@@ -40,7 +40,10 @@ class ModuleMcpConfig extends AbstractMcpModule
             'oauth_registration_mode' => (string) Input::post('oauth_registration_mode'),
             // Checkbox: hidden field carries '0', checked override sends '1'.
             'lazy_mode' => (bool) Input::post('lazy_mode'),
-            'license_server_url' => (string) Input::post('license_server_url'),
+            // No longer a form field (the production URL is baked into the
+            // bundle). Carry the stored value through so a deliberate dev
+            // override survives a config save instead of being wiped.
+            'license_server_url' => (string) ($configStorage->load()['license_server_url'] ?? ''),
             // Managed by the Tools module / the OAuth pairing button — pass
             // the persisted values through, otherwise every config save would
             // silently reset them behind the operator's back.

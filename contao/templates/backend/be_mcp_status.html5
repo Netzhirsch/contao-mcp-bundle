@@ -118,9 +118,15 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
                 <td class="tl_file_list"><?= $t('license_label', 'License') ?></td>
                 <td class="tl_file_list">
                     <?php if (!empty($lic['active'])): ?>
+                        <?php $plan = (string) ($this->licensePlan ?? ''); ?>
                         <strong class="tl_green">●</strong>
-                        <?= htmlspecialchars((string) ($lic['type'] !== '' ? $lic['type'] : 'license')) ?>
-                        — <?= \sprintf($t('license_days_left', '%d days left'), (int) ($lic['days_left'] ?? 0)) ?><?= !empty($lic['in_grace']) ? ' <span class="tl_orange">('.$t('license_grace', 'grace').')</span>' : '' ?>
+                        <?= htmlspecialchars($plan === 'internal' ? $t('license_plan_internal', 'internal') : (string) ($lic['type'] !== '' ? $lic['type'] : 'license')) ?>
+                        <?php if ($plan === 'internal'): ?>
+                            — <?= $t('license_unlimited', 'unlimited (renews automatically)') ?>
+                        <?php else: ?>
+                            — <?= \sprintf($t('license_days_left', '%d days left'), (int) ($lic['days_left'] ?? 0)) ?>
+                        <?php endif; ?>
+                        <?= !empty($lic['in_grace']) ? ' <span class="tl_orange">('.$t('license_grace', 'grace').')</span>' : '' ?>
                     <?php else: ?>
                         <strong class="tl_error">●</strong> <?= $t('license_inactive', 'inactive') ?> (<?= htmlspecialchars((string) ($lic['reason'] ?? '')) ?>)
                     <?php endif; ?>

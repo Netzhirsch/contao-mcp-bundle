@@ -78,11 +78,10 @@ $config = $this->config;
                 <p class="tl_help tl_tip"><?= $t('config_lazy_mode_help') ?></p>
             </div>
 
-            <div class="widget widget-text w50 clr">
-                <h3><label for="ctrl_license_server_url"><?= $t('config_license_server_label', 'License server URL') ?></label></h3>
-                <input type="text" name="license_server_url" id="ctrl_license_server_url" class="tl_text" value="<?= htmlspecialchars((string) ($config['license_server_url'] ?? '')) ?>" placeholder="https://lizenz.netzhirsch.de">
-                <p class="tl_help tl_tip"><?= $t('config_license_server_help') ?></p>
-            </div>
+            <?php /* The license server URL is baked into the bundle
+                     (RenewalClient::DEFAULT_LICENSE_SERVER_URL) — customers never
+                     need to set it. The config key still works as a dev override,
+                     it is just not exposed here any more. */ ?>
         </div>
     </fieldset>
 

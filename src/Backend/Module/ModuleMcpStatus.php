@@ -11,6 +11,7 @@ use Contao\StringUtil;
 use Contao\System;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseGate;
+use Netzhirsch\ContaoMcpBundle\License\LicenseStore;
 use Netzhirsch\ContaoMcpBundle\License\RenewalClient;
 use Netzhirsch\ContaoMcpBundle\OAuth\InitialAccessTokenManager;
 use Netzhirsch\ContaoMcpBundle\OAuth\OAuthClientAdministration;
@@ -54,6 +55,9 @@ class ModuleMcpStatus extends AbstractMcpModule
         // operator can see whether the tools are currently unlocked — see
         // License\LicenseGate.
         $this->Template->license = $container->get(LicenseGate::class)->state();
+        // Internal licenses renew indefinitely — showing "35 days left" (the
+        // token lifetime) reads like an expiry date and confuses operators.
+        $this->Template->licensePlan = $container->get(LicenseStore::class)->getPlan();
 
         // OAuth admin data only when the gate is actually active — under
         // auth_mode=none there are no clients/IATs to manage.
@@ -102,12 +106,23 @@ class ModuleMcpStatus extends AbstractMcpModule
      * for the hourly cron, and no pointless Stripe checkout for an instance that
      * is licensed already.
      *
+     * @param bool $paidOnly only treat a PAID/internal entitlement as "handled".
+     *                       The subscribe button passes true: while merely a
+     *                       trial is running, the customer wants to buy, so the
+     *                       Stripe checkout must still open.
+     *
      * @return bool true when a token was fetched and stored
      */
-    private function claimExistingLicense(RenewalClient $client): bool
+    private function claimExistingLicense(RenewalClient $client, bool $paidOnly = false): bool
     {
         $result = $client->renew(true, RenewalClient::INTERACTIVE_TIMEOUT_SECONDS);
         if ($result['ok'] ?? false) {
+            // A trial is not an entitlement one would "already have" when
+            // clicking Subscribe — fall through to the checkout in that case.
+            if ($paidOnly && 'trial' === ($result['type'] ?? '')) {
+                return false;
+            }
+
             Message::addConfirmation($this->translate('license_claimed', 'License activated — the MCP tools are unlocked.'));
 
             return true;
@@ -164,7 +179,7 @@ class ModuleMcpStatus extends AbstractMcpModule
         // Subscribing while the server already holds an entitlement for this
         // domain (internal license, or a subscription that is already paid)
         // would charge twice — claim the existing license instead.
-        if ('checkout' === $kind && $this->claimExistingLicense($client)) {
+        if ('checkout' === $kind && $this->claimExistingLicense($client, true)) {
             $this->redirectSelf();
         }
 

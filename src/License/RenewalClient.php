@@ -55,7 +55,7 @@ final class RenewalClient
      * Request a fresh trial token. The server rejects a second trial for the
      * same domain/account (HTTP 409) — that is where "no restart" lives.
      *
-     * @return array{ok: bool, error?: string, message?: string, expires_at?: int}
+     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
      */
     public function startTrial(string $accountEmail): array
     {
@@ -78,7 +78,7 @@ final class RenewalClient
      * connectivity failure ('unreachable') never lands here, so a server outage
      * cannot brick a paying install.
      *
-     * @return array{ok: bool, error?: string, message?: string, expires_at?: int}
+     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
      */
     public function renew(bool $force = false, ?int $timeoutSeconds = null): array
     {
@@ -199,7 +199,7 @@ final class RenewalClient
     /**
      * @param array<string, mixed> $body
      *
-     * @return array{ok: bool, error?: string, message?: string, expires_at?: int}
+     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
      */
     private function post(string $endpoint, array $body, ?int $timeoutSeconds = null): array
     {
@@ -241,7 +241,19 @@ final class RenewalClient
             $this->store->setInstanceSecret($instanceSecret);
         }
 
-        return ['ok' => true, 'expires_at' => (int) ($data['expires_at'] ?? 0)];
+        // What kind of entitlement this is. `type` distinguishes a trial from a
+        // paid/internal license (the subscribe button must still open Stripe
+        // while only a trial runs); `plan` marks an internal license, which
+        // renews indefinitely instead of expiring. Older servers omit both.
+        $plan = (string) ($data['plan'] ?? '');
+        $this->store->setPlan($plan);
+
+        return [
+            'ok' => true,
+            'expires_at' => (int) ($data['expires_at'] ?? 0),
+            'type' => (string) ($data['type'] ?? ''),
+            'plan' => $plan,
+        ];
     }
 
     private function serverUrl(): string

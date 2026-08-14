@@ -61,6 +61,24 @@ final class LicenseStore
         return $this->write($data);
     }
 
+    /**
+     * Billing plan reported by the server on the last successful call
+     * ('monthly' | 'annual' | 'internal' | 'staging' | '' when unknown).
+     * Purely informational — the gate decides on the signed token alone.
+     */
+    public function getPlan(): string
+    {
+        return (string) ($this->load()['plan'] ?? '');
+    }
+
+    public function setPlan(string $plan): bool
+    {
+        $data = $this->load();
+        $data['plan'] = trim($plan);
+
+        return $this->write($data);
+    }
+
     public function getHwm(): int
     {
         return (int) ($this->load()['hwm'] ?? 0);

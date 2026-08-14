@@ -22,6 +22,8 @@
       <trans-unit id="mcp_server.license_days_left"><source>%d days left</source><target>noch %d Tage</target></trans-unit>
       <trans-unit id="mcp_server.license_grace"><source>grace</source><target>Kulanz</target></trans-unit>
       <trans-unit id="mcp_server.license_inactive"><source>inactive</source><target>inaktiv</target></trans-unit>
+      <trans-unit id="mcp_server.license_plan_internal"><source>internal</source><target>intern</target></trans-unit>
+      <trans-unit id="mcp_server.license_unlimited"><source>unlimited (renews automatically)</source><target>unbefristet (verlängert sich automatisch)</target></trans-unit>
       <trans-unit id="mcp_server.button_start_trial"><source>Start trial</source><target>Testphase starten</target></trans-unit>
       <trans-unit id="mcp_server.button_subscribe"><source>Subscribe</source><target>Abonnieren</target></trans-unit>
       <trans-unit id="mcp_server.button_manage_billing"><source>Manage subscription</source><target>Abo verwalten</target></trans-unit>
