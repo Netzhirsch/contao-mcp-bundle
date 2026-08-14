@@ -6,6 +6,27 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.0.8] – 2026-08-14 — „Abo-/Trial-Buttons aktivieren sich selbst"
+
+### Changed
+- **„Abonnieren" und „Testphase starten" holen zuerst eine bereits bestehende
+  Lizenz ab** (`POST /renew` per Domain — funktioniert auch ohne gespeicherten
+  Token). Hat der Lizenzserver für die Domain schon ein Entitlement (intern
+  ausgestellte Lizenz oder bereits bezahltes Abo), wird der Token geholt und
+  gespeichert → Tools sofort frei. **Kein Token-Kopieren per Konsole, kein
+  Warten auf den stündlichen Cron, und kein Stripe-Checkout für eine Instanz,
+  die bereits lizenziert ist** (das hätte doppelt belastet).
+- **Widerrufene Lizenz** führt nicht mehr in einen neuen Checkout, sondern
+  meldet klar, dass die Lizenz widerrufen wurde.
+- **Rückkehr von Stripe** pollt `/renew` bis zu 3× (1 s Abstand) gegen das
+  Webhook-Rennen → Kartenzahlungen schalten sofort frei; SEPA (asynchron)
+  meldet „wird automatisch aktiviert", der stündliche Cron schließt ab.
+
+### Notes
+- Serverseitig ergänzt (Repo `Netzhirsch/license-server`, commit `9a70fbd`):
+  `/trial` degradiert eine bestehende Voll-/Internal-Lizenz **nicht mehr** zum
+  Trial und verbraucht dafür auch keinen Trial-Versuch.
+
 ## [1.0.7] – 2026-08-14
 
 ### Changed
