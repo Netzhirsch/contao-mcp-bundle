@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1">
+  <file datatype="plaintext" original="contao/languages/en/default.xlf" source-language="en" target-language="en">
+    <body>
+      <trans-unit id="MSC.external_id_legend">
+        <source>External ID (automation pipelines)</source>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_namespace.0">
+        <source>External-ID namespace</source>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_namespace.1">
+        <source>Optional. Short partition key chosen by an external pipeline (e.g. "skill2-builder", "manifest-acme"). Together with "External-ID key" it forms a stable handle that MCP tools use to re-find this row across re-runs. Leave empty for rows that are not managed by automation.</source>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_key.0">
+        <source>External-ID key</source>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_key.1">
+        <source>Optional. Stable, descriptive id from the pipeline manifest, e.g. "kunde-mueller:el.hero.intro". Together with the namespace must be unique per table.</source>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

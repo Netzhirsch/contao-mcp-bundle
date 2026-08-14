@@ -1,0 +1,306 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: false
+
+    Netzhirsch\ContaoMcpBundle\:
+        resource: '../src/'
+        exclude:
+            - '../src/{DependencyInjection,ContaoMcpBundle.php,ContaoManagerPlugin.php}'
+            # Contao Backend modules are instantiated by Contao itself with a
+            # DataContainer argument — they must NOT be Symfony services or
+            # the autowire fails on the DataContainer constructor parameter.
+            - '../src/Backend/Module/'
+            # UploadValidator wraps Contao\Config (not a service) — the File
+            # Tool instantiates it on demand via the framework adapter.
+            - '../src/Tool/File/UploadValidator.php'
+
+    # Tools are resolved by php-mcp/server through the PSR-11 container via FQCN.
+    # Symfony's service_container only exposes public services, so tools must be public.
+    Netzhirsch\ContaoMcpBundle\Tool\:
+        resource: '../src/Tool/'
+        public: true
+        exclude:
+            # Helper classes that are NOT @McpTool-annotated and have
+            # constructor deps the container can't autowire.
+            - '../src/Tool/File/UploadValidator.php'
+
+    # Smoke-test command takes the project_dir as raw string param to seed
+    # files for the files_search regression tests.
+    Netzhirsch\ContaoMcpBundle\Command\McpSmokeTestCommand:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $mcpToolCallLimiter: '@netzhirsch_contao_mcp.rate_limiter.mcp_tool_calls'
+            $activityLog: '@Netzhirsch\ContaoMcpBundle\Backend\McpActivityLog'
+            $healthzController: '@Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController'
+
+    # Contao's DbafsManager is registered under a service-id (not its FQCN),
+    # so type-hint autowire can't find it. Alias for the Maintenance tool's
+    # dbafs_sync method.
+    Contao\CoreBundle\Filesystem\Dbafs\DbafsManager:
+        alias: contao.filesystem.dbafs_manager
+
+    # Builds the php-mcp Dispatcher for the Symfony controller route /mcp.
+    # Tool discovery scans src/Tool/ for #[McpTool]-annotated methods.
+    Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory:
+        public: true
+        arguments:
+            $container: '@service_container'
+            $logger: '@logger'
+            $serverName: 'Contao MCP Server'
+            $serverVersion: '0.1.0-dev'
+            $scanDirs: ['src/Tool']
+            # Overridden by McpToolProviderPass with the collected
+            # third-party tool provider FQCNs. Default [] so the service is
+            # valid even when no extension bundle is installed.
+            $extensionToolClasses: []
+
+    # Netzhirsch\ContaoMcpBundle\Controller\McpController — wired below
+    # alongside the per-client rate-limiter factory.
+
+    # Caches the php-mcp Registry instance per FPM worker so Discovery tools
+    # can list / invoke every registered tool — including those hidden from
+    # tools/list by Lazy-Mode.
+    Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor:
+        public: true
+
+    # Lazy-Mode tool filter. Installed under the well-known service id
+    # `netzhirsch.mcp.tool_filter` the patched php-mcp Dispatcher looks for.
+    # Active globally — when lazy_mode=false in the config, ToolFilter
+    # returns every tool unchanged so the Dispatcher behaves like upstream.
+    Netzhirsch\ContaoMcpBundle\Server\ToolFilter:
+        public: true
+    netzhirsch.mcp.tool_filter:
+        alias: Netzhirsch\ContaoMcpBundle\Server\ToolFilter
+        public: true
+
+    # Public so the Backend tool panel (BackendModule subclasses have no
+    # constructor injection) can list extension-tool candidates via
+    # System::getContainer().
+    Netzhirsch\ContaoMcpBundle\Server\ExtensionToolRegistrar:
+        public: true
+
+    # Post-tool-call cleanup hook. The patched Dispatcher's `finally` block
+    # calls afterToolCall() after every invocation to clear the
+    # Contao\Model\Registry. Cheap in controller mode (FPM workers recycle
+    # anyway), but the hook stays installed because the same Dispatcher
+    # build is shared by both transports.
+    Netzhirsch\ContaoMcpBundle\Server\PostCallHook:
+        public: true
+    netzhirsch.mcp.post_call_hook:
+        alias: Netzhirsch\ContaoMcpBundle\Server\PostCallHook
+        public: true
+
+    # ConfigStorage is reached from the Backend modules via
+    # System::getContainer(); the modules themselves are not registered as
+    # service (Contao instantiates it via the BE_MOD callback).
+    Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    # License stack (trial → paid subscription). LicenseToken autowires via its
+    # default public-key constant (placeholder = free edition, real key =
+    # commercial edition → enforcement derives from it). LicenseStore needs the
+    # project dir for var/mcp/license.json. Gate + RenewalClient autowire from these.
+    Netzhirsch\ContaoMcpBundle\License\LicenseStore:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+    Netzhirsch\ContaoMcpBundle\License\LicenseGate:
+        public: true
+    # Public so the Backend status module (instantiated by Contao outside DI)
+    # can drive trial / Stripe-checkout / portal via System::getContainer().
+    Netzhirsch\ContaoMcpBundle\License\RenewalClient:
+        public: true
+
+    # Public so the Backend modules (instantiated by Contao outside DI)
+    # can fetch it via System::getContainer() during compile().
+    Netzhirsch\ContaoMcpBundle\Backend\McpActivityLog:
+        public: true
+
+    # Resolves the BackendUser + security token for the OAuth-authenticated
+    # MCP caller so the permission guard can ask Contao's own voters. The
+    # backend user provider is bound explicitly (the UserProviderInterface
+    # type is ambiguous — front-end + back-end providers both implement it).
+    Netzhirsch\ContaoMcpBundle\Security\BackendUserContext:
+        arguments:
+            $backendUserProvider: '@contao.security.backend_user_provider'
+
+    # Per-request identity holder. Filled by the OAuth validator before tool
+    # dispatch, read by AuthorResolver for tl_log + tl_version attribution.
+    Netzhirsch\ContaoMcpBundle\Service\McpCallContext:
+        public: true
+
+    Netzhirsch\ContaoMcpBundle\Service\AuthorResolver:
+        arguments:
+            $defaultAuthorId: '%netzhirsch_contao_mcp.default_author_id%'
+
+    # ── OAuth 2.1 stack ────────────────────────────────────────────────
+    Netzhirsch\ContaoMcpBundle\OAuth\KeyManager:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Netzhirsch\ContaoMcpBundle\OAuth\InitialAccessTokenManager:
+        public: true
+        arguments:
+            # %kernel.secret% is Symfony's standard pointer to APP_SECRET
+            # (.env.local). Used as HMAC key so a leaked tl_mcp_oauth_iat
+            # row can't be brute-forced via rainbow tables.
+            $appSecret: '%kernel.secret%'
+
+    # Public facade so the Backend module (instantiated by Contao outside DI)
+    # can list + revoke clients without fetching the private DBAL Connection.
+    Netzhirsch\ContaoMcpBundle\OAuth\OAuthClientAdministration:
+        public: true
+
+    Netzhirsch\ContaoMcpBundle\OAuth\Repository\ClientRepository: ~
+    Netzhirsch\ContaoMcpBundle\OAuth\Repository\AccessTokenRepository: ~
+    Netzhirsch\ContaoMcpBundle\OAuth\Repository\AuthCodeRepository: ~
+    Netzhirsch\ContaoMcpBundle\OAuth\Repository\RefreshTokenRepository: ~
+    Netzhirsch\ContaoMcpBundle\OAuth\Repository\ScopeRepository: ~
+    Netzhirsch\ContaoMcpBundle\OAuth\Repository\UserRepository: ~
+
+    Netzhirsch\ContaoMcpBundle\OAuth\AuthorizationServerFactory:
+        public: true
+
+    # Public so Symfony Routing can resolve them.
+    Netzhirsch\ContaoMcpBundle\Controller\OAuth\MetadataController:
+        public: true
+        tags: ['controller.service_arguments']
+    Netzhirsch\ContaoMcpBundle\Controller\OAuth\RegisterController:
+        public: true
+        tags: ['controller.service_arguments']
+    Netzhirsch\ContaoMcpBundle\Controller\OAuth\AuthorizeController:
+        public: true
+        tags: ['controller.service_arguments']
+    Netzhirsch\ContaoMcpBundle\Controller\OAuth\TokenController:
+        public: true
+        tags: ['controller.service_arguments']
+
+    # CORS handler for the OAuth endpoints — Inspector / Claude.ai
+    # connect via cross-origin fetch.
+    Netzhirsch\ContaoMcpBundle\EventListener\OAuthCorsListener:
+        tags:
+            - { name: 'kernel.event_listener', event: 'kernel.request', method: 'onKernelRequest', priority: 250 }
+            - { name: 'kernel.event_listener', event: 'kernel.response', method: 'onKernelResponse' }
+
+    # Routes the Stripe checkout/portal return (?mcp_billing=…) from the bare
+    # backend URL to the MCP-Server status module so it can show the message.
+    Netzhirsch\ContaoMcpBundle\EventListener\BillingReturnListener:
+        arguments:
+            $scopeMatcher: '@contao.routing.scope_matcher'
+        tags:
+            - { name: 'kernel.event_listener', event: 'kernel.request', method: 'onKernelRequest', priority: 5 }
+
+    # ── Rate limiting for the OAuth endpoints ──────────────────────────
+    # We define the RateLimiterFactory services manually instead of going
+    # through `framework.rate_limiter` config, because that would require
+    # the user's project security.yaml to be modified (and the bundle
+    # would have to know about the host application's cache pool by name).
+    Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage:
+        class: Symfony\Component\RateLimiter\Storage\CacheStorage
+        arguments: ['@cache.app']
+
+    netzhirsch_contao_mcp.rate_limiter.oauth_register:
+        class: Symfony\Component\RateLimiter\RateLimiterFactory
+        arguments:
+            - { id: 'mcp_oauth_register', policy: 'sliding_window', limit: 10, interval: '1 hour' }
+            - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
+
+    netzhirsch_contao_mcp.rate_limiter.oauth_token:
+        class: Symfony\Component\RateLimiter\RateLimiterFactory
+        arguments:
+            - { id: 'mcp_oauth_token', policy: 'sliding_window', limit: 60, interval: '1 minute' }
+            - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
+
+    netzhirsch_contao_mcp.rate_limiter.oauth_authorize:
+        class: Symfony\Component\RateLimiter\RateLimiterFactory
+        arguments:
+            - { id: 'mcp_oauth_authorize', policy: 'sliding_window', limit: 30, interval: '1 minute' }
+            - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
+
+    # Per-client throttling on the /mcp tool-call endpoint. A well-behaved
+    # agent stays nowhere near 600/min; this is a backstop against a bug
+    # loop or a runaway client, not a workflow throttle. See
+    # Netzhirsch\ContaoMcpBundle\Controller\McpController for the wiring.
+    netzhirsch_contao_mcp.rate_limiter.mcp_tool_calls:
+        class: Symfony\Component\RateLimiter\RateLimiterFactory
+        arguments:
+            - { id: 'mcp_tool_calls', policy: 'sliding_window', limit: 600, interval: '1 minute' }
+            - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
+
+    Netzhirsch\ContaoMcpBundle\Controller\McpController:
+        public: true
+        arguments:
+            $mcpToolCallLimiter: '@netzhirsch_contao_mcp.rate_limiter.mcp_tool_calls'
+        tags: ['controller.service_arguments']
+
+    # Public, OAuth-free liveness probe at GET /mcp/healthz.
+    # Project dir as raw arg so the controller can inspect var/mcp and
+    # var/ disk-free without booting the full Contao framework.
+    Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+        tags: ['controller.service_arguments']
+
+    Netzhirsch\ContaoMcpBundle\EventListener\OAuthRateLimitListener:
+        arguments:
+            $oauthRegisterLimiter: '@netzhirsch_contao_mcp.rate_limiter.oauth_register'
+            $oauthTokenLimiter: '@netzhirsch_contao_mcp.rate_limiter.oauth_token'
+            $oauthAuthorizeLimiter: '@netzhirsch_contao_mcp.rate_limiter.oauth_authorize'
+        tags:
+            - { name: 'kernel.event_listener', event: 'kernel.request', method: 'onKernelRequest', priority: 240 }
+
+    Netzhirsch\ContaoMcpBundle\Tool\System\Tool:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Netzhirsch\ContaoMcpBundle\Tool\Template\Tool:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    Netzhirsch\ContaoMcpBundle\Tool\Maintenance\Tool:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    # Discovery proxy: needs the service_container to invoke other registered
+    # tools via their handlers (each handler resolves its own dependencies
+    # from the container at call time).
+    Netzhirsch\ContaoMcpBundle\Tool\Discovery\Tool:
+        public: true
+        arguments:
+            $container: '@service_container'
+
+    # File tools — need the upload-path parameter to resolve relative paths.
+    Netzhirsch\ContaoMcpBundle\Tool\File\PathResolver:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $uploadPath: '%contao.upload_path%'
+
+    Netzhirsch\ContaoMcpBundle\Tool\File\Tool:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    # Auto-tag every FieldProvider implementation so the registry picks them up.
+    _instanceof:
+        Netzhirsch\ContaoMcpBundle\Tool\Contract\FieldProvider:
+            tags: ['netzhirsch.field_provider']
+
+    Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry:
+        arguments:
+            $providers: !tagged_iterator netzhirsch.field_provider
+
+    # Permission declarations from third-party extension tools. Fed the same
+    # `netzhirsch_mcp.tool`-tagged services the McpToolProviderPass collects;
+    # ExtensionPermissionMap keeps only those implementing
+    # McpToolPermissionProviderInterface. ToolPermissionMap autowires this.
+    Netzhirsch\ContaoMcpBundle\Security\ExtensionPermissionMap:
+        arguments:
+            $providers: !tagged_iterator netzhirsch_mcp.tool

@@ -1,0 +1,331 @@
+name: CI
+
+# Runs on every push to master, on every PR, and can be triggered by hand.
+# Tag pushes (release pipeline) don't re-run CI — the commit they point at
+# was already CI'd before tagging.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-flight run when a newer commit lands on the same branch /
+# PR — keeps the queue snappy and saves Action minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Lint — quick syntax + composer-validate, no install. Runs in ~20 s,
+  # catches the 80 % "I broke the build" cases before the slower jobs
+  # spin up. composer audit lives in the phpstan job (needs vendor/).
+  # ─────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (PHP 8.3)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate composer.json
+        run: composer validate --strict --no-check-publish
+
+      - name: PHP syntax check on src/
+        run: find src -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Static analysis — PHPStan at level 5. Pragmatic baseline for a Contao
+  # bundle (level 8+ would drown in Model __set / __get magic without the
+  # contao/phpstan-contao extension). Catches dead code, undefined-method,
+  # and the larger class of type mismatches before runtime.
+  # ─────────────────────────────────────────────────────────────────────
+  phpstan:
+    name: PHPStan (PHP 8.3)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: openssl, pdo_mysql, mbstring, intl, dom, curl, sodium
+          tools: composer:v2
+          coverage: none
+
+      - name: Cache composer downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/composer
+          key: composer-phpstan-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            composer-phpstan-
+
+      # --no-plugins bypasses cweagans/composer-patches whose patch paths
+      # (`vendor/netzhirsch/contao-mcp-bundle/patches/...`) only resolve
+      # in a *consumer* install, not a stand-alone bundle install. PHPStan
+      # only reads source, never executes the patched php-mcp/server code.
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress --no-plugins
+
+      # composer audit hits the GitHub Advisory DB for every installed
+      # package + its transitives. Needs vendor/ in place — runs here
+      # after install, not in the lint job (which intentionally skips
+      # install to stay fast).
+      #
+      # --abandoned=report → list abandoned packages in the output but
+      # don't exit non-zero just because Contao still ships transitive
+      # `doctrine/annotations`. We can't control that upstream choice;
+      # only actual CVEs should fail the job.
+      - name: Composer security audit
+        run: composer audit --no-cache --abandoned=report
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --no-progress --error-format=github
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Unit + Integration tests via PHPUnit. Covers the dimensions the smoke
+  # test can't reach — OAuth-crypto edge cases (dual-key rotation, expired
+  # IATs, single-use enforcement). Runs in parallel with phpstan: both
+  # install via --no-plugins (no patches needed for either), so the only
+  # extra cost is one composer install which the shared cache absorbs.
+  # ─────────────────────────────────────────────────────────────────────
+  phpunit:
+    name: PHPUnit (PHP 8.3)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          # pdo_sqlite for the InitialAccessTokenManager integration test.
+          # openssl for KeyManager's RSA generation. The rest mirror what
+          # the bundle needs at runtime.
+          extensions: openssl, pdo_sqlite, mbstring, intl, dom, curl
+          tools: composer:v2
+          coverage: none
+
+      - name: Cache composer downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/composer
+          key: composer-phpunit-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            composer-phpunit-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress --no-plugins
+
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit --no-coverage --testdox
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Smoke test — full setup: fresh Contao 5.7 Managed Edition + the bundle
+  # installed from path-repo + MariaDB sidecar + contao:migrate + the
+  # bundle's own smoke command. Runs against PHP 8.2, 8.3, 8.4 in parallel.
+  #
+  # fail-fast: false → an 8.4-specific regression doesn't kill the 8.2/8.3
+  # green checks (Contao 5.7 + some dependencies still catching up to 8.4).
+  # ─────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke test (Contao ${{ matrix.contao }}, PHP ${{ matrix.php }})
+    runs-on: ubuntu-22.04
+    needs: [lint, phpstan, phpunit]
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each leg pins a Contao line to the lowest PHP that line accepts, so we
+        # continuously prove the full support window:
+        #   - Contao 5.3 (lowest supported) on PHP 8.1 — the bundle's true floor;
+        #     proves legacy-LTS customers can install + run it (5.3 core = PHP ^8.1,
+        #     Symfony 6.4, DBAL 3). This is why composer.json declares php ^8.1.
+        #   - Contao 5.7 on PHP 8.3 + 8.4 — current production target
+        #     (5.7's core-bundle requires PHP ^8.3).
+        # `contao` doubles as the composer create-project constraint used below.
+        include:
+          - php: '8.1'
+            contao: '5.3.*'
+          - php: '8.3'
+            contao: '^5.7'
+          - php: '8.4'
+            contao: '^5.7'
+
+    # MariaDB as a docker sidecar. The MCP bundle's schema-migrations
+    # exercise plenty of MySQL-specific behaviour (strict mode, reserved
+    # words, JSON columns), so we use the same engine production runs on.
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: contao_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      # Path: bundle/  — keep the bundle in a sibling dir so the Contao
+      # test app can reference it via a relative path-repository.
+      - name: Checkout bundle
+        uses: actions/checkout@v6
+        with:
+          path: bundle
+
+      - name: Setup PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # Extensions the bundle + Contao + smoke test need at runtime.
+          extensions: openssl, posix, pdo_mysql, mbstring, intl, gd, exif, fileinfo, dom, xml, curl, sodium, zip
+          # opcache.enable_cli=0 — under CI we want fresh PHP per console
+          # invocation, no caching surprises. Also matches the warning we
+          # emit in system_health_check.
+          ini-values: opcache.enable_cli=0, memory_limit=512M, date.timezone=UTC
+          coverage: none
+          tools: composer:v2
+
+      # Persistent composer cache shared across matrix entries. Cache key
+      # is PHP-version + composer.json hash so 8.2/8.3/8.4 each get their
+      # own bucket but skip re-downloading on every push.
+      - name: Cache composer downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ matrix.php }}-${{ matrix.contao }}-${{ hashFiles('bundle/composer.json') }}
+          restore-keys: |
+            composer-${{ matrix.php }}-${{ matrix.contao }}-
+            composer-${{ matrix.php }}-
+
+      # Bootstrap a fresh Contao Managed Edition app (version per matrix leg)
+      # and wire the bundle in via a path-repo. This is what a real
+      # installation looks like — same shape that customers run against.
+      - name: Bootstrap Contao test app
+        run: |
+          set -euo pipefail
+
+          # contao/managed-edition spins up the full Contao skeleton
+          # (bin/console, public/, var/, etc.). --no-install lets us
+          # configure repos + patches first, then composer install once.
+          # The constraint comes from the matrix (e.g. "5.3.*" or "^5.7").
+          composer create-project --no-install --no-scripts --remove-vcs \
+              "contao/managed-edition:${{ matrix.contao }}" app
+
+          cd app
+
+          # Path-repo: bundle lives one level up, no-symlink so the test
+          # really exercises the install layout (vendor/ paths) and patches
+          # land on real files instead of symlink targets.
+          composer config repositories.bundle '{"type":"path","url":"../bundle","options":{"symlink":false}}'
+
+          # Stability: managed-edition pulls in contao/conflicts: @dev as a
+          # transitive — `dev` minimum + `prefer-stable` is the only combo
+          # that resolves both that and our beta-tagged bundle.
+          composer config minimum-stability dev
+          composer config prefer-stable true
+
+          # Allow the plugins the bundle + Contao 5 need at install time.
+          composer config allow-plugins.cweagans/composer-patches true
+          composer config allow-plugins.contao/manager-plugin true
+          composer config allow-plugins.contao/core-bundle true
+          composer config allow-plugins.contao-components/installer true
+          composer config allow-plugins.php-http/discovery true
+          composer config allow-plugins.symfony/runtime true
+          composer config allow-plugins.symfony/flex true
+
+          # Pull in the patch-applier + the bundle itself.
+          composer require --no-update cweagans/composer-patches:^1.7
+          composer require --no-update netzhirsch/contao-mcp-bundle:@dev
+
+          # Patches block in the ROOT composer.json — Composer ignores
+          # patch declarations coming from dependencies (security
+          # convention). We mirror the snippet from README.md.
+          composer config --json --merge extra.patches '{"php-mcp/server":{"Pluggable Bearer-auth + OAuth Authorization Server Metadata hooks":"vendor/netzhirsch/contao-mcp-bundle/patches/transport-auth-and-oauth-metadata.patch","Optional tool-filter for tools/list (Lazy-Mode)":"vendor/netzhirsch/contao-mcp-bundle/patches/dispatcher-tool-filter.patch"}}'
+
+          # Single install pass — applies patches + builds autoloader +
+          # runs Contao's manager-plugin auto-discovery. -v lifts the
+          # log level just enough to surface real solver / patch errors
+          # without flooding logs the way -vvv would.
+          composer install --no-interaction --prefer-dist --no-progress -v
+
+      # CI-specific env. DATABASE_URL points at the MariaDB sidecar
+      # exposed on localhost:3306. APP_SECRET is irrelevant for the
+      # console-only smoke test but Symfony's framework bundle insists
+      # on a value.
+      #
+      # APP_ENV=prod is mandatory: Contao Managed Edition's ContaoKernel
+      # only accepts "dev" or "prod" (hard runtime guard, throws on
+      # anything else). "test" looks tempting from a CI perspective but
+      # is rejected with `RuntimeException: The Contao Managed Edition
+      # only supports the "dev" and "prod" environments`.
+      - name: Configure environment
+        working-directory: app
+        run: |
+          cat > .env.local <<EOF
+          APP_ENV=prod
+          APP_SECRET=ci-secret-never-used-anywhere
+          DATABASE_URL=mysql://root:root@127.0.0.1:3306/contao_test?serverVersion=mariadb-10.11.0
+          MAILER_DSN=null://null
+          EOF
+
+      - name: Wait for MariaDB
+        run: |
+          for i in {1..30}; do
+              if mysqladmin ping -h127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+                  echo "MariaDB ready after ${i}s"
+                  exit 0
+              fi
+              sleep 1
+          done
+          echo "MariaDB did not become ready in 30s" >&2
+          exit 1
+
+      # Warm the Symfony cache once so contao:migrate runs against a
+      # fully-compiled container (catches DI / service-config bugs
+      # early, before they hit the smoke test).
+      - name: Warmup cache
+        working-directory: app
+        run: vendor/bin/contao-console cache:warmup --env=prod
+
+      # Schema migration. This exercises:
+      #   - The OAuth tables (tl_mcp_oauth_*)
+      #   - The decentral external-id columns on 23 entity tables
+      #   - The MigrateExternalIdToDecentralColumns no-op path
+      - name: Run Contao migrations
+        working-directory: app
+        run: vendor/bin/contao-console contao:migrate --env=prod --no-interaction
+
+      # The actual smoke test — ~181 asserts on tools + OAuth + DBAFS +
+      # external-id + cascade behaviour. The single source of truth that
+      # the bundle is operational on this PHP version.
+      - name: Run MCP smoke test
+        working-directory: app
+        run: vendor/bin/contao-console contao:mcp:smoke-test --env=prod
+
+      # Upload Contao + Symfony logs on failure so we can post-mortem
+      # without re-running the whole pipeline.
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-php${{ matrix.php }}
+          path: |
+            app/var/logs/
+            app/var/mcp/
+          if-no-files-found: ignore
+          retention-days: 7

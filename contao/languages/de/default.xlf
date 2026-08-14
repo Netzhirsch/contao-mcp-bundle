@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1">
+  <file datatype="plaintext" original="contao/languages/en/default.xlf" source-language="en" target-language="de">
+    <body>
+      <!-- Field labels + legends injected by ExternalIdDcaInjector into every
+           supported entity table. Lives in MSC.* so all 23 tables share one
+           translation source instead of repeating it per-tl_*.xlf. -->
+      <trans-unit id="MSC.external_id_legend">
+        <source>External ID (automation pipelines)</source>
+        <target>Externe ID (Automation/Pipelines)</target>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_namespace.0">
+        <source>External-ID namespace</source>
+        <target>Externer ID-Namespace</target>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_namespace.1">
+        <source>Optional. Short partition key chosen by an external pipeline (e.g. "skill2-builder", "manifest-acme"). Together with "External-ID key" it forms a stable handle that MCP tools use to re-find this row across re-runs. Leave empty for rows that are not managed by automation.</source>
+        <target>Optional. Kurzer Partitions-Key, den eine externe Pipeline vergibt (z. B. „skill2-builder", „manifest-acme"). Zusammen mit „Externer ID-Key" bildet er den stabilen Handle, über den MCP-Tools diese Zeile bei Wiederholungsläufen wiederfinden. Leerlassen, wenn die Zeile nicht von Automation verwaltet wird.</target>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_key.0">
+        <source>External-ID key</source>
+        <target>Externer ID-Key</target>
+      </trans-unit>
+      <trans-unit id="MSC.external_id_key.1">
+        <source>Optional. Sprechende stable id from the pipeline manifest, e.g. "kunde-mueller:el.hero.intro". Together with the namespace, must be unique per table.</source>
+        <target>Optional. Sprechende stabile ID aus dem Pipeline-Manifest, z. B. „kunde-mueller:el.hero.intro". Zusammen mit dem Namespace pro Tabelle eindeutig.</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1">
+  <file datatype="plaintext" original="contao/languages/en/modules.xlf" source-language="en" target-language="en">
+    <body>
+      <!-- Backend menu group header -->
+      <trans-unit id="MOD.netzhirsch_mcp">
+        <source>MCP server</source>
+      </trans-unit>
+
+      <!-- Menu items (one per former fold-out panel) -->
+      <trans-unit id="MOD.netzhirsch_mcp_status.0">
+        <source>Status</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_status.1">
+        <source>Endpoint and auth state, pairing window, Initial Access Tokens, registered clients.</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_config.0">
+        <source>Configuration</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_config.1">
+        <source>Path, pagination, authentication mode and Lazy-Mode of the MCP server.</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_activity.0">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_activity.1">
+        <source>The last 100 actions performed by MCP clients (from the system log).</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_tools.0">
+        <source>Tools</source>
+      </trans-unit>
+      <trans-unit id="MOD.netzhirsch_mcp_tools.1">
+        <source>Enable or disable every MCP tool individually, including extension tools.</source>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

@@ -1,0 +1,14 @@
+/*
+ * Icon der Backend-Menügruppe "MCP-Server".
+ *
+ * Contao vergibt pro Gruppe automatisch die Klasse `group-<gruppenkey>`
+ * (BackendUser::navigation()). Background-Shorthand mit no-repeat nach
+ * Core-Muster; das FA-Robot-SVG (576x512-ViewBox) wird per
+ * background-size auf 14px eingepasst, Position 2px 2px.
+ * Modul-Einträge (Level 2) bekommen im Core kein Icon — daher hier keine
+ * .navigation.<modulkey>-Regeln.
+ */
+#tl_navigation .group-netzhirsch_mcp {
+    background: url("icon.svg") 2px 2px no-repeat;
+    background-size: 14px;
+}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1">
+  <file datatype="plaintext" original="contao/languages/en/tl_user.xlf" source-language="en" target-language="de">
+    <body>
+      <trans-unit id="tl_user.netzhirsch_mcp_legend">
+        <source>MCP server access</source>
+        <target>MCP-Server-Zugriff</target>
+      </trans-unit>
+      <trans-unit id="tl_user.netzhirschMcpAccess.0">
+        <source>Allow MCP server access</source>
+        <target>MCP-Server-Zugriff erlauben</target>
+      </trans-unit>
+      <trans-unit id="tl_user.netzhirschMcpAccess.1">
+        <source>Lets this user operate the site through an AI assistant via the MCP server. Inside MCP the user only gets the same rights they have in the backend. Admins are always allowed. Off by default.</source>
+        <target>Erlaubt diesem Benutzer, die Website über einen KI-Assistenten am MCP-Server zu bedienen. Innerhalb von MCP hat der Benutzer nur dieselben Rechte wie im Backend. Administratoren sind immer erlaubt. Standardmäßig aus.</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

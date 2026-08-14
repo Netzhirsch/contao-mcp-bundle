@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>MCP Authorization</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="stylesheet" href="/system/themes/flexible/login.bd4e4a60.css">
+    <style>
+        body { background:#f0f0f0; }
+        .consent { max-width:520px; margin:60px auto; background:#fff; padding:2em 2.5em; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.1); font-family:system-ui,sans-serif; }
+        .consent h1 { font-size:1.4em; margin:0 0 .5em; }
+        .consent .client { background:#fafafa; padding:.6em .8em; border-left:4px solid #f47c00; margin:1em 0; }
+        .consent .scopes { background:#f9f9f9; padding:.6em .8em; margin:1em 0; border-radius:4px; }
+        .consent .scopes ul { margin:.3em 0 0 1.2em; padding:0; }
+        .consent .user { color:#666; font-size:.92em; margin:.5em 0 1em; }
+        .consent .actions { display:flex; gap:.8em; margin-top:1.5em; }
+        .consent button { flex:1; padding:.7em 1em; border:none; border-radius:4px; cursor:pointer; font-size:1em; }
+        .consent button.approve { background:#2ea44f; color:#fff; }
+        .consent button.deny { background:#eee; color:#444; }
+        .consent .redirect { color:#999; font-size:.85em; margin-top:1em; word-break:break-all; }
+    </style>
+</head>
+<body>
+<div class="consent">
+    <h1>Zugriff auf MCP-Server erlauben?</h1>
+    <p class="user">Angemeldet als <strong>{{ username }}</strong></p>
+
+    <div class="client">
+        <strong>{{ client_name }}</strong> möchte sich mit deinem Contao-Account verbinden.
+    </div>
+
+    <div class="scopes">
+        <strong>Berechtigungen:</strong>
+        <ul>
+            {% for scope in scopes %}
+                <li><code>{{ scope }}</code> &mdash; voller Zugriff auf alle MCP-Tools (lesen + schreiben)</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <form method="post">
+        {# CSRF token binds this consent to the current user's session. #}
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="actions">
+            <button type="submit" name="approve" value="0" class="deny">Ablehnen</button>
+            <button type="submit" name="approve" value="1" class="approve">Erlauben</button>
+        </div>
+    </form>
+
+    <p class="redirect">Bei Zustimmung wirst du weitergeleitet an: <code>{{ redirect_uri }}</code></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1">
+  <file datatype="plaintext" original="contao/languages/en/tl_user_group.xlf" source-language="en" target-language="de">
+    <body>
+      <trans-unit id="tl_user_group.netzhirsch_mcp_legend">
+        <source>MCP server access</source>
+        <target>MCP-Server-Zugriff</target>
+      </trans-unit>
+      <trans-unit id="tl_user_group.netzhirschMcpAccess.0">
+        <source>Allow MCP server access</source>
+        <target>MCP-Server-Zugriff erlauben</target>
+      </trans-unit>
+      <trans-unit id="tl_user_group.netzhirschMcpAccess.1">
+        <source>Lets all members of this group operate the site through an AI assistant via the MCP server, each limited to their own backend rights. Admins are always allowed. Off by default.</source>
+        <target>Erlaubt allen Mitgliedern dieser Gruppe, die Website über einen KI-Assistenten am MCP-Server zu bedienen — jeweils begrenzt auf die eigenen Backend-Rechte. Administratoren sind immer erlaubt. Standardmäßig aus.</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

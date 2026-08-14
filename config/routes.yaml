@@ -1,0 +1,19 @@
+# Discover #[Route] attributes on the OAuth controllers. Without this
+# Symfony has no idea where /contao/oauth/authorize etc. live.
+netzhirsch_contao_mcp_oauth:
+    resource: '../src/Controller/OAuth/'
+    type: attribute
+
+# Controller-mode MCP transport — Symfony handles /mcp POST instead of the
+# ReactPHP daemon. Always registered; mode-selection in var/mcp/config.json
+# only affects which endpoint the operator points clients at.
+netzhirsch_contao_mcp_controller:
+    resource: '../src/Controller/McpController.php'
+    type: attribute
+
+# OAuth-free liveness probe at GET /mcp/healthz. Separate file so the
+# auth-gated McpController routes load independently of the probe — a
+# parse error in either doesn't take both down.
+netzhirsch_contao_mcp_healthz:
+    resource: '../src/Controller/McpHealthzController.php'
+    type: attribute

@@ -1,0 +1,197 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Netzhirsch\ContaoMcpBundle\Tool\PagePreview;
+
+use Contao\CoreBundle\Framework\ContaoFramework;
+use Contao\CoreBundle\Routing\ContentUrlGenerator;
+use Contao\PageModel;
+use PhpMcp\Server\Attributes\McpTool;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+
+/**
+ * Frontend-side helpers: build a Page URL and fetch its rendered HTML.
+ *
+ * These tools close the loop after a CRUD change so the LLM can verify
+ * what actually came out, instead of just "trust the database".
+ */
+final class Tool
+{
+    public function __construct(
+        private readonly ContaoFramework $framework,
+        private readonly ContentUrlGenerator $contentUrlGenerator,
+        private readonly HttpClientInterface $httpClient,
+    ) {
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'page_url',
+        description: <<<'DESC'
+            Returns the frontend URL for a Contao page (tl_page id).
+
+            Resolves the page via PageModel (so language prefix, urlSuffix, dns, etc. are
+            applied from the page's root), then asks Contao's ContentUrlGenerator. With
+            `absolute=true` (default) you get a full URL like "https://www.example.com/news.html";
+            with absolute=false you get a relative path "/news.html".
+
+            Returns {url, absolute, page_id, language, host}. Errors if the page is invisible,
+            unpublished, or has no resolvable URL (e.g. error pages, sections).
+        DESC,
+    )]
+    public function pageUrl(int $page_id, bool $absolute = true): array
+    {
+        $this->framework->initialize();
+
+        $page = PageModel::findByPk($page_id);
+        if ($page === null) {
+            return ['error' => 'not_found', 'message' => sprintf('No tl_page with id %d', $page_id)];
+        }
+
+        // ContentUrlGenerator needs the model loaded with root + parent
+        // relationships. PageModel::findByPk already does that.
+        $page->loadDetails();
+
+        try {
+            $url = $this->contentUrlGenerator->generate(
+                $page,
+                [],
+                $absolute ? UrlGeneratorInterface::ABSOLUTE_URL : UrlGeneratorInterface::ABSOLUTE_PATH,
+            );
+        } catch (\Throwable $e) {
+            return [
+                'error' => 'url_generation_failed',
+                'message' => $e->getMessage(),
+                'hint' => 'Page might be of a type without a frontend URL (root, error_*, logout, …).',
+            ];
+        }
+
+        return [
+            'url' => $url,
+            'absolute' => $absolute,
+            'page_id' => $page_id,
+            'language' => (string) ($page->language ?: $page->rootLanguage ?: ''),
+            'host' => (string) ($page->domain ?? ''),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'page_preview',
+        description: <<<'DESC'
+            Fetches the rendered HTML of a Contao frontend page so the LLM can verify the
+            output after edits. Internally calls page_url(page_id, absolute=true) then HTTPs
+            the URL with a 10-second timeout.
+
+            By default returns the FULL HTML body (capped at 64 KB). Pass `excerpt_only=true`
+            to receive a structured summary instead: `{title, h1, meta_description, body_text}`
+            — useful for content checks without dragging full markup into the LLM context.
+
+            Note: invokes the daemon's OWN site (loopback). Authentication / member-area pages
+            will be unauthenticated; the preview shows what an anonymous visitor sees.
+        DESC,
+    )]
+    public function pagePreview(int $page_id, bool $excerpt_only = false): array
+    {
+        $this->framework->initialize();
+
+        $urlResult = $this->pageUrl($page_id, absolute: true);
+        if (isset($urlResult['error'])) {
+            return $urlResult;
+        }
+        $url = (string) $urlResult['url'];
+
+        try {
+            $response = $this->httpClient->request('GET', $url, [
+                'timeout' => 10,
+                'max_redirects' => 5,
+                'headers' => ['User-Agent' => 'Contao-MCP-Bundle/page_preview'],
+            ]);
+            $status = $response->getStatusCode();
+            $contentType = $response->getHeaders(false)['content-type'][0] ?? '';
+            $body = $response->getContent(false);
+        } catch (\Throwable $e) {
+            return [
+                'error' => 'fetch_failed',
+                'message' => $e->getMessage(),
+                'url' => $url,
+            ];
+        }
+
+        // Hard cap on body length to keep MCP responses small.
+        $truncated = false;
+        if (\strlen($body) > 65536) {
+            $body = substr($body, 0, 65536);
+            $truncated = true;
+        }
+
+        if ($excerpt_only) {
+            return [
+                'url' => $url,
+                'status' => $status,
+                'content_type' => $contentType,
+                'summary' => self::summariseHtml($body),
+                'body_size' => \strlen($body),
+                'truncated' => $truncated,
+            ];
+        }
+
+        return [
+            'url' => $url,
+            'status' => $status,
+            'content_type' => $contentType,
+            'body' => $body,
+            'body_size' => \strlen($body),
+            'truncated' => $truncated,
+        ];
+    }
+
+    // ─────────────────────────── helpers ────────────────────────────
+
+    /**
+     * @return array{title: ?string, h1: ?string, meta_description: ?string, body_text: string}
+     */
+    private static function summariseHtml(string $html): array
+    {
+        $title = null;
+        if (preg_match('#<title>(.*?)</title>#is', $html, $m) === 1) {
+            $title = self::cleanText($m[1]);
+        }
+        $h1 = null;
+        if (preg_match('#<h1[^>]*>(.*?)</h1>#is', $html, $m) === 1) {
+            $h1 = self::cleanText(strip_tags($m[1]));
+        }
+        $desc = null;
+        if (preg_match('#<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']\s*/?>#is', $html, $m) === 1) {
+            $desc = self::cleanText($m[1]);
+        }
+
+        // Strip scripts + styles entirely before extracting body text.
+        $clean = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
+        // Strip remaining tags + collapse whitespace.
+        $bodyText = self::cleanText(strip_tags($clean));
+        // Cap to ~2 KB so the LLM doesn't drown in main-content.
+        if (mb_strlen($bodyText) > 2000) {
+            $bodyText = mb_substr($bodyText, 0, 1999).'…';
+        }
+
+        return [
+            'title' => $title,
+            'h1' => $h1,
+            'meta_description' => $desc,
+            'body_text' => $bodyText,
+        ];
+    }
+
+    private static function cleanText(string $s): string
+    {
+        $s = html_entity_decode($s, \ENT_QUOTES | \ENT_HTML5, 'UTF-8');
+        return trim(preg_replace('/\s+/', ' ', $s) ?? $s);
+    }
+}

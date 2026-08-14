@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.1">
+  <file datatype="plaintext" original="contao/languages/en/mcp_server.xlf" source-language="en" target-language="en">
+    <body>
+      <!-- Headlines -->
+      <trans-unit id="mcp_server.headline_status"><source>Status</source></trans-unit>
+      <trans-unit id="mcp_server.headline_config"><source>Configuration</source></trans-unit>
+
+      <!-- Status labels -->
+      <trans-unit id="mcp_server.status_endpoint_active"><source>Endpoint active</source></trans-unit>
+      <trans-unit id="mcp_server.status_path"><source>Path</source></trans-unit>
+      <trans-unit id="mcp_server.status_url"><source>Endpoint</source></trans-unit>
+      <trans-unit id="mcp_server.status_auth_mode"><source>Auth</source></trans-unit>
+      <trans-unit id="mcp_server.status_bundle_version"><source>Bundle version</source></trans-unit>
+
+      <!-- License (trial → paid subscription) -->
+      <trans-unit id="mcp_server.license_label"><source>License</source></trans-unit>
+      <trans-unit id="mcp_server.license_days_left"><source>%d days left</source></trans-unit>
+      <trans-unit id="mcp_server.license_grace"><source>grace</source></trans-unit>
+      <trans-unit id="mcp_server.license_inactive"><source>inactive</source></trans-unit>
+      <trans-unit id="mcp_server.button_start_trial"><source>Start trial</source></trans-unit>
+      <trans-unit id="mcp_server.button_subscribe"><source>Subscribe</source></trans-unit>
+      <trans-unit id="mcp_server.button_manage_billing"><source>Manage subscription</source></trans-unit>
+      <trans-unit id="mcp_server.billing_success"><source>Payment received — your subscription is being activated.</source></trans-unit>
+      <trans-unit id="mcp_server.billing_cancel"><source>Checkout cancelled — nothing was charged.</source></trans-unit>
+      <trans-unit id="mcp_server.license_trial_help"><source>Start the trial — unlocks the MCP tools for the trial period. No payment required.</source></trans-unit>
+      <trans-unit id="mcp_server.license_subscribe_help"><source>Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.</source></trans-unit>
+      <trans-unit id="mcp_server.license_manage_help"><source>Manage your subscription on the Stripe customer portal (payment method, cancellation, invoices).</source></trans-unit>
+      <trans-unit id="mcp_server.license_trial_started"><source>Trial activated — the MCP tools are unlocked for the trial period.</source></trans-unit>
+      <trans-unit id="mcp_server.license_action_failed"><source>License action failed: %s</source></trans-unit>
+
+      <!-- Buttons -->
+      <trans-unit id="mcp_server.button_refresh"><source>Refresh</source></trans-unit>
+      <trans-unit id="mcp_server.button_save_config"><source>Save configuration</source></trans-unit>
+      <trans-unit id="mcp_server.button_reset_defaults"><source>Reset to defaults</source></trans-unit>
+
+      <!-- Config field labels -->
+      <trans-unit id="mcp_server.config_path_label"><source>Path</source></trans-unit>
+      <trans-unit id="mcp_server.config_path_help"><source>URL path of the MCP endpoint, without leading slash. Default "mcp" → https://backend_url/mcp.</source></trans-unit>
+      <trans-unit id="mcp_server.config_pagination_limit_label"><source>Pagination limit</source></trans-unit>
+      <trans-unit id="mcp_server.config_pagination_limit_help"><source>Maximum tools returned by `tools/list` per page. Claude Desktop / mcp-remote do NOT paginate; keep this above the total tool count (default 500).</source></trans-unit>
+      <trans-unit id="mcp_server.config_auth_mode_label"><source>Authentication mode</source></trans-unit>
+      <trans-unit id="mcp_server.config_auth_mode_none"><source>No authentication (private network only)</source></trans-unit>
+      <trans-unit id="mcp_server.config_auth_mode_oauth"><source>OAuth 2.1 (Authorization Code + PKCE)</source></trans-unit>
+      <trans-unit id="mcp_server.config_auth_mode_help"><source>"None" leaves the server open — only safe behind .htpasswd or on a private network. "OAuth 2.1" runs the full authorization flow: clients register, the user approves via the Backend, the token endpoint issues JWT access tokens.</source></trans-unit>
+      <trans-unit id="mcp_server.config_backend_url_label"><source>Backend URL</source></trans-unit>
+      <trans-unit id="mcp_server.config_backend_url_help"><source>Public base URL of the Contao Backend (e.g. https://www.example.com). Required when auth_mode=oauth — the server advertises this in its OAuth metadata so clients find /authorize, /token and /register.</source></trans-unit>
+      <trans-unit id="mcp_server.config_reg_mode_label"><source>Client registration mode</source></trans-unit>
+      <trans-unit id="mcp_server.config_reg_mode_help"><source>Restricted: new clients must supply a valid Initial Access Token when registering (generated via the "Generate new IAT" button on the Status page). Recommended for production. Open: any client can register without a token — use only on private/localhost setups.</source></trans-unit>
+      <trans-unit id="mcp_server.config_reg_mode_restricted"><source>Restricted (Initial Access Token required)</source></trans-unit>
+      <trans-unit id="mcp_server.config_reg_mode_open"><source>Open (anyone can register)</source></trans-unit>
+      <trans-unit id="mcp_server.config_lazy_mode_label"><source>Lazy-Mode (Recommended for Claude)</source></trans-unit>
+      <trans-unit id="mcp_server.config_lazy_mode_inline"><source>Hide all tools behind a discovery interface</source></trans-unit>
+      <trans-unit id="mcp_server.config_license_server_label"><source>License server URL</source></trans-unit>
+      <trans-unit id="mcp_server.config_license_server_help"><source>Base URL of the Netzhirsch license server (used for trial / renewal / Stripe checkout + portal). Only relevant in the commercial edition; the free edition never enforces. A wrong URL cannot mint valid tokens (they are signed), so this field is safe to expose.</source></trans-unit>
+      <trans-unit id="mcp_server.config_lazy_mode_help"><source>Claude doesn't paginate tools/list and loads every tool schema into context (~12 KB / turn at 150+ tools). When enabled, tools/list returns only three generic tools — contao_search_tools, contao_describe_tool, contao_call — and the LLM uses them to discover + invoke the real ones on demand. Recommended for Claude Desktop / claude.ai. Disable when debugging with MCP Inspector or driving the server from scripts that expect a flat tool list.</source></trans-unit>
+
+      <!-- OAuth administration / Initial Access Tokens / Clients -->
+      <trans-unit id="mcp_server.open_reg_warning"><source>Client registration is set to "Open" — any MCP client can register without a token. Change this to "Restricted" in the Configuration page unless you are on a private/localhost setup.</source></trans-unit>
+      <trans-unit id="mcp_server.http_warning"><source>OAuth is active but the Backend URL is plain http:// on a non-loopback host — access tokens travel in clear text. Use HTTPS in production.</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_admin_title"><source>OAuth administration</source></trans-unit>
+      <!-- Client pairing window -->
+      <trans-unit id="mcp_server.pairing_help"><source>Standard MCP clients (mcp-remote, Claude Desktop) cannot send an Initial Access Token while registering. This button opens client registration for 10 minutes — or exactly ONE successful registration, whichever comes first — then locks itself again. Authorization still requires a backend login + consent, so the window never grants access by itself.</source></trans-unit>
+      <trans-unit id="mcp_server.pairing_active_until"><source>Registration open until %s (%d min left)</source></trans-unit>
+      <trans-unit id="mcp_server.button_open_pairing"><source>Open registration for 10 minutes</source></trans-unit>
+      <trans-unit id="mcp_server.button_close_pairing"><source>Close window now</source></trans-unit>
+      <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.</source></trans-unit>
+      <trans-unit id="mcp_server.pairing_closed"><source>Pairing window closed.</source></trans-unit>
+      <trans-unit id="mcp_server.status_registration"><source>Client registration</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_help"><source>For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. For Claude Desktop / mcp-remote use the pairing window above instead.</source></trans-unit>
+      <trans-unit id="mcp_server.button_generate_iat"><source>Generate new IAT</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_col_id"><source>ID</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_col_created"><source>Created</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_col_expires"><source>Expires</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_col_state"><source>State</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_used"><source>redeemed</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_expired"><source>expired</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_active"><source>active</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_title"><source>Registered clients</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_help"><source>OAuth clients that have completed dynamic registration. Revoking deletes the client and all its access + refresh tokens — affected apps will need to re-authorize.</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_empty"><source>No clients registered yet.</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_col_name"><source>Name</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_col_user"><source>Authorized by</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_user_consent_at"><source>Consent granted: </source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_user_pending"><source>Registered, but no consent granted yet — no backend user is linked.</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_col_id"><source>Client ID</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_col_redirect"><source>Redirect URIs</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_clients_col_created"><source>Registered</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_client_confirm_revoke"><source>Revoke this client? All access + refresh tokens will be invalidated.</source></trans-unit>
+      <trans-unit id="mcp_server.button_revoke_client"><source>Revoke</source></trans-unit>
+      <trans-unit id="mcp_server.iat_generated"><source>Initial Access Token generated. Copy it now — it will NOT be shown again: %s</source></trans-unit>
+      <trans-unit id="mcp_server.client_revoke_missing_id"><source>Client ID missing — please use the Revoke button next to a client.</source></trans-unit>
+      <trans-unit id="mcp_server.client_revoked"><source>Client "%s" revoked. All its tokens are now invalid.</source></trans-unit>
+      <trans-unit id="mcp_server.client_not_found"><source>Client "%s" not found.</source></trans-unit>
+
+      <!-- Messages -->
+      <trans-unit id="mcp_server.config_saved"><source>Configuration saved.</source></trans-unit>
+      <trans-unit id="mcp_server.config_save_failed"><source>Could not save configuration.</source></trans-unit>
+      <trans-unit id="mcp_server.error_pagination_limit_invalid"><source>Pagination limit must be 1-10000.</source></trans-unit>
+      <trans-unit id="mcp_server.error_dir_unwritable"><source>Could not create the config directory.</source></trans-unit>
+      <trans-unit id="mcp_server.error_file_unwritable"><source>Could not write the config file.</source></trans-unit>
+
+      <!-- MCP activity panel -->
+      <trans-unit id="mcp_server.mcp_activity_title"><source>MCP activity</source></trans-unit>
+      <trans-unit id="mcp_server.mcp_activity_help"><source>Last 100 actions performed by MCP clients. Pulled from tl_log where source starts with "mcp". Open System → System log for the full filterable history.</source></trans-unit>
+      <trans-unit id="mcp_server.mcp_activity_empty"><source>No MCP activity recorded yet.</source></trans-unit>
+      <trans-unit id="mcp_server.mcp_activity_col_when"><source>When</source></trans-unit>
+      <trans-unit id="mcp_server.mcp_activity_col_source"><source>Source</source></trans-unit>
+      <trans-unit id="mcp_server.mcp_activity_col_user"><source>User</source></trans-unit>
+      <trans-unit id="mcp_server.mcp_activity_col_message"><source>Message</source></trans-unit>
+
+      <!-- Tool panel (enable/disable per tool) -->
+      <trans-unit id="mcp_server.tools_panel_title"><source>Tools</source></trans-unit>
+      <trans-unit id="mcp_server.tools_panel_help"><source>Unchecked tools are removed from the MCP catalogue entirely: they disappear from tools/list and discovery, and calls are rejected — for every client and user. Extension tools (badge EXT) are opt-in and stay disabled until you check them here. System tools (badge SYSTEM) keep the discovery interface and health checks working and cannot be disabled. Changes apply on the next MCP request; connected clients see them after a reconnect.</source></trans-unit>
+      <trans-unit id="mcp_server.tools_panel_unavailable"><source>The tool registry could not be loaded — see the system log. Tool toggles are temporarily unavailable; the stored configuration is untouched.</source></trans-unit>
+      <trans-unit id="mcp_server.tools_suffix_ext"><source>Extension</source></trans-unit>
+      <trans-unit id="mcp_server.tools_suffix_sys"><source>System</source></trans-unit>
+      <trans-unit id="mcp_server.tools_group_help"><source>Hover a tool name for its description.</source></trans-unit>
+      <trans-unit id="mcp_server.tools_badge_ext_title"><source>Provided by an extension bundle — opt-in</source></trans-unit>
+      <trans-unit id="mcp_server.tools_badge_sys_title"><source>Required for discovery / health checks — always on</source></trans-unit>
+      <trans-unit id="mcp_server.button_save_tools"><source>Save tool selection</source></trans-unit>
+      <trans-unit id="mcp_server.tools_saved"><source>Tool selection saved — %d core tool(s) disabled, %d extension tool(s) enabled.</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_discovery"><source>Discovery + proxy</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_system"><source>System + health</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_maintenance"><source>Maintenance</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_page"><source>Pages</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_article"><source>Articles</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_content"><source>Content elements</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_news"><source>News</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_news_archive"><source>News archives</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_calendar"><source>Calendars</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_calendar_event"><source>Events</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_faq"><source>FAQ</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_faq_category"><source>FAQ categories</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_theme"><source>Themes</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_layout"><source>Layouts</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_module"><source>Frontend modules</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_image_size"><source>Image sizes</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_image_size_item"><source>Image size items</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_member"><source>Members + groups</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_user"><source>Users + groups</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_form"><source>Forms + fields</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_newsletter"><source>Newsletter</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_comment"><source>Comments</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_template"><source>Templates</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_file"><source>Files + folders</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_multilingual"><source>Multilingual (changelanguage)</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_url_rewrite"><source>URL rewrite (terminal42)</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_lead"><source>Form leads (terminal42, read-only)</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_external_id"><source>External IDs (automation)</source></trans-unit>
+      <trans-unit id="mcp_server.tool_group_entity"><source>Cross-entity helpers</source></trans-unit>
+    </body>
+  </file>
+</xliff>

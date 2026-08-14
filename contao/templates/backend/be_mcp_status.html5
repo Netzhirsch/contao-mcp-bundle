@@ -1,0 +1,211 @@
+<?php
+/** @var \Contao\BackendTemplate $this */
+
+$lang = $GLOBALS['TL_LANG']['mcp_server'] ?? [];
+$t = static fn (string $key, string $fallback = ''): string => (string) ($lang[$key] ?? ($fallback !== '' ? $fallback : $key));
+
+$config = $this->config;
+$endpointUrl = $this->endpointUrl;
+
+$isOauth = ($config['auth_mode'] ?? 'none') === 'oauth';
+$pairingUntil = (int) ($config['registration_open_until'] ?? 0);
+$pairingActive = $pairingUntil > time();
+$regRestricted = ($config['oauth_registration_mode'] ?? 'restricted') === 'restricted';
+
+// Global actions as #tl_buttons top-bar links (GET + rt, validated by the
+// base module). Explanations live in the title tooltips — no prose boxes.
+$actionUrl = (string) $this->actionUrl;
+$actionLink = static fn (string $action): string => $actionUrl.'&action='.$action;
+?>
+
+<div id="tl_buttons">
+    <a href="<?= $this->referer ?>" class="header_back" title="<?= $this->backTitle ?>" accesskey="b" onclick="Backend.getScrollOffset()"><?= $this->backLabel ?></a>
+    <a href="<?= $this->actionUrl ?>" class="header_sync"><?= $t('button_refresh', 'Refresh') ?></a>
+    <?php if ($isOauth && $regRestricted && !$pairingActive): ?>
+        <a href="<?= $actionLink('open_pairing') ?>" class="header_new" title="<?= htmlspecialchars($t('pairing_help', 'Standard MCP clients (mcp-remote, Claude Desktop) cannot send an Initial Access Token while registering. This button opens client registration for 10 minutes — or exactly ONE successful registration, whichever comes first — then locks itself again. Authorization still requires a backend login + consent, so the window never grants access by itself.')) ?>"><?= $t('button_open_pairing', 'Open registration for 10 minutes') ?></a>
+    <?php elseif ($isOauth && $regRestricted): ?>
+        <a href="<?= $actionLink('close_pairing') ?>" class="header_toggle"><?= $t('button_close_pairing', 'Close window now') ?></a>
+    <?php endif; ?>
+    <?php if ($isOauth): ?>
+        <a href="<?= $actionLink('generate_iat') ?>" class="header_new" title="<?= htmlspecialchars($t('oauth_iat_help', 'For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. For Claude Desktop / mcp-remote use the pairing window instead.')) ?>"><?= $t('button_generate_iat', 'Generate new IAT') ?></a>
+    <?php endif; ?>
+    <?php
+    // License / subscription actions. The license server URL is baked into the
+    // bundle (RenewalClient::DEFAULT_LICENSE_SERVER_URL), so a server is always
+    // reachable — the buttons show regardless of the optional config override.
+    // Payment happens on Stripe-hosted pages; these links just start the flow.
+    $licState = \is_array($this->license ?? null) ? $this->license : [];
+    ?>
+    <?php $licType = (string) ($licState['type'] ?? ''); ?>
+    <?php if (empty($licState['active']) && 'full' === $licType): ?>
+        <?php // Paid licence that lapsed past the grace window: the customer needs the Stripe portal (fix the card, restart the subscription) — a second trial would only 409. ?>
+        <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
+        <a href="<?= $actionLink('manage_billing') ?>" class="header_edit_all" title="<?= htmlspecialchars($t('license_manage_help', 'Manage your subscription on the Stripe customer portal (payment method, cancellation, invoices).')) ?>"><?= $t('button_manage_billing', 'Manage subscription') ?></a>
+    <?php elseif (empty($licState['active'])): ?>
+        <a href="<?= $actionLink('start_trial') ?>" class="header_new" title="<?= htmlspecialchars($t('license_trial_help', 'Start the trial — unlocks the MCP tools for the trial period. No payment required.')) ?>"><?= $t('button_start_trial', 'Start trial') ?></a>
+        <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
+    <?php elseif ('full' !== $licType): ?>
+        <?php // Active trial: offer to convert to a paid plan. There is no Stripe billing account to "manage" yet, so no portal button here. ?>
+        <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
+    <?php else: ?>
+        <a href="<?= $actionLink('manage_billing') ?>" class="header_edit_all" title="<?= htmlspecialchars($t('license_manage_help', 'Manage your subscription on the Stripe customer portal (payment method, cancellation, invoices).')) ?>"><?= $t('button_manage_billing', 'Manage subscription') ?></a>
+    <?php endif; ?>
+</div>
+
+<?= $this->messages ?>
+
+<?php if (!empty($this->oauthIsHttp)): ?>
+<div class="tl_message">
+    <p class="tl_error">⚠ <?= $t('http_warning', 'OAuth is active but the Backend URL is plain http:// on a non-loopback host — access tokens travel in clear text. Use HTTPS in production.') ?></p>
+</div>
+<?php endif; ?>
+<?php if ($isOauth && !$regRestricted): ?>
+<div class="tl_message">
+    <p class="tl_error">⚠ <?= $t('open_reg_warning', 'Client registration is set to "Open" — any MCP client can register without a token. Change this to "Restricted" in the Configuration page unless you are on a private/localhost setup.') ?></p>
+</div>
+<?php endif; ?>
+
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <tbody>
+            <tr class="hover-row">
+                <td class="tl_file_list" style="width:22%;"><?= $t('status_endpoint_active', 'Endpoint') ?></td>
+                <td class="tl_file_list">
+                    <!-- The endpoint runs as a Symfony controller — every POST /mcp
+                         boots PHP-FPM, so it is available as long as Apache is up.
+                         No process to manage, no port to probe. -->
+                    <strong class="tl_green">●</strong> <code><?= htmlspecialchars($endpointUrl) ?></code>
+                </td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list"><?= $t('status_path', 'Path') ?></td>
+                <td class="tl_file_list">/<?= htmlspecialchars(ltrim($config['path'], '/')) ?></td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list"><?= $t('status_auth_mode', 'Auth') ?></td>
+                <td class="tl_file_list">
+                    <?php if ($isOauth): ?>
+                        <strong class="tl_green">●</strong> <?= $t('config_auth_mode_oauth', 'OAuth 2.1') ?>
+                    <?php else: ?>
+                        <strong class="tl_orange">●</strong> <?= $t('config_auth_mode_none', 'None — open access') ?>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php if ($isOauth): ?>
+            <tr class="hover-row">
+                <td class="tl_file_list"><?= $t('status_registration', 'Client registration') ?></td>
+                <td class="tl_file_list">
+                    <?php if (!$regRestricted): ?>
+                        <strong class="tl_orange">●</strong> <?= $t('config_reg_mode_open', 'Open (anyone can register)') ?>
+                    <?php elseif ($pairingActive): ?>
+                        <strong class="tl_green">●</strong> <?= \sprintf($t('pairing_active_until', 'Registration open until %s (%d min left)'), date('H:i', $pairingUntil), max(1, (int) ceil(($pairingUntil - time()) / 60))) ?>
+                    <?php else: ?>
+                        <strong class="tl_green">●</strong> <?= $t('config_reg_mode_restricted', 'Restricted (Initial Access Token required)') ?>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endif; ?>
+            <tr class="hover-row">
+                <td class="tl_file_list"><?= $t('config_lazy_mode_label', 'Lazy-Mode') ?></td>
+                <td class="tl_file_list"><?= !empty($config['lazy_mode']) ? '<strong class="tl_green">●</strong> '.$t('status_on', 'on') : '<span class="tl_gray">●</span> '.$t('status_off', 'off') ?></td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list"><?= $t('status_bundle_version', 'Bundle version') ?></td>
+                <td class="tl_file_list"><?= htmlspecialchars($this->bundleVersion) ?></td>
+            </tr>
+            <?php $lic = \is_array($this->license ?? null) ? $this->license : ['active' => true, 'type' => '', 'reason' => '', 'days_left' => 0, 'in_grace' => false]; ?>
+            <tr class="hover-row">
+                <td class="tl_file_list"><?= $t('license_label', 'License') ?></td>
+                <td class="tl_file_list">
+                    <?php if (!empty($lic['active'])): ?>
+                        <strong class="tl_green">●</strong>
+                        <?= htmlspecialchars((string) ($lic['type'] !== '' ? $lic['type'] : 'license')) ?>
+                        — <?= \sprintf($t('license_days_left', '%d days left'), (int) ($lic['days_left'] ?? 0)) ?><?= !empty($lic['in_grace']) ? ' <span class="tl_orange">('.$t('license_grace', 'grace').')</span>' : '' ?>
+                    <?php else: ?>
+                        <strong class="tl_error">●</strong> <?= $t('license_inactive', 'inactive') ?> (<?= htmlspecialchars((string) ($lic['reason'] ?? '')) ?>)
+                    <?php endif; ?>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<?php if ($isOauth): ?>
+
+<?php if (!empty($this->oauthIats)): ?>
+<h2 class="sub_headline" style="margin-top:1.5em;"><?= $t('oauth_iat_title', 'Initial Access Tokens') ?></h2>
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist"><?= $t('oauth_iat_col_id', 'ID') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_iat_col_created', 'Created') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_iat_col_expires', 'Expires') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_iat_col_state', 'State') ?></th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($this->oauthIats as $iat): ?>
+                <tr class="hover-row">
+                    <td class="tl_file_list">#<?= (int) $iat['id'] ?></td>
+                    <td class="tl_file_list"><?= date('Y-m-d H:i', (int) $iat['created_at']) ?></td>
+                    <td class="tl_file_list"><?= date('Y-m-d H:i', (int) $iat['expires_at']) ?></td>
+                    <td class="tl_file_list">
+                        <?php if ((int) $iat['used_at'] > 0): ?>
+                            <span class="tl_gray">● <?= $t('oauth_iat_used', 'redeemed') ?> (<code><?= htmlspecialchars((string) $iat['redeemed_by_client_id']) ?></code>)</span>
+                        <?php elseif ((int) $iat['expires_at'] < time()): ?>
+                            <span class="tl_red">● <?= $t('oauth_iat_expired', 'expired') ?></span>
+                        <?php else: ?>
+                            <strong class="tl_green">● <?= $t('oauth_iat_active', 'active') ?></strong>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+<?php endif; ?>
+
+<h2 class="sub_headline" style="margin-top:1.5em;"><?= $t('oauth_clients_title', 'Registered clients') ?></h2>
+<?php if (empty($this->oauthClients)): ?>
+    <p class="tl_gray" style="margin:0 18px;"><em><?= $t('oauth_clients_empty', 'No clients registered yet.') ?></em></p>
+<?php else: ?>
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist"><?= $t('oauth_clients_col_name', 'Name') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_clients_col_user', 'Authorized by') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_clients_col_id', 'Client ID') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_clients_col_redirect', 'Redirect URIs') ?></th>
+                <th class="tl_folder_tlist"><?= $t('oauth_clients_col_created', 'Registered') ?></th>
+                <th class="tl_folder_tlist tl_right_nowrap"></th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($this->oauthClients as $c): ?>
+                <tr class="hover-row">
+                    <td class="tl_file_list"><?= htmlspecialchars((string) $c['name']) ?><?= $c['is_confidential'] ? ' <span class="tl_blue">[confidential]</span>' : '' ?></td>
+                    <td class="tl_file_list">
+                        <?php if (($c['authorized_by'] ?? '') !== ''): ?>
+                            <span<?= ((int) ($c['authorized_at'] ?? 0)) > 0 ? ' title="'.$t('oauth_clients_user_consent_at', 'Consent granted: ').date('Y-m-d H:i', (int) $c['authorized_at']).'"' : '' ?>><?= htmlspecialchars((string) $c['authorized_by']) ?></span>
+                        <?php else: ?>
+                            <span class="tl_gray" title="<?= htmlspecialchars($t('oauth_clients_user_pending', 'Registered, but no consent granted yet — no backend user is linked.')) ?>">—</span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="tl_file_list"><code><?= htmlspecialchars((string) $c['client_id']) ?></code></td>
+                    <td class="tl_file_list"><code style="font-size:.85em;"><?= htmlspecialchars((string) $c['redirect_uris']) ?></code></td>
+                    <td class="tl_file_list"><?= date('Y-m-d H:i', (int) $c['created_at']) ?></td>
+                    <td class="tl_file_list tl_right_nowrap">
+                        <a href="<?= $actionLink('revoke_client') ?>&client_id=<?= urlencode((string) $c['client_id']) ?>"
+                           title="<?= htmlspecialchars($t('oauth_clients_help', 'Revoking deletes the client and all its access + refresh tokens — the app needs to re-authorize.')) ?>"
+                           onclick="return confirm('<?= htmlspecialchars($t('oauth_client_confirm_revoke', 'Revoke this client?'), ENT_QUOTES) ?>')"><?= $t('button_revoke_client', 'Revoke') ?></a>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+<?php endif; ?>
+
+<?php endif; ?>

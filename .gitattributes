@@ -1,0 +1,23 @@
+# Force LF line endings for all text files regardless of the OS that
+# commits or checks out. Without this Windows clients with `core.autocrlf=true`
+# would silently store CRLF in the repo (or rewrite LF on checkout), making
+# the diff on Linux noisy and breaking shebangs in scripts.
+* text=auto eol=lf
+
+# Patch files MUST keep their exact byte layout — composer-patches relies on
+# them matching the vendor source line-for-line.
+*.patch  binary
+
+# Common binary types — never normalise.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.svg    text eol=lf
+*.pdf    binary
+
+# Avoid bloating release archives that consumers download via composer.
+/.gitattributes  export-ignore
+/.gitignore      export-ignore
+/.github/        export-ignore

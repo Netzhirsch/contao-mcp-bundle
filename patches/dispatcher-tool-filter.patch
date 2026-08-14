@@ -1,0 +1,47 @@
+--- a/src/Dispatcher.php
++++ b/src/Dispatcher.php
+@@ -145,6 +145,23 @@
+         $limit = $this->configuration->paginationLimit;
+         $offset = $this->decodeCursor($request->cursor);
+         $allItems = $this->registry->getTools();
++
++        // LOCAL VENDOR PATCH (netzhirsch/contao-mcp-bundle):
++        // Optional Lazy-Mode-Filter — der Bundle-Container kann einen Service
++        // unter 'netzhirsch.mcp.tool_filter' registrieren, der entscheidet,
++        // welche Tools in tools/list erscheinen. Verstecke Tools bleiben via
++        // tools/call aufrufbar (Registry::getTool() greift weiterhin) —
++        // damit unser eigenes contao_call-Discovery-Tool Proxy spielen kann.
++        // Service-Kontrakt: bool isExposed(string $toolName).
++        if ($this->container->has('netzhirsch.mcp.tool_filter')) {
++            $filter = $this->container->get('netzhirsch.mcp.tool_filter');
++            $allItems = array_filter(
++                $allItems,
++                static fn (string $name): bool => $filter->isExposed($name),
++                ARRAY_FILTER_USE_KEY,
++            );
++        }
++
+         $pagedItems = array_slice($allItems, $offset, $limit);
+         $nextCursor = $this->encodeNextCursor($offset, count($pagedItems), count($allItems), $limit);
+
+@@ -197,6 +214,20 @@
+             $errorMessage = "Tool execution failed: {$toolError->getMessage()}";
+
+             return new CallToolResult([new TextContent($errorMessage)], true);
++        } finally {
++            // LOCAL VENDOR PATCH (netzhirsch/contao-mcp-bundle):
++            // Post-call hook — gives the bundle a chance to clean up
++            // per-request state (Contao Model Registry, RequestStack, etc.)
++            // after every tool invocation. Without this, the long-running
++            // ReactPHP daemon accumulates loaded Model instances forever
++            // until OOM. Service contract: void afterToolCall(string $toolName).
++            if ($this->container->has('netzhirsch.mcp.post_call_hook')) {
++                try {
++                    $this->container->get('netzhirsch.mcp.post_call_hook')->afterToolCall($toolName);
++                } catch (Throwable $hookError) {
++                    $this->logger->warning('Post-call hook failed.', ['tool' => $toolName, 'exception' => $hookError]);
++                }
++            }
+         }
+     }
+

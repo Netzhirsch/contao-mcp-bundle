@@ -1,0 +1,66 @@
+PROPRIETARY SOFTWARE LICENSE — Contao MCP Bundle
+
+Copyright (c) 2026 Netzhirsch (https://netzhirsch.de). All rights reserved.
+
+This software and its source code are the property of Netzhirsch. The source
+code is published for transparency and review ("source-available"); publication
+does NOT place it in the public domain and does NOT grant an open-source
+licence.
+
+1. GRANT OF LICENCE
+
+   Subject to an active trial or a paid subscription obtained from Netzhirsch,
+   you are granted a non-exclusive, non-transferable, revocable licence to
+   install and use this software on the Contao installation covered by that
+   trial or subscription, for as long as it is active.
+
+   Each additional Contao installation requires its own trial or subscription.
+   Non-production installations (local development, staging) that belong to a
+   covered installation are included.
+
+2. RESTRICTIONS
+
+   Without prior written permission from Netzhirsch you may NOT:
+
+     - distribute, sublicense, sell, lease, rent or otherwise make the software
+       available to third parties, in whole or in part
+     - publish the source code or any derivative work
+     - remove, disable, circumvent or otherwise interfere with the licence
+       verification built into the software, or use it without an active trial
+       or subscription
+
+   You MAY modify the software for use within your own covered installation
+   (e.g. to integrate it with your project). Modifications do not extend the
+   licence to further installations and are not supported by Netzhirsch.
+
+3. TERM AND TERMINATION
+
+   The licence ends when the trial expires or the subscription ends, is
+   cancelled or is revoked for non-payment. On termination you must stop using
+   the software and remove it from your installations. Sections 2, 4 and 5
+   survive termination.
+
+4. WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+5. LIABILITY
+
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE. Mandatory statutory liability
+   (including liability for intent and gross negligence, and under the German
+   Product Liability Act) remains unaffected.
+
+6. DATA PROCESSED BY THE LICENCE CHECK
+
+   To issue and renew licences the software transmits the domain of the
+   installation, the product name and, when a trial or subscription is started
+   from the Contao back end, the e-mail address of the acting back end user to
+   the Netzhirsch licence server. No payment data is processed by the software;
+   payments are handled by Stripe on their own pages.
+
+Licensing inquiries and permissions: kalus@netzhirsch.de

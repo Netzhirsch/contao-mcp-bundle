@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PHPUnit configuration for the Contao MCP Bundle.
+
+  Test pyramid:
+    - tests/Unit/        — pure-PHP, no DB, no filesystem-outside-tmpdir.
+    - tests/Integration/ — DBAL with sqlite-in-memory, throwaway filesystem
+                           under sys_get_temp_dir(). No Symfony kernel boot.
+
+  End-to-end coverage stays in src/Command/McpSmokeTestCommand.php — that
+  exercises 200+ tool-call paths against a real Contao install. PHPUnit
+  here covers the dimensions the smoke test cannot reach: OAuth-crypto
+  edge cases (dual-key rotation, expired tokens, single-use IATs),
+  failure-path assertions, and any helper logic best tested in isolation.
+
+  Run: vendor/bin/phpunit
+-->
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+    bootstrap="vendor/autoload.php"
+    colors="true"
+    failOnRisky="true"
+    failOnWarning="true"
+    cacheDirectory=".phpunit.cache"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+
+    <php>
+        <ini name="error_reporting" value="-1"/>
+        <ini name="display_errors" value="1"/>
+        <ini name="display_startup_errors" value="1"/>
+    </php>
+</phpunit>

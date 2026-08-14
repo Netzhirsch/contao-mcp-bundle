@@ -1,0 +1,29 @@
+# Composer
+/vendor/
+/composer.lock
+
+# Symfony / Contao runtime — host project owns these
+/var/
+
+# IDE / editor
+/.idea/
+/.vscode/
+/.fleet/
+*.iml
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Test artefacts
+/.phpunit.cache/
+/phpunit.xml
+/.phpstan-cache/
+/.php-cs-fixer.cache
+/phpstan-out.txt
+# phpstan.neon is the override file an operator can author locally;
+# we ship phpstan.neon.dist.
+/phpstan.neon
+
+# OS
+*.log

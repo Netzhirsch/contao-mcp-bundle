@@ -1,0 +1,96 @@
+<?php
+/** @var \Contao\BackendTemplate $this */
+
+$lang = $GLOBALS['TL_LANG']['mcp_server'] ?? [];
+$t = static fn (string $key, string $fallback = ''): string => (string) ($lang[$key] ?? ($fallback !== '' ? $fallback : $key));
+
+$config = $this->config;
+?>
+
+<div id="tl_buttons">
+    <a href="<?= $this->referer ?>" class="header_back" title="<?= $this->backTitle ?>" accesskey="b" onclick="Backend.getScrollOffset()"><?= $this->backLabel ?></a>
+</div>
+
+<?= $this->messages ?>
+
+<?php if (!empty($this->oauthIsHttp)): ?>
+<div class="tl_message">
+    <p class="tl_error">⚠ <?= $t('http_warning', 'OAuth is active but the Backend URL is plain http:// on a non-loopback host — access tokens travel in clear text. Use HTTPS in production.') ?></p>
+</div>
+<?php endif; ?>
+
+<form class="tl_form tl_edit_form" method="post" action="<?= $this->actionUrl ?>" enctype="application/x-www-form-urlencoded">
+<div class="tl_formbody_edit">
+
+    <input type="hidden" name="FORM_SUBMIT" value="mcp_server_action">
+    <input type="hidden" name="REQUEST_TOKEN" value="<?= $this->requestToken ?>">
+    <input type="hidden" name="action" value="save_config">
+
+    <fieldset class="tl_tbox">
+        <legend><?= $t('headline_config', 'Configuration') ?></legend>
+        <div class="widget-group">
+
+            <div class="widget widget-text w50">
+                <h3><label for="ctrl_path"><?= $t('config_path_label', 'Path') ?></label></h3>
+                <input type="text" name="path" id="ctrl_path" class="tl_text" value="<?= htmlspecialchars($config['path']) ?>">
+                <p class="tl_help tl_tip"><?= $t('config_path_help') ?></p>
+            </div>
+
+            <div class="widget widget-text w50">
+                <h3><label for="ctrl_pl"><?= $t('config_pagination_limit_label', 'Pagination limit') ?></label></h3>
+                <input type="number" name="pagination_limit" id="ctrl_pl" class="tl_text" value="<?= (int) $config['pagination_limit'] ?>" min="1" max="10000">
+                <p class="tl_help tl_tip"><?= $t('config_pagination_limit_help') ?></p>
+            </div>
+
+            <div class="widget widget-select w50 clr">
+                <h3><label for="ctrl_auth_mode"><?= $t('config_auth_mode_label', 'Authentication mode') ?></label></h3>
+                <select name="auth_mode" id="ctrl_auth_mode" class="tl_select">
+                    <?php $authMode = (string) ($config['auth_mode'] ?? 'none'); ?>
+                    <option value="none" <?= $authMode === 'none' ? 'selected' : '' ?>><?= $t('config_auth_mode_none', 'No authentication (localhost only)') ?></option>
+                    <option value="oauth" <?= $authMode === 'oauth' ? 'selected' : '' ?>><?= $t('config_auth_mode_oauth', 'OAuth 2.1 (Authorization Code + PKCE)') ?></option>
+                </select>
+                <p class="tl_help tl_tip"><?= $t('config_auth_mode_help') ?></p>
+            </div>
+
+            <div class="widget widget-text w50">
+                <h3><label for="ctrl_backend_url"><?= $t('config_backend_url_label', 'Backend URL') ?></label></h3>
+                <input type="text" name="backend_url" id="ctrl_backend_url" class="tl_text" value="<?= htmlspecialchars((string) ($config['backend_url'] ?? '')) ?>" placeholder="http://contao-mcp.test">
+                <p class="tl_help tl_tip"><?= $t('config_backend_url_help') ?></p>
+            </div>
+
+            <div class="widget widget-select w50 clr">
+                <h3><label for="ctrl_reg_mode"><?= $t('config_reg_mode_label', 'Client registration mode') ?></label></h3>
+                <select name="oauth_registration_mode" id="ctrl_reg_mode" class="tl_select">
+                    <?php $regMode = (string) ($config['oauth_registration_mode'] ?? 'restricted'); ?>
+                    <option value="restricted" <?= $regMode === 'restricted' ? 'selected' : '' ?>><?= $t('config_reg_mode_restricted', 'Restricted (Initial Access Token required)') ?></option>
+                    <option value="open" <?= $regMode === 'open' ? 'selected' : '' ?>><?= $t('config_reg_mode_open', 'Open (anyone can register)') ?></option>
+                </select>
+                <p class="tl_help tl_tip"><?= $t('config_reg_mode_help') ?></p>
+            </div>
+
+            <div class="widget widget-checkbox w50 clr">
+                <h3><?= $t('config_lazy_mode_label', 'Lazy-Mode (Recommended for Claude)') ?></h3>
+                <input type="hidden" name="lazy_mode" value="0">
+                <label for="ctrl_lazy_mode" class="tl_checkbox_label">
+                    <input type="checkbox" name="lazy_mode" id="ctrl_lazy_mode" value="1" <?= !empty($config['lazy_mode']) ? 'checked' : '' ?>>
+                    <?= $t('config_lazy_mode_inline', 'Hide all tools behind a discovery interface') ?>
+                </label>
+                <p class="tl_help tl_tip"><?= $t('config_lazy_mode_help') ?></p>
+            </div>
+
+            <div class="widget widget-text w50 clr">
+                <h3><label for="ctrl_license_server_url"><?= $t('config_license_server_label', 'License server URL') ?></label></h3>
+                <input type="text" name="license_server_url" id="ctrl_license_server_url" class="tl_text" value="<?= htmlspecialchars((string) ($config['license_server_url'] ?? '')) ?>" placeholder="https://lizenz.netzhirsch.de">
+                <p class="tl_help tl_tip"><?= $t('config_license_server_help') ?></p>
+            </div>
+        </div>
+    </fieldset>
+
+</div>
+
+<div class="tl_formbody_submit">
+    <div class="tl_submit_container">
+        <button type="submit" class="tl_submit"><?= $t('button_save_config', 'Save configuration') ?></button>
+    </div>
+</div>
+</form>

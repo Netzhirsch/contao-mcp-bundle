@@ -1,0 +1,122 @@
+<?php
+/** @var \Contao\BackendTemplate $this */
+
+$lang = $GLOBALS['TL_LANG']['mcp_server'] ?? [];
+$t = static fn (string $key, string $fallback = ''): string => (string) ($lang[$key] ?? ($fallback !== '' ? $fallback : $key));
+
+// Built live by ModuleMcpTools from the (unpruned) registry + extension
+// candidates. Null when the registry could not be loaded — render a
+// warning instead of toggles then.
+$toolCatalogue = $this->toolCatalogue;
+
+// Group label: translated when an XLF key exists, otherwise auto-derived
+// from the group key ("image_size_item" → "Image size item").
+$groupLabel = static fn (string $group): string => (string) ($lang['tool_group_'.$group] ?? ucfirst(str_replace('_', ' ', $group)));
+
+// Core-Sprachschlüssel für den "Alle auswählen"-Toggle der Checkbox-Container.
+$selectAll = (string) ($GLOBALS['TL_LANG']['MSC']['selectAll'] ?? 'Select all');
+
+// Collapsible palette fieldsets — same Stimulus wiring as the page editor.
+// Contao's collapse CSS hides only DIV children, so the payload lives in a
+// <div class="widget-group">.
+$boxAttrs = static function (bool $collapsed, bool $first = false): string {
+    $classes = $first ? 'tl_tbox' : 'tl_box';
+    if ($collapsed) {
+        $classes .= ' collapsed';
+    }
+
+    return sprintf(
+        'class="%s" data-controller="contao--toggle-fieldset" data-contao--toggle-fieldset-collapsed-class="collapsed"',
+        $classes,
+    );
+};
+?>
+
+<div id="tl_buttons">
+    <a href="<?= $this->referer ?>" class="header_back" title="<?= $this->backTitle ?>" accesskey="b" onclick="Backend.getScrollOffset()"><?= $this->backLabel ?></a>
+</div>
+
+<?= $this->messages ?>
+
+<?php if ($toolCatalogue === null): ?>
+    <div class="tl_message">
+        <p class="tl_error">⚠ <?= $t('tools_panel_unavailable', 'The tool registry could not be loaded — see the system log. Tool toggles are temporarily unavailable; the stored configuration is untouched.') ?></p>
+    </div>
+<?php else: ?>
+    <?php
+    $renderedCore = [];
+    $renderedExt = [];
+    foreach ($toolCatalogue as $groupData) {
+        foreach ($groupData['tools'] as $tool) {
+            if ($tool['source'] === 'extension') {
+                $renderedExt[] = $tool['name'];
+            } else {
+                $renderedCore[] = $tool['name'];
+            }
+        }
+    }
+    ?>
+
+    <div class="tl_message">
+        <p class="tl_info"><?= $t('tools_panel_help', 'Unchecked tools are removed from the MCP catalogue entirely: they disappear from tools/list and discovery, and calls are rejected — for every client and user. Extension tools (marked "Extension") are opt-in and stay disabled until you check them here. System tools keep the discovery interface and health checks working and cannot be disabled. Changes apply on the next MCP request; connected clients see them after a reconnect.') ?></p>
+    </div>
+
+    <form class="tl_form tl_edit_form" method="post" action="<?= $this->actionUrl ?>" enctype="application/x-www-form-urlencoded">
+    <div class="tl_formbody_edit">
+
+        <input type="hidden" name="FORM_SUBMIT" value="mcp_server_action">
+        <input type="hidden" name="REQUEST_TOKEN" value="<?= $this->requestToken ?>">
+        <input type="hidden" name="action" value="save_tools">
+        <input type="hidden" name="tools_rendered_core" value="<?= htmlspecialchars(implode(',', $renderedCore)) ?>">
+        <input type="hidden" name="tools_rendered_ext" value="<?= htmlspecialchars(implode(',', $renderedExt)) ?>">
+
+        <?php $first = true; ?>
+        <?php foreach ($toolCatalogue as $groupData): ?>
+            <?php
+            $groupKey = (string) $groupData['group'];
+            $containerId = 'ctrl_tools_'.$groupKey;
+            // "Alle auswählen" nur in Gruppen ohne geschützte Tools —
+            // Backend.toggleCheckboxGroup würde sonst auch die disabled
+            // System-Checkboxen visuell mit umschalten.
+            $hasProtected = \in_array(true, array_column($groupData['tools'], 'protected'), true);
+            ?>
+            <fieldset <?= $boxAttrs(!$first, $first) ?>>
+                <legend><button type="button" data-action="contao--toggle-fieldset#toggle"><?= htmlspecialchars($groupLabel($groupKey)) ?></button></legend>
+                <div class="widget-group">
+                    <div class="widget widget-checkbox clr">
+                        <fieldset id="<?= $containerId ?>" class="tl_checkbox_container">
+                            <?php if (!$hasProtected): ?>
+                                <input type="checkbox" id="check_all_<?= $groupKey ?>" class="tl_checkbox" onclick="Backend.toggleCheckboxGroup(this,'<?= $containerId ?>')"> <label for="check_all_<?= $groupKey ?>" class="check-all"><em><?= htmlspecialchars($selectAll) ?></em></label><br>
+                            <?php endif; ?>
+                            <?php foreach ($groupData['tools'] as $tool): ?>
+                                <?php $optId = 'opt_tool_'.$tool['name']; ?>
+                                <?php if ($tool['protected']): ?>
+                                    <input type="checkbox" id="<?= $optId ?>" class="tl_checkbox" checked disabled>
+                                <?php else: ?>
+                                    <input type="checkbox" name="tools[]" id="<?= $optId ?>" class="tl_checkbox" value="<?= htmlspecialchars($tool['name']) ?>" <?= $tool['enabled'] ? 'checked' : '' ?> onfocus="Backend.getScrollOffset()">
+                                <?php endif; ?>
+                                <label for="<?= $optId ?>" title="<?= htmlspecialchars($tool['description']) ?>"><?= htmlspecialchars($tool['name']) ?><?php
+                                    if ($tool['source'] === 'extension') {
+                                        echo ' <span class="tl_gray" title="'.htmlspecialchars($t('tools_badge_ext_title', 'Provided by an extension bundle — opt-in')).'">('.$t('tools_suffix_ext', 'Extension').')</span>';
+                                    } elseif ($tool['protected']) {
+                                        echo ' <span class="tl_gray" title="'.htmlspecialchars($t('tools_badge_sys_title', 'Required for discovery / health checks — always on')).'">('.$t('tools_suffix_sys', 'System').')</span>';
+                                    }
+                                ?></label><br>
+                            <?php endforeach; ?>
+                        </fieldset>
+                        <p class="tl_help tl_tip"><?= $t('tools_group_help', 'Hover a tool name for its description.') ?></p>
+                    </div>
+                </div>
+            </fieldset>
+            <?php $first = false; ?>
+        <?php endforeach; ?>
+
+    </div>
+
+    <div class="tl_formbody_submit">
+        <div class="tl_submit_container">
+            <button type="submit" class="tl_submit"><?= $t('button_save_tools', 'Save tool selection') ?></button>
+        </div>
+    </div>
+    </form>
+<?php endif; ?>

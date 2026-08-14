@@ -1,0 +1,52 @@
+<?php
+/** @var \Contao\BackendTemplate $this */
+
+$lang = $GLOBALS['TL_LANG']['mcp_server'] ?? [];
+$t = static fn (string $key, string $fallback = ''): string => (string) ($lang[$key] ?? ($fallback !== '' ? $fallback : $key));
+?>
+
+<div id="tl_buttons">
+    <a href="<?= $this->referer ?>" class="header_back" title="<?= $this->backTitle ?>" accesskey="b" onclick="Backend.getScrollOffset()"><?= $this->backLabel ?></a>
+    <a href="<?= $this->actionUrl ?>" class="header_sync"><?= $t('button_refresh', 'Refresh') ?></a>
+</div>
+
+<?= $this->messages ?>
+
+<!-- Contao-Standard für Seiten-Hinweise: tl_message + tl_info (das Markup,
+     das auch Message::addInfo() erzeugt). -->
+<div class="tl_message">
+    <p class="tl_info"><?= $t('mcp_activity_help', 'Last 100 actions performed by MCP clients. Pulled from tl_log where source starts with "mcp". Open System → System log for the full filterable history.') ?></p>
+</div>
+
+<?php if (empty($this->mcpActivity)): ?>
+    <p class="tl_gray"><em><?= $t('mcp_activity_empty', 'No MCP activity recorded yet.') ?></em></p>
+<?php else: ?>
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist" style="width:14%;"><?= $t('mcp_activity_col_when', 'When') ?></th>
+                <th class="tl_folder_tlist" style="width:8%;"><?= $t('mcp_activity_col_source', 'Source') ?></th>
+                <th class="tl_folder_tlist" style="width:18%;"><?= $t('mcp_activity_col_user', 'User') ?></th>
+                <th class="tl_folder_tlist"><?= $t('mcp_activity_col_message', 'Message') ?></th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($this->mcpActivity as $entry): ?>
+                <tr class="hover-row">
+                    <td class="tl_file_list" style="white-space:nowrap;"><?= date('Y-m-d H:i:s', (int) $entry['tstamp']) ?></td>
+                    <td class="tl_file_list">
+                        <?php if ($entry['source'] === 'mcp_oauth'): ?>
+                            <span class="tl_green">oauth</span>
+                        <?php else: ?>
+                            <span class="tl_gray"><?= htmlspecialchars((string) $entry['source']) ?></span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="tl_file_list"><?= htmlspecialchars((string) $entry['username']) ?></td>
+                    <td class="tl_file_list"><?= htmlspecialchars((string) $entry['text']) ?></td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+<?php endif; ?>
