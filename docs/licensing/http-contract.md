@@ -92,7 +92,17 @@ Response `200`: `{ "token": "…", "expires_at": … }` (issue a `type:full` tok
 e.g. `exp = now + 35d` while paid — keep it a bit longer than the renewal
 interval so a missed cron run doesn't lock a paying customer out).
 
+Since bundle **v1.0.9** the request also carries `instance_secret` (empty before
+the first activation). The server binds the licence to the calling installation
+on first claim and returns the secret **once**; later calls must present it. See
+[server-briefing-instance-binding.md](./server-briefing-instance-binding.md) —
+this is what stops anyone who merely knows a customer's domain from pulling their
+token.
+
 Errors:
+- `403 {"error":"instance_mismatch"}` — the licence for this domain is bound to a
+  different installation (missing or wrong `instance_secret`). The bundle shows an
+  explanatory message and starts **neither** a trial **nor** a checkout.
 - `402 {"error":"subscription_inactive"}` — unpaid (cancelled / past-due). Do
   **not** issue. Graceful wind-down: the installed token runs out its remaining
   lifetime + 3-day grace, then the tools lock.

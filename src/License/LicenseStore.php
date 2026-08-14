@@ -9,9 +9,11 @@ namespace Netzhirsch\ContaoMcpBundle\License;
  * (separate from the operator-editable config.json — this file rotates and is
  * managed by the activate/trial/renew commands, not hand-edited).
  *
- *   token         string  the current signed license token ('' = none)
- *   hwm           int     forward-only "highest time ever seen" (clock-rollback guard)
- *   last_renew_at int     unix ts of the last successful renewal (renew throttle)
+ *   token           string  the current signed license token ('' = none)
+ *   instance_secret string  proves to the server that THIS install owns the
+ *                           license (issued once, on the claim that binds it)
+ *   hwm             int     forward-only "highest time ever seen" (clock-rollback guard)
+ *   last_renew_at   int     unix ts of the last successful renewal (renew throttle)
  */
 final class LicenseStore
 {
@@ -32,6 +34,29 @@ final class LicenseStore
     {
         $data = $this->load();
         $data['token'] = trim($token);
+
+        return $this->write($data);
+    }
+
+    /**
+     * Secret that proves this installation owns the license. Issued by the
+     * server on the claim that binds the license; sent with every later
+     * trial/renew call. Empty until the first successful claim.
+     */
+    public function getInstanceSecret(): string
+    {
+        return (string) ($this->load()['instance_secret'] ?? '');
+    }
+
+    public function setInstanceSecret(string $secret): bool
+    {
+        $secret = trim($secret);
+        if ($secret === '') {
+            return false;
+        }
+
+        $data = $this->load();
+        $data['instance_secret'] = $secret;
 
         return $this->write($data);
     }

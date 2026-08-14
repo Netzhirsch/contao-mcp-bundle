@@ -25,6 +25,7 @@
       <trans-unit id="mcp_server.billing_activated"><source>Payment received — your subscription is active and the MCP tools are unlocked.</source></trans-unit>
       <trans-unit id="mcp_server.license_claimed"><source>License activated — the MCP tools are unlocked.</source></trans-unit>
       <trans-unit id="mcp_server.license_revoked_notice"><source>This license has been revoked. Please contact Netzhirsch.</source></trans-unit>
+      <trans-unit id="mcp_server.license_instance_mismatch"><source>A license for this domain is already bound to another installation. Restore var/mcp/license.json from that installation, or contact Netzhirsch to release it.</source></trans-unit>
       <trans-unit id="mcp_server.billing_cancel"><source>Checkout cancelled — nothing was charged.</source></trans-unit>
       <trans-unit id="mcp_server.license_trial_help"><source>Start the trial — unlocks the MCP tools for the trial period. No payment required.</source></trans-unit>
       <trans-unit id="mcp_server.license_subscribe_help"><source>Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.</source></trans-unit>

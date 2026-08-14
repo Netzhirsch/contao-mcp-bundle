@@ -36,6 +36,12 @@ final class RenewalClient
      */
     private const DEFAULT_LICENSE_SERVER_URL = 'https://license.netzhirsch.de';
 
+    /** HTTP timeout for background calls (cron, CLI), in seconds. */
+    private const DEFAULT_TIMEOUT_SECONDS = 10;
+
+    /** Shorter timeout for calls made while a backend page is rendering. */
+    public const INTERACTIVE_TIMEOUT_SECONDS = 4;
+
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly LicenseStore $store,
@@ -57,6 +63,7 @@ final class RenewalClient
             'product' => LicenseToken::PRODUCT,
             'domain' => $this->domain(),
             'account_email' => trim($accountEmail),
+            'instance_secret' => $this->store->getInstanceSecret(),
         ]);
     }
 
@@ -73,7 +80,7 @@ final class RenewalClient
      *
      * @return array{ok: bool, error?: string, message?: string, expires_at?: int}
      */
-    public function renew(bool $force = false): array
+    public function renew(bool $force = false, ?int $timeoutSeconds = null): array
     {
         if (!$force) {
             $since = time() - $this->store->getLastRenewAt();
@@ -86,13 +93,22 @@ final class RenewalClient
             'product' => LicenseToken::PRODUCT,
             'domain' => $this->domain(),
             'token' => $this->store->getToken(),
-        ]);
+            // Proof that THIS installation owns the license. Empty only on a
+            // first activation — once the server has bound the license to an
+            // instance it rejects a claim without the matching secret
+            // (`instance_mismatch`), so knowing a customer's domain is no longer
+            // enough to pull their token.
+            'instance_secret' => $this->store->getInstanceSecret(),
+        ], $timeoutSeconds);
 
-        // Record the ATTEMPT, not just the success: otherwise a failing install
-        // (unreachable server, unpaid, domain mismatch) would never advance the
-        // throttle and the hourly cron would hit the server every hour instead
-        // of once per window.
-        $this->store->setLastRenewAt(time());
+        // Record the ATTEMPT for the cron path, so a failing install (unreachable
+        // server, unpaid, domain mismatch) doesn't hit the server every hour
+        // instead of once per window. A FORCED call that failed must not move the
+        // marker — a user clicking a backend button would otherwise postpone the
+        // cron's next real attempt by up to a full throttle window.
+        if ($result['ok'] || !$force) {
+            $this->store->setLastRenewAt(time());
+        }
 
         if (!$result['ok'] && 'revoked' === ($result['error'] ?? '')) {
             // Authoritative kill switch: the server actively revoked this
@@ -135,6 +151,10 @@ final class RenewalClient
             'product' => LicenseToken::PRODUCT,
             'domain' => $this->domain(),
             'token' => $this->store->getToken(),
+            // The portal can cancel the subscription and change payment details,
+            // so it must be reachable only from the bound installation — not by
+            // anyone who knows the customer's domain.
+            'instance_secret' => $this->store->getInstanceSecret(),
         ]);
     }
 
@@ -181,14 +201,16 @@ final class RenewalClient
      *
      * @return array{ok: bool, error?: string, message?: string, expires_at?: int}
      */
-    private function post(string $endpoint, array $body): array
+    private function post(string $endpoint, array $body, ?int $timeoutSeconds = null): array
     {
         $server = $this->serverUrl();
 
         try {
             $response = $this->httpClient->request('POST', $server.$endpoint, [
                 'json' => $body,
-                'timeout' => 10,
+                // Interactive callers pass a short timeout: a backend page must
+                // not sit for 10s per attempt when the license server is slow.
+                'timeout' => $timeoutSeconds ?? self::DEFAULT_TIMEOUT_SECONDS,
             ]);
             $status = $response->getStatusCode();
             $data = $response->toArray(false);
@@ -209,6 +231,14 @@ final class RenewalClient
         $token = (string) ($data['token'] ?? '');
         if ($token === '' || !$this->store->setToken($token)) {
             return ['ok' => false, 'error' => 'bad_response', 'message' => 'License server did not return a storable token.'];
+        }
+
+        // The server hands out the instance secret exactly once — on the claim
+        // that binds the license to this installation. Persist it; every later
+        // trial/renew presents it as proof of possession. Never logged.
+        $instanceSecret = (string) ($data['instance_secret'] ?? '');
+        if ($instanceSecret !== '') {
+            $this->store->setInstanceSecret($instanceSecret);
         }
 
         return ['ok' => true, 'expires_at' => (int) ($data['expires_at'] ?? 0)];

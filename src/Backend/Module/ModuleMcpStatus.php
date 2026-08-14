@@ -106,7 +106,7 @@ class ModuleMcpStatus extends AbstractMcpModule
      */
     private function claimExistingLicense(RenewalClient $client): bool
     {
-        $result = $client->renew(true);
+        $result = $client->renew(true, RenewalClient::INTERACTIVE_TIMEOUT_SECONDS);
         if ($result['ok'] ?? false) {
             Message::addConfirmation($this->translate('license_claimed', 'License activated — the MCP tools are unlocked.'));
 
@@ -116,6 +116,15 @@ class ModuleMcpStatus extends AbstractMcpModule
         // A revoked license must not silently lead into a new checkout.
         if ('revoked' === ($result['error'] ?? '')) {
             Message::addError($this->translate('license_revoked_notice', 'This license has been revoked. Please contact Netzhirsch.'));
+
+            return true; // handled — caller must not continue
+        }
+
+        // The license for this domain is already bound to a different
+        // installation. Starting a trial or a second checkout here would be
+        // wrong (double charge / burnt trial) — tell the operator instead.
+        if ('instance_mismatch' === ($result['error'] ?? '')) {
+            Message::addError($this->translate('license_instance_mismatch', 'A license for this domain is already bound to another installation. Restore var/mcp/license.json from that installation, or contact Netzhirsch to release it.'));
 
             return true; // handled — caller must not continue
         }
@@ -192,8 +201,25 @@ class ModuleMcpStatus extends AbstractMcpModule
         // case activates immediately instead of waiting for the hourly cron.
         $client = $container->get(RenewalClient::class);
         for ($attempt = 0; $attempt < self::BILLING_RETURN_ATTEMPTS; ++$attempt) {
-            if ($client->renew(true)['ok'] ?? false) {
+            $result = $client->renew(true, RenewalClient::INTERACTIVE_TIMEOUT_SECONDS);
+            if ($result['ok'] ?? false) {
                 Message::addConfirmation($this->translate('billing_activated', 'Payment received — your subscription is active and the MCP tools are unlocked.'));
+                $this->redirectSelf();
+
+                return;
+            }
+
+            // Definitive answers — retrying cannot change them, and reporting
+            // "is being activated" afterwards would be plainly wrong.
+            $error = (string) ($result['error'] ?? '');
+            if ('revoked' === $error) {
+                Message::addError($this->translate('license_revoked_notice', 'This license has been revoked. Please contact Netzhirsch.'));
+                $this->redirectSelf();
+
+                return;
+            }
+            if ('instance_mismatch' === $error) {
+                Message::addError($this->translate('license_instance_mismatch', 'A license for this domain is already bound to another installation. Restore var/mcp/license.json from that installation, or contact Netzhirsch to release it.'));
                 $this->redirectSelf();
 
                 return;

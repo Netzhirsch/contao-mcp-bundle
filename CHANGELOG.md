@@ -6,6 +6,34 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.0.9] – 2026-08-14 — „Lizenz an die Installation binden"
+
+### Security (Lizenz-Integrität)
+- **Besitznachweis `instance_secret`.** `/renew`, `/trial` und `/portal-session`
+  schicken jetzt ein Instanz-Geheimnis mit; liefert der Server bei der
+  Erstaktivierung eines zurück, wird es in `var/mcp/license.json` gespeichert und
+  ab dann jedem Aufruf beigelegt (nie geloggt, nie im Backend angezeigt).
+  Hintergrund: bisher genügte die **Kenntnis der Domain**, um sich ein gültiges
+  Token ausstellen zu lassen — Kundendomains sind öffentlich. Damit war die
+  Lizenz umgehbar und über `/portal-session` sogar das fremde Stripe-Portal
+  erreichbar. **Die Serverhälfte muss nachgezogen werden**, siehe
+  [docs/licensing/server-briefing-instance-binding.md](docs/licensing/server-briefing-instance-binding.md);
+  bis dahin ignoriert der Server die Felder folgenlos.
+- Neuer Fehlercode **`403 instance_mismatch`** wird sauber behandelt: klare
+  Meldung, und es wird **weder** eine Testphase gestartet **noch** ein Checkout
+  geöffnet (sonst verbrannter Trial bzw. Doppelbelastung).
+
+### Fixed
+- **Rückkehr von Stripe hängt nicht mehr bis zu ~32 s.** Die bis zu drei
+  `/renew`-Versuche liefen mit dem Hintergrund-Timeout von 10 s; interaktive
+  Aufrufe nutzen jetzt **4 s**. Zusätzlich bricht die Schleife bei endgültigen
+  Antworten (`revoked`, `instance_mismatch`) sofort ab, statt dreimal zu warten
+  und danach fälschlich „wird aktiviert" zu melden.
+- **Backend-Klicks verzögern den Cron nicht mehr.** Ein erzwungener, aber
+  fehlgeschlagener `renew` schrieb `last_renew_at` und schob damit die nächste
+  echte Cron-Erneuerung um bis zu 6 Stunden. Der Zeitstempel wandert jetzt nur
+  noch bei Erfolg oder auf dem Cron-Pfad.
+
 ## [1.0.8] – 2026-08-14 — „Abo-/Trial-Buttons aktivieren sich selbst"
 
 ### Changed
