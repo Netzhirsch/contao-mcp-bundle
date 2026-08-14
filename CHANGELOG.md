@@ -6,6 +6,14 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.0.7] – 2026-08-14
+
+### Changed
+- **Paketbeschreibung aktualisiert** (`composer.json`, sichtbar auf Packagist und
+  im Contao-Manager-Katalog): „~160 MCP tools" → **„~170"** (tatsächlich 172) und
+  Hinweis auf das kommerzielle Modell (30 Tage Testphase, danach Abo je
+  Contao-Installation), damit vor der Installation klar ist, was einen erwartet.
+
 ## [1.0.6] – 2026-08-13
 
 ### Security (BREAKING für Nicht-Admin-Zugriff)
