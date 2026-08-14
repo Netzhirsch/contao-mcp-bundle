@@ -6,6 +6,26 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.0.10] – 2026-08-14
+
+### Fixed
+- **„Abonnieren" während einer laufenden Testphase** meldete „Lizenz aktiviert",
+  statt die Stripe-Bezahlseite zu öffnen: die Vorabprüfung wertete das soeben
+  erneuerte **Trial**-Token als bestehendes Entitlement. Sie greift jetzt nur
+  noch bei einer **bezahlten oder internen** Lizenz (`type` aus der
+  Server-Antwort); während eines Trials führt der Klick wie erwartet zum
+  Checkout. Der Schutz vor Doppelbelastung bleibt unverändert.
+- **Interne Lizenzen lasen sich wie ein Ablaufdatum.** Angezeigt wurde
+  „full — noch 35 Tage" (die Token-Laufzeit), obwohl sie sich unbefristet
+  erneuern. Der vom Server gemeldete Plan wird jetzt gespeichert und der Status
+  zeigt **„intern — unbefristet (verlängert sich automatisch)"**.
+
+### Changed
+- **Feld „Lizenz-Server-URL" aus dem Konfigurationsformular entfernt.** Die
+  Produktions-URL steckt seit 1.0.5 fest im Bundle; das Feld konnte nur noch
+  Schaden anrichten. Der Config-Schlüssel bleibt als Dev-Override funktionsfähig
+  und wird beim Speichern **durchgereicht** statt geleert.
+
 ## [1.0.9] – 2026-08-14 — „Lizenz an die Installation binden"
 
 ### Security (Lizenz-Integrität)
