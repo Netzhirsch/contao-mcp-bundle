@@ -6,6 +6,19 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.0.11] – 2026-08-14
+
+### Fixed
+- **„Abo verwalten" erscheint nicht mehr bei internen Lizenzen.** Eine interne
+  Lizenz trägt `type: full` und landete damit im selben Zweig wie ein bezahltes
+  Abo — sie hat aber gar kein Stripe-Kundenkonto, der Klick konnte also nur in
+  einem Fehler enden. Bei aktiver interner Lizenz werden jetzt **gar keine
+  Abrechnungs-Buttons** angezeigt (die Statuszeile erklärt den Zustand bereits);
+  ist eine interne Lizenz inaktiv, steht nur „Abonnieren" bereit — ein Portal
+  ohne Kundenkonto gibt es weiterhin nicht. Ein von Hand aufgerufener
+  `manage_billing`-Link meldet jetzt sauber, dass es nichts zu verwalten gibt,
+  statt den Serverfehler durchzureichen.
+
 ## [1.0.10] – 2026-08-14
 
 ### Fixed

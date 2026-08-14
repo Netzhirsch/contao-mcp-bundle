@@ -20,6 +20,7 @@
       <trans-unit id="mcp_server.license_inactive"><source>inactive</source></trans-unit>
       <trans-unit id="mcp_server.license_plan_internal"><source>internal</source></trans-unit>
       <trans-unit id="mcp_server.license_unlimited"><source>unlimited (renews automatically)</source></trans-unit>
+      <trans-unit id="mcp_server.license_internal_no_billing"><source>This is an internal license issued by Netzhirsch — there is no subscription to manage. It renews automatically.</source></trans-unit>
       <trans-unit id="mcp_server.button_start_trial"><source>Start trial</source></trans-unit>
       <trans-unit id="mcp_server.button_subscribe"><source>Subscribe</source></trans-unit>
       <trans-unit id="mcp_server.button_manage_billing"><source>Manage subscription</source></trans-unit>

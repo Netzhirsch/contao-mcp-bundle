@@ -92,6 +92,13 @@ class ModuleMcpStatus extends AbstractMcpModule
                 $this->handleBillingRedirect($container->get(RenewalClient::class), 'checkout');
                 break;
             case 'manage_billing':
+                // No Stripe customer exists for an internal licence, so the
+                // portal call could only fail. The button is hidden for that
+                // case — this guards a hand-crafted link.
+                if ('internal' === $container->get(LicenseStore::class)->getPlan()) {
+                    Message::addInfo($this->translate('license_internal_no_billing', 'This is an internal license issued by Netzhirsch — there is no subscription to manage. It renews automatically.'));
+                    $this->redirectSelf();
+                }
                 $this->handleBillingRedirect($container->get(RenewalClient::class), 'portal');
                 break;
             default:

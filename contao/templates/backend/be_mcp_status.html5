@@ -36,19 +36,30 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
     // Payment happens on Stripe-hosted pages; these links just start the flow.
     $licState = \is_array($this->license ?? null) ? $this->license : [];
     ?>
-    <?php $licType = (string) ($licState['type'] ?? ''); ?>
-    <?php if (empty($licState['active']) && 'full' === $licType): ?>
+    <?php
+    $licType = (string) ($licState['type'] ?? '');
+    $licActive = !empty($licState['active']);
+    // An internal licence (issued by Netzhirsch) has no Stripe customer, so
+    // there is nothing to "manage" — the portal would only error out.
+    $licInternal = 'internal' === (string) ($this->licensePlan ?? '');
+    ?>
+    <?php if ($licActive && $licInternal): ?>
+        <?php // Internal licence: renews by itself, no billing account. No buttons — the status row explains the state. ?>
+    <?php elseif ($licActive && 'full' === $licType): ?>
+        <a href="<?= $actionLink('manage_billing') ?>" class="header_edit_all" title="<?= htmlspecialchars($t('license_manage_help', 'Manage your subscription on the Stripe customer portal (payment method, cancellation, invoices).')) ?>"><?= $t('button_manage_billing', 'Manage subscription') ?></a>
+    <?php elseif ($licActive): ?>
+        <?php // Active trial: offer to convert to a paid plan. There is no Stripe billing account to "manage" yet, so no portal button here. ?>
+        <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
+    <?php elseif ($licInternal): ?>
+        <?php // Internal licence that stopped working (revoked/expired): buying is the way out, but there is still no billing account to manage. ?>
+        <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
+    <?php elseif ('full' === $licType): ?>
         <?php // Paid licence that lapsed past the grace window: the customer needs the Stripe portal (fix the card, restart the subscription) — a second trial would only 409. ?>
         <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
         <a href="<?= $actionLink('manage_billing') ?>" class="header_edit_all" title="<?= htmlspecialchars($t('license_manage_help', 'Manage your subscription on the Stripe customer portal (payment method, cancellation, invoices).')) ?>"><?= $t('button_manage_billing', 'Manage subscription') ?></a>
-    <?php elseif (empty($licState['active'])): ?>
+    <?php else: ?>
         <a href="<?= $actionLink('start_trial') ?>" class="header_new" title="<?= htmlspecialchars($t('license_trial_help', 'Start the trial — unlocks the MCP tools for the trial period. No payment required.')) ?>"><?= $t('button_start_trial', 'Start trial') ?></a>
         <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
-    <?php elseif ('full' !== $licType): ?>
-        <?php // Active trial: offer to convert to a paid plan. There is no Stripe billing account to "manage" yet, so no portal button here. ?>
-        <a href="<?= $actionLink('subscribe') ?>" class="header_new" title="<?= htmlspecialchars($t('license_subscribe_help', 'Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.')) ?>"><?= $t('button_subscribe', 'Subscribe') ?></a>
-    <?php else: ?>
-        <a href="<?= $actionLink('manage_billing') ?>" class="header_edit_all" title="<?= htmlspecialchars($t('license_manage_help', 'Manage your subscription on the Stripe customer portal (payment method, cancellation, invoices).')) ?>"><?= $t('button_manage_billing', 'Manage subscription') ?></a>
     <?php endif; ?>
 </div>
 
