@@ -33,6 +33,12 @@ class ModuleMcpStatus extends AbstractMcpModule
      */
     protected $strTemplate = 'be_mcp_status';
 
+    /**
+     * How often the Stripe return polls /renew before falling back to "will be
+     * activated automatically" (one attempt per second).
+     */
+    private const BILLING_RETURN_ATTEMPTS = 3;
+
     protected function compileModule(ContainerInterface $container, McpServerConfigStorage $configStorage, array $config): void
     {
         // Stripe checkout/portal return (routed here by BillingReturnListener):
@@ -89,12 +95,46 @@ class ModuleMcpStatus extends AbstractMcpModule
     }
 
     /**
+     * Pull an entitlement the server already holds for this domain (an internal
+     * license issued by Netzhirsch, or a subscription that is already paid).
+     *
+     * This is what makes both buttons "just work": no token copying, no waiting
+     * for the hourly cron, and no pointless Stripe checkout for an instance that
+     * is licensed already.
+     *
+     * @return bool true when a token was fetched and stored
+     */
+    private function claimExistingLicense(RenewalClient $client): bool
+    {
+        $result = $client->renew(true);
+        if ($result['ok'] ?? false) {
+            Message::addConfirmation($this->translate('license_claimed', 'License activated — the MCP tools are unlocked.'));
+
+            return true;
+        }
+
+        // A revoked license must not silently lead into a new checkout.
+        if ('revoked' === ($result['error'] ?? '')) {
+            Message::addError($this->translate('license_revoked_notice', 'This license has been revoked. Please contact Netzhirsch.'));
+
+            return true; // handled — caller must not continue
+        }
+
+        return false;
+    }
+
+    /**
      * Request a trial from the license server. No payment — just unlocks the
      * tools for the trial window. The server rejects a second trial per
      * domain/account (that is the non-restart guarantee).
      */
     private function handleStartTrial(RenewalClient $client): void
     {
+        // Already entitled (e.g. an internal license)? Then don't burn a trial.
+        if ($this->claimExistingLicense($client)) {
+            $this->redirectSelf();
+        }
+
         $result = $client->startTrial($this->currentUserEmail());
         if ($result['ok'] ?? false) {
             Message::addConfirmation($this->translate('license_trial_started', 'Trial activated — the MCP tools are unlocked for the trial period.'));
@@ -112,6 +152,13 @@ class ModuleMcpStatus extends AbstractMcpModule
      */
     private function handleBillingRedirect(RenewalClient $client, string $kind): void
     {
+        // Subscribing while the server already holds an entitlement for this
+        // domain (internal license, or a subscription that is already paid)
+        // would charge twice — claim the existing license instead.
+        if ('checkout' === $kind && $this->claimExistingLicense($client)) {
+            $this->redirectSelf();
+        }
+
         $result = 'checkout' === $kind
             ? $client->checkoutSession($this->currentUserEmail())
             : $client->portalSession();
@@ -133,13 +180,33 @@ class ModuleMcpStatus extends AbstractMcpModule
      */
     private function handleBillingReturn(string $billing, ContainerInterface $container): void
     {
-        if ('success' === $billing) {
-            $container->get(RenewalClient::class)->renew(true);
-            Message::addConfirmation($this->translate('billing_success', 'Payment received — your subscription is being activated.'));
-        } else {
+        if ('success' !== $billing) {
             Message::addInfo($this->translate('billing_cancel', 'Checkout cancelled — nothing was charged.'));
+            $this->redirectSelf();
+
+            return;
         }
 
+        // Racing Stripe's webhook: the browser is back before the payment event
+        // has necessarily been processed. Retry briefly so the common (card)
+        // case activates immediately instead of waiting for the hourly cron.
+        $client = $container->get(RenewalClient::class);
+        for ($attempt = 0; $attempt < self::BILLING_RETURN_ATTEMPTS; ++$attempt) {
+            if ($client->renew(true)['ok'] ?? false) {
+                Message::addConfirmation($this->translate('billing_activated', 'Payment received — your subscription is active and the MCP tools are unlocked.'));
+                $this->redirectSelf();
+
+                return;
+            }
+
+            if ($attempt < self::BILLING_RETURN_ATTEMPTS - 1) {
+                sleep(1);
+            }
+        }
+
+        // Not activated yet — normal for SEPA (settles asynchronously). The
+        // hourly cron picks it up as soon as the payment is confirmed.
+        Message::addInfo($this->translate('billing_success', 'Payment received — your subscription is being activated. This can take a moment with SEPA; the licence unlocks automatically.'));
         $this->redirectSelf();
     }
 

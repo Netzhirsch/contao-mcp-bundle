@@ -21,7 +21,10 @@
       <trans-unit id="mcp_server.button_start_trial"><source>Start trial</source></trans-unit>
       <trans-unit id="mcp_server.button_subscribe"><source>Subscribe</source></trans-unit>
       <trans-unit id="mcp_server.button_manage_billing"><source>Manage subscription</source></trans-unit>
-      <trans-unit id="mcp_server.billing_success"><source>Payment received — your subscription is being activated.</source></trans-unit>
+      <trans-unit id="mcp_server.billing_success"><source>Payment received — your subscription is being activated. This can take a moment with SEPA; the licence unlocks automatically.</source></trans-unit>
+      <trans-unit id="mcp_server.billing_activated"><source>Payment received — your subscription is active and the MCP tools are unlocked.</source></trans-unit>
+      <trans-unit id="mcp_server.license_claimed"><source>License activated — the MCP tools are unlocked.</source></trans-unit>
+      <trans-unit id="mcp_server.license_revoked_notice"><source>This license has been revoked. Please contact Netzhirsch.</source></trans-unit>
       <trans-unit id="mcp_server.billing_cancel"><source>Checkout cancelled — nothing was charged.</source></trans-unit>
       <trans-unit id="mcp_server.license_trial_help"><source>Start the trial — unlocks the MCP tools for the trial period. No payment required.</source></trans-unit>
       <trans-unit id="mcp_server.license_subscribe_help"><source>Subscribe — opens the secure Stripe payment page. Card / SEPA data is entered on Stripe, never in Contao.</source></trans-unit>
