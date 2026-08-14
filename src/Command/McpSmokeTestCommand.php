@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Command;
 
+use Contao\Search;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\McpActivityLog;
 use Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController;
@@ -27,6 +28,7 @@ use Netzhirsch\ContaoMcpBundle\Tool\NewsArchive\Tool as NewsArchiveTool;
 use Netzhirsch\ContaoMcpBundle\Tool\MemberGroup\Tool as MemberGroupTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Maintenance\Tool as MaintenanceTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Page\Tool as PageTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Search\Tool as SearchTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Sorting\Tool as SortingTool;
 use Netzhirsch\ContaoMcpBundle\Tool\System\Tool as SystemTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Template\Tool as TemplateTool;
@@ -67,6 +69,7 @@ final class McpSmokeTestCommand extends Command
         private readonly MaintenanceTool $maintenanceTool,
         private readonly SortingTool $sortingTool,
         private readonly SystemTool $systemTool,
+        private readonly SearchTool $searchTool,
         private readonly ExternalIdTool $externalIdTool,
         private readonly MultilingualTool $multilingualTool,
         private readonly ContentTool $contentTool,
@@ -1594,6 +1597,82 @@ final class McpSmokeTestCommand extends Command
                 $verifier->verify($foreign, $licHost),
                 fn ($r) => ($r['valid'] ?? true) === false && $r['reason'] === 'bad_signature');
         }
+
+        // ═══════════════════════ Search index ═══════════════════════
+        $output->writeln("\n<comment>Search index</comment>");
+
+        $searchPublicUrl = 'https://mcp-smoke-search.local/public.html';
+        $searchProtectedUrl = 'https://mcp-smoke-search.local/protected.html';
+        // Leftovers from an aborted run would skew the assertions below.
+        foreach ([$searchPublicUrl, $searchProtectedUrl] as $staleUrl) {
+            try {
+                Search::removeEntry($staleUrl);
+            } catch (\Throwable) {
+                // never indexed — nothing to clean
+            }
+        }
+
+        // NOTE for future fixtures: indexPage() splits head/body on "</head>",
+        // and `protected` must be 0/1 — '' dies under MySQL strict mode.
+        Search::indexPage([
+            'url' => $searchPublicUrl,
+            'title' => 'Smoke Stornobedingungen',
+            'pid' => 1,
+            'language' => 'de',
+            'protected' => 0,
+            'groups' => [],
+            'meta' => [],
+            'content' => '<html><head><title>Smoke</title></head><body>Vorspann ohne Belang. '
+                .str_repeat('Fuellwort ohne Bedeutung. ', 20)
+                .'Das Stichwort Quastenflosser steht absichtlich weit hinten im Text.</body></html>',
+        ]);
+        Search::indexPage([
+            'url' => $searchProtectedUrl,
+            'title' => 'Smoke intern',
+            'pid' => 1,
+            'language' => 'de',
+            'protected' => 1,
+            'groups' => [2],
+            'meta' => [],
+            'content' => '<html><head><title>Smoke intern</title></head><body>Geheimer Quastenflosser nur fuer Mitglieder.</body></html>',
+        ]);
+
+        $expect('search_index_status reports the indexed documents',
+            $this->searchTool->status(),
+            fn ($r) => ($r['documents'] ?? 0) >= 2 && ($r['protected'] ?? 0) >= 1 && str_contains((string) ($r['hint'] ?? ''), 'populated'));
+
+        $searchHits = $this->searchTool->query('Quastenflosser');
+
+        $expect('search_query finds the indexed page',
+            $searchHits,
+            fn ($r) => 1 === ($r['total'] ?? 0) && ($r['results'][0]['url'] ?? '') === $searchPublicUrl);
+
+        // The protected page matches the same keyword — it must never be
+        // returned, because its access depends on FRONTEND member groups.
+        $expect('search_query hides protected pages and counts them',
+            $searchHits,
+            fn ($r) => 1 === ($r['protected_skipped'] ?? 0)
+                && !\in_array($searchProtectedUrl, array_column($r['results'] ?? [], 'url'), true));
+
+        $expect('search_query returns a snippet around the match',
+            $searchHits,
+            fn ($r) => str_contains((string) ($r['results'][0]['snippet'] ?? ''), 'Quastenflosser')
+                && str_starts_with((string) ($r['results'][0]['snippet'] ?? ''), '…'));
+
+        $expect('search_query caps the limit',
+            $this->searchTool->query('Quastenflosser', false, false, null, 999),
+            fn ($r) => 50 === ($r['limit'] ?? 0));
+
+        $expect('search_query rejects empty keywords',
+            $this->searchTool->query('   '),
+            fn ($r) => ($r['error'] ?? null) === 'invalid_input');
+
+        foreach ([$searchPublicUrl, $searchProtectedUrl] as $cleanupUrl) {
+            Search::removeEntry($cleanupUrl);
+        }
+        $expect('search fixtures removed again',
+            ['left' => (int) $this->connection->fetchOne('SELECT COUNT(*) FROM tl_search WHERE url LIKE ?', ['%mcp-smoke-search.local%'])],
+            fn ($r) => 0 === $r['left']);
 
         // ═══════════════════════ Cleanup ═══════════════════════════
         if (!$keep) {

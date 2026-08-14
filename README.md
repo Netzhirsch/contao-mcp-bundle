@@ -33,6 +33,11 @@ System-Einstellungen.
   Turn.
 - **OAuth 2.1** mit PKCE + Dynamic Client Registration (RFC 7591) inkl.
   Initial-Access-Token-Gate für `restricted` mode.
+- **Volltextsuche über die Website**: `search_query` durchsucht Contaos
+  Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
+  oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.
+  Geschützte Seiten bleiben außen vor; `search_index_status` zeigt, ob der
+  Index überhaupt befüllt ist.
 - **Filesystem-Suche**: `files_search` (rekursive Glob-Suche im Upload-Tree,
   POSIX-Syntax + `**`-Erweiterung, basename-Match bei Patterns ohne Slash)
 - **Site-Building-Helfer**: `entity_move`, `page_cache_invalidate`,

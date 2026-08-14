@@ -133,6 +133,12 @@ final class ToolPermissionMap
         'page_url' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'page_preview' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'language_link_pages' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'update'],
+
+        // Search index: it holds the rendered text of pages, so reading it is
+        // a page read. (Protected entries are filtered out in the tool itself —
+        // their access depends on frontend member groups, not backend rights.)
+        'search_query' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
+        'search_index_status' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
     ];
 
     /**

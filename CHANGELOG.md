@@ -6,6 +6,27 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.1.0] – 2026-08-14 — „Volltextsuche über die Website"
+
+### Added
+- **Zwei neue Tools auf Contaos Suchindex** (`tl_search`), damit die KI Inhalte
+  **findet**, statt Listen durchzublättern:
+  - **`search_query`** — Volltextsuche mit derselben Engine wie das
+    Frontend-Suchmodul (`Search::query()`): Phrasen in Anführungszeichen,
+    `+pflicht`/`-ausschluss`, Wildcards, ODER- und Fuzzy-Suche, Filter auf
+    bestimmte Seiten, Paging (Limit auf 50 gedeckelt). Liefert Titel, URL,
+    Seiten-ID, Sprache, Relevanz und ein **Snippet rund um den Treffer**.
+    Durchsucht den **gerenderten** Seitentext — findet also auch Inhalte aus
+    Modulen, Includes und Erweiterungen, die über die CRUD-Tools unsichtbar sind.
+  - **`search_index_status`** — Anzahl Dokumente, Aufteilung nach Sprache,
+    geschützte Einträge, Zeitpunkt der letzten Indizierung. Beantwortet die
+    häufigste Rückfrage bei leeren Treffern: der Index wurde nie gecrawlt.
+- **Geschützte Seiten werden nie zurückgegeben.** Ihr Zugriff hängt an
+  **Frontend**-Mitgliedergruppen, die nichts darüber aussagen, was der
+  aufrufende Backend-Benutzer sehen darf — sie werden herausgefiltert und als
+  `protected_skipped` gezählt, damit ein unvollständiges Ergebnis erkennbar ist.
+  Rechte-Zuordnung: Lesen des Index = Lesen von `tl_page`.
+
 ## [1.0.11] – 2026-08-14
 
 ### Fixed
