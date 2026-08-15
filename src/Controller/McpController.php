@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Controller;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseGate;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
+use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory;
 use Netzhirsch\ContaoMcpBundle\Service\McpOAuthValidator;
@@ -70,6 +71,7 @@ final class McpController
         private readonly RateLimiterFactory $mcpToolCallLimiter,
         private readonly McpPermissionGuard $permissionGuard,
         private readonly McpPermissionEnforcer $permissionEnforcer,
+        private readonly UndoRecorder $undoRecorder,
         private readonly LicenseGate $licenseGate,
         private readonly LoggerInterface $logger,
     ) {
@@ -326,11 +328,33 @@ final class McpController
             ));
         }
 
+        // Snapshot deletions into tl_undo BEFORE they happen, so a human can
+        // recover them through Contao's own backend undo. No-op for everything
+        // that isn't a delete. See Service\UndoRecorder.
+        $undoId = 0;
+        if ('tools/call' === $request->method) {
+            $params = \is_array($request->params ?? null) ? $request->params : [];
+            $undoId = $this->undoRecorder->beforeToolCall(
+                (string) ($params['name'] ?? ''),
+                \is_array($params['arguments'] ?? null) ? $params['arguments'] : [],
+            );
+        }
+
         $lastError = null;
         for ($attempt = 1; $attempt <= self::DCA_CACHE_RACE_RETRIES; ++$attempt) {
             try {
-                return JsonRpcResponse::make($id, $dispatcher->handleRequest($request, $session));
+                $response = JsonRpcResponse::make($id, $result = $dispatcher->handleRequest($request, $session));
+
+                // The tool refused (not found, cascade guard, …) — the rows are
+                // still there, so the snapshot would be a lie.
+                if ($undoId > 0 && $result instanceof CallToolResult && $result->isError) {
+                    $this->undoRecorder->discard($undoId);
+                }
+
+                return $response;
             } catch (McpServerException $mcpError) {
+                $this->undoRecorder->discard($undoId);
+
                 return $mcpError->toJsonRpcError($id);
             } catch (\Throwable $e) {
                 // Windows-only transient: when several requests hit a COLD DCA
@@ -342,14 +366,20 @@ final class McpController
                 // losing process just waits for the winner to finish the rename.
                 // Linux/prod warm the cache at deploy time and never hit this.
                 if (!$this->isTransientCacheError($e)) {
+                    $this->undoRecorder->discard($undoId);
+
                     return McpServerException::internalError($e->getMessage())->toJsonRpcError($id);
                 }
+                // Transient: the dispatch is retried, so the snapshot must stay.
                 $lastError = $e;
                 if ($attempt < self::DCA_CACHE_RACE_RETRIES) {
                     usleep(150_000 * $attempt); // 150ms, then 300ms backoff
                 }
             }
         }
+
+        // Every attempt failed — nothing was deleted.
+        $this->undoRecorder->discard($undoId);
 
         $this->logger->error('MCP dispatch failed after DCA-cache retries.', ['exception' => $lastError]);
 

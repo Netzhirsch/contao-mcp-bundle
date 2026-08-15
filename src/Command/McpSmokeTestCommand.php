@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Command;
 
 use Contao\Search;
+use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\McpActivityLog;
 use Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController;
 use Netzhirsch\ContaoMcpBundle\License\LicenseToken;
 use Netzhirsch\ContaoMcpBundle\OAuth\KeyManager;
 use Netzhirsch\ContaoMcpBundle\Service\McpCallContext;
+use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Tool\Article\Tool as ArticleTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Content\Tool as ContentTool;
 use Netzhirsch\ContaoMcpBundle\Tool\ExternalId\Tool as ExternalIdTool;
@@ -70,6 +72,7 @@ final class McpSmokeTestCommand extends Command
         private readonly SortingTool $sortingTool,
         private readonly SystemTool $systemTool,
         private readonly SearchTool $searchTool,
+        private readonly UndoRecorder $undoRecorder,
         private readonly ExternalIdTool $externalIdTool,
         private readonly MultilingualTool $multilingualTool,
         private readonly ContentTool $contentTool,
@@ -1673,6 +1676,84 @@ final class McpSmokeTestCommand extends Command
         $expect('search fixtures removed again',
             ['left' => (int) $this->connection->fetchOne('SELECT COUNT(*) FROM tl_search WHERE url LIKE ?', ['%mcp-smoke-search.local%'])],
             fn ($r) => 0 === $r['left']);
+
+        // ═══════════════════════ Undo snapshot ══════════════════════
+        // MCP deletions must end up in tl_undo, otherwise Contao's own backend
+        // undo cannot recover them (a version snapshot can't: restore is an
+        // UPDATE and the row is gone).
+        $output->writeln("\n<comment>Undo snapshot</comment>");
+
+        // NB: no `groups` column here — it is a MySQL reserved word and DBAL's
+        // insert() does not quote column keys. The DB default covers it.
+        $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => 'MCP smoke undo archive', 'jumpTo' => 0]);
+        $undoArchiveId = (int) $this->connection->lastInsertId();
+        $this->connection->insert('tl_news', ['pid' => $undoArchiveId, 'tstamp' => time(), 'headline' => 'MCP smoke undo news', 'alias' => 'mcp-smoke-undo-'.time(), 'date' => time(), 'time' => time(), 'published' => 1, 'author' => 1]);
+        $undoNewsId = (int) $this->connection->lastInsertId();
+        $this->connection->insert('tl_content', ['pid' => $undoNewsId, 'ptable' => 'tl_news', 'tstamp' => time(), 'type' => 'text', 'text' => '<p>MCP smoke undo body</p>', 'sorting' => 128]);
+        $undoContentId = (int) $this->connection->lastInsertId();
+
+        $expect('undo snapshot is skipped without confirm_destructive',
+            ['id' => $this->undoRecorder->beforeToolCall('news_delete', ['id' => $undoNewsId, 'confirm_destructive' => false])],
+            fn ($r) => 0 === $r['id']);
+
+        $expect('undo snapshot is skipped for non-deleting tools',
+            ['id' => $this->undoRecorder->beforeToolCall('news_list', [])],
+            fn ($r) => 0 === $r['id']);
+
+        $undoId = $this->undoRecorder->beforeToolCall('news_delete', ['id' => $undoNewsId, 'confirm_destructive' => true]);
+        $undoRow = $undoId > 0 ? $this->connection->fetchAssociative('SELECT * FROM tl_undo WHERE id = ?', [$undoId]) : false;
+        $undoData = \is_array($undoRow) ? StringUtil::deserialize((string) $undoRow['data']) : [];
+
+        $expect('delete is snapshotted into tl_undo, cascade included',
+            ['undo_id' => $undoId, 'row' => $undoRow, 'data' => $undoData],
+            fn ($r) => $r['undo_id'] > 0
+                && \is_array($r['row'])
+                && 'tl_news' === $r['row']['fromTable']
+                && 2 === (int) $r['row']['affectedRows']
+                && 1 === \count($r['data']['tl_news'] ?? [])
+                && 1 === \count($r['data']['tl_content'] ?? []));
+
+        $this->newsTool->delete($undoNewsId, true);
+
+        $expect('record and its content element are really gone',
+            [
+                'news' => $this->connection->fetchOne('SELECT id FROM tl_news WHERE id = ?', [$undoNewsId]),
+                'content' => $this->connection->fetchOne('SELECT id FROM tl_content WHERE id = ?', [$undoContentId]),
+            ],
+            fn ($r) => false === $r['news'] && false === $r['content']);
+
+        // Replay what the backend's undo does: re-insert every snapshotted row.
+        // Column names MUST be quoted — Contao's own undo goes through
+        // Database\Statement::set(), which quotes; a raw DBAL insert() would
+        // choke on reserved words like `groups`.
+        foreach ($undoData as $undoTable => $undoRows) {
+            foreach ($undoRows as $undoRowData) {
+                $columns = array_map(fn (string $col): string => $this->connection->quoteIdentifier($col), array_keys($undoRowData));
+                $this->connection->executeStatement(
+                    'INSERT INTO '.$this->connection->quoteIdentifier((string) $undoTable)
+                    .' ('.implode(', ', $columns).') VALUES ('.implode(', ', array_fill(0, \count($columns), '?')).')',
+                    array_values($undoRowData),
+                );
+            }
+        }
+
+        $expect('backend undo restores the record with its original id and body',
+            [
+                'news' => $this->connection->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [$undoNewsId]),
+                'content' => $this->connection->fetchAssociative('SELECT * FROM tl_content WHERE id = ?', [$undoContentId]),
+            ],
+            fn ($r) => \is_array($r['news']) && 'MCP smoke undo news' === $r['news']['headline']
+                && \is_array($r['content']) && str_contains((string) $r['content']['text'], 'MCP smoke undo body'));
+
+        $this->undoRecorder->discard($undoId);
+
+        $expect('discard() removes a snapshot again',
+            ['left' => $this->connection->fetchOne('SELECT id FROM tl_undo WHERE id = ?', [$undoId])],
+            fn ($r) => false === $r['left']);
+
+        $this->connection->delete('tl_content', ['id' => $undoContentId]);
+        $this->connection->delete('tl_news', ['id' => $undoNewsId]);
+        $this->connection->delete('tl_news_archive', ['id' => $undoArchiveId]);
 
         // ═══════════════════════ Cleanup ═══════════════════════════
         if (!$keep) {

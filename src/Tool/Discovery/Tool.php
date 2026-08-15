@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Discovery;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
+use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Server\ToolGroups;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
@@ -41,6 +42,7 @@ final class Tool
         private readonly LoggerInterface $logger,
         private readonly AuthorResolver $authorResolver,
         private readonly McpPermissionEnforcer $permissionEnforcer,
+        private readonly UndoRecorder $undoRecorder,
     ) {
     }
 
@@ -216,9 +218,15 @@ final class Tool
             return $denial;
         }
 
+        // Same reasoning as the permission check above: without this, deleting
+        // through the lazy-mode proxy would skip the undo snapshot that direct
+        // tools/call requests get.
+        $undoId = $this->undoRecorder->beforeToolCall($name, $arguments);
+
         try {
             $contentItems = $tool->call($this->container, $arguments);
         } catch (\Throwable $e) {
+            $this->undoRecorder->discard($undoId);
             $this->log(sprintf('contao_call(%s) failed: %s', $name, $e->getMessage()), __METHOD__);
 
             return [
@@ -232,7 +240,14 @@ final class Tool
         // Unwrap MCP Content[] back to the original PHP value the underlying
         // tool returned, so the LLM gets the same shape it would have gotten
         // from a direct tools/call (an object / array / scalar).
-        return self::unwrapContent($contentItems);
+        $result = self::unwrapContent($contentItems);
+
+        // The tool reported a problem → nothing was deleted, drop the snapshot.
+        if (\is_array($result) && isset($result['error'])) {
+            $this->undoRecorder->discard($undoId);
+        }
+
+        return $result;
     }
 
     // ─────────────────────────── helpers ────────────────────────────

@@ -6,6 +6,37 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.2.0] – 2026-08-14 — „KI-Löschungen sind im Backend wiederherstellbar"
+
+### Added
+- **Löschungen über MCP landen jetzt in `tl_undo`** — und damit im **normalen
+  Contao-Backend unter „Rückgängig"**. Vorher füllte nur Contaos eigener
+  `DC_Table::delete()` diese Tabelle; die MCP-Tools löschen über Models/DBAL,
+  eine von der KI gelöschte Seite war also **unwiederbringlich** (auch der
+  Versions-Snapshot hilft dort nicht: ein Restore ist ein `UPDATE`, und die
+  Zeile existiert nicht mehr).
+- Der Snapshot umfasst wie im Backend **den Datensatz samt Kind-Datensätzen** —
+  DCA-`ctable`-Relationen inklusive `dynamicPtable` (Inhaltselemente) und
+  Baumstrukturen (eine gelöschte Seite nimmt ihre Unterseiten mit). Er wird dem
+  **handelnden Backend-Benutzer** zugeordnet, weshalb Contaos `UndoVoter` ihn
+  genau der Person zeigt, in deren Sitzung gelöscht wurde.
+
+### Notes
+- **Bewusst gibt es kein `undo_restore`-Tool.** Wiederherstellen bleibt eine
+  menschliche Handlung im Backend: Die KI darf löschen, aber nicht
+  stillschweigend wieder herstellen — und Contaos Oberfläche dafür existiert
+  bereits, sie war für MCP-Löschungen nur leer.
+- Verdrahtet an den **zwei** Stellen, die auch die Rechteprüfung durchsetzen
+  (Controller und Lazy-Mode-Proxy `contao_call`), statt in 21 Löschmethoden —
+  damit sind auch künftige Lösch-Tools automatisch abgedeckt. Tabelle und ID
+  kommen aus derselben Auflösung wie die Rechteprüfung.
+- Ein Snapshot wird **wieder verworfen**, wenn das Tool doch nicht löscht
+  (fehlendes `confirm_destructive`, Datensatz nicht gefunden, Kaskadensperre,
+  Fehler) — sonst stünde im Backend ein Eintrag, der nicht existierende
+  Löschungen anbietet.
+- Schlägt das Snapshotten fehl, wird es **protokolliert, aber nicht blockiert**:
+  Die vom Benutzer angeforderte Aktion läuft weiter (Verhalten wie bisher).
+
 ## [1.1.0] – 2026-08-14 — „Volltextsuche über die Website"
 
 ### Added

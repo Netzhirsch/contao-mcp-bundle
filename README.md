@@ -49,6 +49,10 @@ System-Einstellungen.
   `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`).
 - **Author-Pass-Through**: Writes laufen unter dem echten OAuth-User in
   `tl_log` + `tl_version`.
+- **Löschungen sind rückholbar**: Was die KI löscht, landet inklusive
+  Kind-Datensätzen in `tl_undo` — wiederherstellbar über **Contaos normales
+  „Rückgängig"** im Backend. Wiederherstellen bleibt bewusst Handarbeit: Die KI
+  kann löschen, aber nichts stillschweigend zurückholen.
 - **Backend-Modul** „MCP-Server" mit vier Bereichen: Status (Lizenz + Testphase/
   Abo starten, OAuth-Clients, IATs), Konfiguration, Aktivitätslog, Tool-Panel
   (jedes Tool einzeln abschaltbar) — **nur für Contao-Administratoren**.
