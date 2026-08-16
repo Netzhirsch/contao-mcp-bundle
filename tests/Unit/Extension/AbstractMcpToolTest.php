@@ -17,6 +17,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\Security\Core\Authorization\AccessDecisionManagerInterface;
+use Symfony\Component\Security\Core\User\UserCheckerInterface;
 use Symfony\Component\Security\Core\User\UserProviderInterface;
 
 /**
@@ -109,7 +110,12 @@ final class AbstractMcpToolTest extends TestCase
     {
         return new McpPermissionGuard(
             $context,
-            new BackendUserContext($this->createMock(UserProviderInterface::class), $this->createMock(Connection::class)),
+            new BackendUserContext(
+                $this->createMock(UserProviderInterface::class),
+                $this->createMock(Connection::class),
+                $this->createMock(UserCheckerInterface::class),
+                new NullLogger(),
+            ),
             $this->createMock(AccessDecisionManagerInterface::class),
             $this->createMock(Connection::class),
             $this->createMock(ContaoFramework::class),

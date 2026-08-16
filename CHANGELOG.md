@@ -6,6 +6,15 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.2.2] – 2026-08-16
+
+### Fixed
+- **PHPUnit-Suite repariert.** Der Sicherheitsfix in 1.2.1 erweiterte den
+  Konstruktor von `BackendUserContext` um Contaos `UserChecker` und einen Logger;
+  ein Unit-Test instanziiert die Klasse direkt und lief dadurch in einen
+  `ArgumentCountError` (4 Fehler, CI rot). Nur Testcode betroffen — die
+  ausgelieferte Funktionalität von 1.2.1 war und ist in Ordnung.
+
 ## [1.2.1] – 2026-08-14 — Sicherheitsfix
 
 Beide Punkte wurden von außen gemeldet ([#1](https://github.com/Netzhirsch/contao-mcp-bundle/issues/1),
