@@ -2,20 +2,43 @@
 #
 # Refuses to push a tree that would turn CI red.
 #
-# Deliberately delegates to `composer verify` instead of listing the checks
-# again: one definition, so the hook can never drift away from what CI runs.
-# PHPStan + PHPUnit take a few seconds; the smoke test is NOT included — it
-# needs a live Contao + database and would make pushing unbearable.
+# Delegates to `composer verify` instead of listing the checks again: one
+# definition, so the hook cannot drift away from what CI runs. PHPStan + PHPUnit
+# take a few seconds; the smoke test is NOT included — it needs a live Contao +
+# database and would make pushing unbearable.
 #
 # Activate once per clone:   composer setup-hooks
 # Skip in an emergency:      git push --no-verify
+#
+# If composer is not on your PATH (Laragon ships it as a .phar), tell the hook
+# how to call it once:
+#   git config hooks.composer "/c/laragon/bin/php/php-8.3.30-Win32-vs16-x64/php.exe /c/laragon/bin/composer/composer.phar"
 set -e
 
-if ! command -v composer >/dev/null 2>&1; then
-    echo "pre-push: composer not found — skipping checks"
+COMPOSER_CMD="$(git config hooks.composer 2>/dev/null || true)"
+
+if [ -z "$COMPOSER_CMD" ]; then
+    if command -v composer >/dev/null 2>&1; then
+        COMPOSER_CMD="composer"
+    elif command -v composer.phar >/dev/null 2>&1; then
+        COMPOSER_CMD="composer.phar"
+    fi
+fi
+
+if [ -z "$COMPOSER_CMD" ]; then
+    # Do not block the push — a machine without composer may legitimately be
+    # pushing docs. But say it loudly: a check that fails silently is worse
+    # than no check, because it buys false confidence.
+    echo "┌──────────────────────────────────────────────────────────────┐" >&2
+    echo "│ pre-push: composer NOT FOUND — PHPStan/PHPUnit did NOT run.  │" >&2
+    echo "│ CI may go red. Set it up once:                               │" >&2
+    echo "│   git config hooks.composer \"<how you call composer>\"        │" >&2
+    echo "└──────────────────────────────────────────────────────────────┘" >&2
     exit 0
 fi
 
 echo "pre-push: composer verify …"
-composer verify --quiet
+# Unquoted on purpose: hooks.composer may be "php composer.phar", i.e. two words.
+# shellcheck disable=SC2086
+$COMPOSER_CMD verify --quiet
 echo "pre-push: OK"
