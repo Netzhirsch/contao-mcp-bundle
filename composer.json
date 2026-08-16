@@ -66,6 +66,18 @@
         "terminal42/contao-leads": "Required for leads_list + lead_get (read-only access to form submissions).",
         "terminal42/contao-url-rewrite": "Required for url_rewrite_* tools."
     },
+    "scripts": {
+        "//php-note": "All entries go through @php so they use Composer's own PHP binary — on Windows/Laragon `php` is usually not in PATH and a bare `phpstan` would fail.",
+        "phpstan": "@php vendor/bin/phpstan.phar analyse --no-progress",
+        "unit-tests": "@php vendor/bin/phpunit",
+        "//verify": "Everything that must be green BEFORE tagging a release. One command, so nothing can be left out by accident — the smoke test runs separately against a real Contao (see README).",
+        "verify": [
+            "@phpstan",
+            "@unit-tests"
+        ],
+        "//setup-hooks": "One-time per clone: route git hooks to .githooks/ so pre-push refuses to push a red tree.",
+        "setup-hooks": "git config core.hooksPath .githooks && echo \"git hooks active (.githooks)\""
+    },
     "autoload": {
         "psr-4": {
             "Netzhirsch\\ContaoMcpBundle\\": "src/"

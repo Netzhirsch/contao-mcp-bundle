@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+#
+# Refuses to push a tree that would turn CI red.
+#
+# Deliberately delegates to `composer verify` instead of listing the checks
+# again: one definition, so the hook can never drift away from what CI runs.
+# PHPStan + PHPUnit take a few seconds; the smoke test is NOT included — it
+# needs a live Contao + database and would make pushing unbearable.
+#
+# Activate once per clone:   composer setup-hooks
+# Skip in an emergency:      git push --no-verify
+set -e
+
+if ! command -v composer >/dev/null 2>&1; then
+    echo "pre-push: composer not found — skipping checks"
+    exit 0
+fi
+
+echo "pre-push: composer verify …"
+composer verify --quiet
+echo "pre-push: OK"

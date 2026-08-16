@@ -305,6 +305,32 @@ Empfehlung: `tar` über `var/mcp/` + mysqldump auf die fünf
 (External-ID-Spalten leben auf Entity-Tabellen, kein eigener Backup-
 Container möglich).
 
+## Entwicklung: Prüfkette vor einem Release
+
+```bash
+composer verify
+```
+
+Bündelt PHPStan + PHPUnit — genau das, was die CI fährt. Einmal pro Klon
+`composer setup-hooks` ausführen: Danach lehnt ein `pre-push`-Hook einen Push ab,
+der die CI rot machen würde (`git push --no-verify` umgeht ihn im Notfall).
+
+Der **Smoke-Test** braucht ein laufendes Contao samt Datenbank und ist deshalb
+nicht Teil davon — er gehört vor jeden Release-Tag:
+
+```bash
+vendor/bin/contao-console contao:mcp:smoke-test --env=dev
+```
+
+Reihenfolge für einen Release: `composer verify` → Smoke-Test → committen →
+pushen → **CI grün abwarten** → erst dann taggen.
+
+## Sicherheitslücken melden
+
+Bitte **nicht** über ein öffentliches Issue, sondern über die
+[Security-Policy](SECURITY.md) (GitHub Security Advisory oder
+<kalus@netzhirsch.de>).
+
 ## Bug-Reports
 
 Issues / Findings bitte ins Repo, plus Anhang:

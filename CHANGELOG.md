@@ -6,6 +6,18 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **`SECURITY.md`** — privater Meldeweg für Sicherheitslücken (GitHub Security
+  Advisory oder E-Mail) statt eines öffentlichen Issues, dazu Reaktionszeiten,
+  Geltungsbereich und die bewusst akzeptierten Grenzen (patchbares Gate,
+  `auth_mode=none`).
+- **`composer verify`** — PHPStan + PHPUnit in einem Kommando, identisch zur CI.
+  Dazu `composer setup-hooks`: aktiviert einen **`pre-push`-Hook**, der Pushes
+  ablehnt, die die CI rot machen würden. Anlass war 1.2.2 — die Konstruktor-
+  Änderung aus 1.2.1 hatte die PHPUnit-Suite gebrochen, weil vor dem Tag nur
+  PHPStan und der Smoke-Test liefen. Der Hook delegiert an `composer verify`,
+  damit beide nicht auseinanderdriften können.
+
 ## [1.2.2] – 2026-08-16
 
 ### Fixed
