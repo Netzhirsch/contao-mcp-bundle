@@ -6,6 +6,37 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.2.1] – 2026-08-14 — Sicherheitsfix
+
+Beide Punkte wurden von außen gemeldet ([#1](https://github.com/Netzhirsch/contao-mcp-bundle/issues/1),
+danke an [@zoglo](https://github.com/zoglo)).
+
+### Security
+- **Gesperrte Backend-Konten hatten weiterhin MCP-Zugriff.**
+  `BackendUserContext::tokenFor()` lud den Benutzer über den User-Provider und
+  baute den Security-Token selbst — Contaos **`UserChecker`** lief dabei nie, und
+  der ist es, der `disable`, die Login-Erlaubnis und das `start`/`stop`-Zeitfenster
+  durchsetzt. Ein Konto zu deaktivieren (der Standardweg beim Offboarding)
+  **kappte den MCP-Zugang also nicht**; wer noch ein gültiges OAuth-Token hatte,
+  arbeitete mit alten Rechten weiter. Jetzt wird Contaos Checker gefragt, sowohl
+  beim Auflösen des Tokens als auch am groben Zugriffs-Gate (sonst blieben Tools
+  ohne Datensatz-Recht, etwa Discovery, offen).
+  *Regression:* die frühere statische Token-Auth hatte `disable` und Start/Stop
+  noch geprüft; beim Umbau auf OAuth ging das verloren.
+- **Keine rohen Exception-Meldungen mehr nach außen.** Betroffen waren der
+  MCP-Controller (2 Stellen), der `contao_call`-Proxy und — am unangenehmsten —
+  der **unauthentifizierte** `/mcp/healthz`, der bei DB-Ausfall die
+  DBAL-Meldung samt Host, Datenbank und Benutzer auslieferte. Ab jetzt: volle
+  Exception ins Log, nach außen eine generische Meldung mit **Korrelations-ID**,
+  die in Antwort und Logzeile steht (Support bleibt möglich).
+  Die OAuth-Endpunkte bleiben unverändert — dort werden gezielt
+  `OAuthServerException`s gefangen, deren Texte die standardisierten
+  OAuth-Fehlerbeschreibungen für Clients sind.
+
+### Tests
+- Zwei neue Smoke-Test-Prüfungen mit einem eigens angelegten **gesperrten**
+  Benutzer (eigene ID, weil `BackendUserContext` je Request cacht). 237 Asserts.
+
 ## [1.2.0] – 2026-08-14 — „KI-Löschungen sind im Backend wiederherstellbar"
 
 ### Added

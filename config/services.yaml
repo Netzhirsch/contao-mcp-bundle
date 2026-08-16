@@ -127,6 +127,11 @@ services:
     Netzhirsch\ContaoMcpBundle\Security\BackendUserContext:
         arguments:
             $backendUserProvider: '@contao.security.backend_user_provider'
+            # Contao's own checker (disabled account, login allowed, start/stop
+            # window). Bound explicitly: UserCheckerInterface is ambiguous —
+            # Symfony's InMemoryUserChecker is registered under it as well and
+            # would silently accept everything.
+            $backendUserChecker: '@contao.security.user_checker'
 
     # Per-request identity holder. Filled by the OAuth validator before tool
     # dispatch, read by AuthorResolver for tl_log + tl_version attribution.

@@ -227,13 +227,18 @@ final class Tool
             $contentItems = $tool->call($this->container, $arguments);
         } catch (\Throwable $e) {
             $this->undoRecorder->discard($undoId);
-            $this->log(sprintf('contao_call(%s) failed: %s', $name, $e->getMessage()), __METHOD__);
+
+            // Same reasoning as in McpController::opaqueError(): an unexpected
+            // exception can carry SQL fragments or paths. Tools report their own
+            // *expected* errors as structured results — those are unaffected and
+            // still tell the model exactly what to fix.
+            $reference = bin2hex(random_bytes(4));
+            $this->log(sprintf('contao_call(%s) failed [ref %s]: %s', $name, $reference, $e->getMessage()), __METHOD__);
 
             return [
                 'error' => 'tool_failed',
                 'tool' => $name,
-                'message' => $e->getMessage(),
-                'class' => $e::class,
+                'message' => sprintf('Internal error while running "%s" (reference %s). See the Contao application log.', $name, $reference),
             ];
         }
 

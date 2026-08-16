@@ -234,10 +234,9 @@ final class McpController
                 ['Access-Control-Allow-Origin' => '*'],
             );
         } catch (\Throwable $e) {
-            $this->logger->error('MCP controller dispatch failed.', ['exception' => $e]);
             return $this->errorResponse(
                 $message instanceof JsonRpcRequest ? $message->getId() : null,
-                McpServerException::internalError($e->getMessage()),
+                McpServerException::internalError($this->opaqueError($e, 'MCP controller dispatch failed.')),
             );
         }
     }
@@ -368,7 +367,9 @@ final class McpController
                 if (!$this->isTransientCacheError($e)) {
                     $this->undoRecorder->discard($undoId);
 
-                    return McpServerException::internalError($e->getMessage())->toJsonRpcError($id);
+                    return McpServerException::internalError(
+                        $this->opaqueError($e, 'MCP tool dispatch failed.'),
+                    )->toJsonRpcError($id);
                 }
                 // Transient: the dispatch is retried, so the snapshot must stay.
                 $lastError = $e;
@@ -387,6 +388,23 @@ final class McpController
             'Transient filesystem error (DCA cache busy) persisted after '.self::DCA_CACHE_RACE_RETRIES.' attempts: '
             .$lastError->getMessage(),
         )->toJsonRpcError($id);
+    }
+
+    /**
+     * Log the real exception and hand the caller a message that says what to do
+     * without saying what broke.
+     *
+     * Raw `getMessage()` output travels straight to the MCP client and readily
+     * contains SQL fragments, file paths or connection details. The reference
+     * keeps support workable: it appears in this response AND in the log line.
+     */
+    private function opaqueError(\Throwable $e, string $context): string
+    {
+        $reference = bin2hex(random_bytes(4));
+
+        $this->logger->error($context, ['exception' => $e, 'reference' => $reference]);
+
+        return \sprintf('Internal server error (reference %s). See the Contao application log for details.', $reference);
     }
 
     /**

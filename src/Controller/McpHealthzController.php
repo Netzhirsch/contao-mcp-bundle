@@ -8,6 +8,7 @@ use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\OAuth\KeyManager;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Annotation\Route;
 
@@ -61,6 +62,7 @@ final class McpHealthzController
         private readonly McpServerConfigStorage $configStorage,
         private readonly KeyManager $keyManager,
         private readonly string $projectDir,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -126,11 +128,16 @@ final class McpHealthzController
             $result = $this->connection->fetchOne('SELECT 1');
             $ok = $result == 1 || $result === '1';
         } catch (\Throwable $e) {
+            // This endpoint is public. A DBAL connection error carries host,
+            // port, database and user ("Access denied for user 'x'@'host'") —
+            // that belongs in the log, not in an unauthenticated response.
+            $this->logger->error('MCP healthz: database check failed.', ['exception' => $e]);
+
             return [
                 'name' => 'database',
                 'ok' => false,
                 'latency_ms' => round((microtime(true) - $start) * 1000, 2),
-                'error' => $e->getMessage(),
+                'error' => 'not reachable (see the application log for details)',
             ];
         }
 

@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Security;
 
 use Doctrine\DBAL\Connection;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
+use Symfony\Component\Security\Core\Exception\AccountStatusException;
 use Symfony\Component\Security\Core\Exception\UserNotFoundException;
+use Symfony\Component\Security\Core\User\UserCheckerInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Security\Core\User\UserProviderInterface;
 
@@ -39,6 +42,8 @@ final class BackendUserContext
     public function __construct(
         private readonly UserProviderInterface $backendUserProvider,
         private readonly Connection $connection,
+        private readonly UserCheckerInterface $backendUserChecker,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -68,6 +73,24 @@ final class BackendUserContext
             return $this->tokenCache[$userId] = null;
         }
 
+        // The user provider only LOADS the account — on a real login it is
+        // Contao's UserChecker that rejects disabled accounts, accounts outside
+        // their start/stop window and users not allowed to log in. Since we
+        // build the token ourselves, that check would never run: disabling a
+        // backend account (the standard offboarding step) would not cut off MCP
+        // access. Delegating to the same checker keeps us in step with Contao's
+        // rules instead of hand-rolling a `disable = 0` condition.
+        try {
+            $this->backendUserChecker->checkPreAuth($user);
+        } catch (AccountStatusException $e) {
+            $this->logger->info(
+                'MCP: rejected backend user because the account is not usable.',
+                ['user_id' => $userId, 'reason' => $e::class],
+            );
+
+            return $this->tokenCache[$userId] = null;
+        }
+
         return $this->tokenCache[$userId] = new UsernamePasswordToken($user, self::FIREWALL, $user->getRoles());
     }
 
@@ -91,6 +114,13 @@ final class BackendUserContext
     {
         if (\array_key_exists($userId, $this->mcpAccessCache)) {
             return $this->mcpAccessCache[$userId];
+        }
+
+        // Same gate as above, applied to the COARSE check as well: without it a
+        // disabled user would still pass tools that need no per-record
+        // permission (discovery, health probes).
+        if ($this->tokenFor($userId) === null) {
+            return $this->mcpAccessCache[$userId] = false;
         }
 
         if ($this->isAdmin($userId)) {

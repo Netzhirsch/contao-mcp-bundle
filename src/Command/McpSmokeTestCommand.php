@@ -1538,6 +1538,32 @@ final class McpSmokeTestCommand extends Command
                 $expect('non-admin still sees discovery/meta tools (ping)',
                     $this->permissionEnforcer->isToolVisible('ping'), fn ($r) => $r === true);
 
+                // (d3) A DISABLED account gets nothing — disabling a backend user
+                // is the standard offboarding step, and it has to cut MCP access
+                // too. Contao's UserChecker owns that rule (disable, login
+                // allowed, start/stop); we only get it by asking the checker.
+                // Reported from outside as issue #1.
+                // A separate user id on purpose: BackendUserContext caches per id
+                // within the request, so flipping the flag on the user above
+                // would not be observed here.
+                $row['username'] = $stamp.'_disableduser';
+                $row['email'] = $stamp.'_disabled@example.invalid';
+                $row['disable'] = 1;
+                $quotedDisabled = [];
+                foreach ($row as $col => $val) {
+                    $quotedDisabled[$this->connection->quoteIdentifier((string) $col)] = $val;
+                }
+                $this->connection->insert('tl_user', $quotedDisabled);
+                $disabledUserId = (int) $this->connection->lastInsertId();
+
+                $this->mcpCallContext->setIdentity($disabledUserId, 'smoke-disabled', null, null);
+                $expect('disabled backend user is denied the MCP-access gate',
+                    $this->permissionGuard->ensureMcpAccess(),
+                    fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'mcp_access_denied');
+                $expect('disabled backend user resolves to no security token',
+                    ['denial' => $this->permissionGuard->ensureCan('tl_page', 'read', 1)],
+                    fn ($r) => \is_array($r['denial']) && ($r['denial']['error'] ?? null) === 'permission_denied');
+
                 // (e) Trusted mode (auth_mode=none → no identity) allows everything.
                 $this->mcpCallContext->clear();
                 $expect('trusted mode (no identity) allows page create', $this->permissionGuard->ensureCan('tl_page', 'create', null, ['title' => 'x']), fn ($r) => $r === null);
@@ -1545,6 +1571,9 @@ final class McpSmokeTestCommand extends Command
                 $this->mcpCallContext->clear();
                 if ($tempUserId > 0) {
                     $this->connection->delete('tl_user', ['id' => $tempUserId]);
+                }
+                if (($disabledUserId ?? 0) > 0) {
+                    $this->connection->delete('tl_user', ['id' => $disabledUserId]);
                 }
             }
         } else {
