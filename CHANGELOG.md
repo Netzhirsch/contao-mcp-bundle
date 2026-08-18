@@ -6,6 +6,24 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Removed
+- **Der Knopf „IAT erzeugen" ist weg.** Ein Initial Access Token automatisierte
+  nur die *Registrierung*, nie die Autorisierung: Es gibt ausschließlich die
+  Grants `authorization_code` und `refresh_token`, und `/authorize` verlangt
+  einen eingeloggten Backend-User. Der Knopf sparte also genau einen Klick
+  (das Öffnen des Pairing-Fensters) — und zwar nur für Aufrufer, die einen
+  HTTP-Header setzen können. Dafür kostete er jeden anderen einen plausibel
+  aussehenden Irrweg, wie diese Woche mehrfach in der Praxis.
+
+  Was bleibt: Der Registrierungs-Endpunkt akzeptiert ein noch gültiges Token
+  aus dem Altbestand weiter, und die Liste zeigt es bis zum Ablauf. Neue
+  werden nicht mehr ausgegeben. Damit verweist auch die Ablehnungsmeldung
+  nicht mehr auf das IAT — sie nennt nur noch das Pairing-Fenster, sonst
+  zeigte sie auf etwas, das niemand mehr erzeugen kann.
+
+  `PairingWordingTest` hält fest, dass weder Template noch Backend-Modul die
+  Erzeugung wieder anbieten.
+
 ## [1.5.0] – 2026-08-18
 
 > **Update von ≤ 1.4.0: kein Handlungsbedarf.** `composer update` läuft durch,

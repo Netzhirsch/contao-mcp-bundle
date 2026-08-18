@@ -73,6 +73,28 @@ final class PairingWordingTest extends TestCase
     }
 
     /**
+     * The backend no longer offers a way to generate an Initial Access Token.
+     *
+     * It only ever automated the registration step — never the authorization,
+     * which still needs a backend login and consent because the only grants
+     * are authorization_code and refresh_token. So the button saved exactly
+     * one click (opening the pairing window) for callers able to set an HTTP
+     * header, while costing every other operator a plausible-looking wrong
+     * turn. Existing tokens stay listed until they expire; nothing issues new
+     * ones.
+     */
+    public function testTheBackendOffersNoWayToGenerateAnAccessToken(): void
+    {
+        foreach (['contao/templates/backend/be_mcp_status.html5', 'src/Backend/Module/ModuleMcpStatus.php'] as $path) {
+            self::assertStringNotContainsString(
+                'generate_iat',
+                (string) file_get_contents(self::ROOT.'/'.$path),
+                "$path still exposes IAT generation.",
+            );
+        }
+    }
+
+    /**
      * Saying what is NOT true is only half the job — the operator still has
      * to be told where to click.
      */

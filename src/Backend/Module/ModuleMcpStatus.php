@@ -88,9 +88,6 @@ class ModuleMcpStatus extends AbstractMcpModule
             case 'close_pairing':
                 $this->handlePairingWindow($configStorage, false);
                 break;
-            case 'generate_iat':
-                $this->handleGenerateIat($container->get(InitialAccessTokenManager::class));
-                break;
             case 'revoke_client':
                 $this->handleRevokeClient($container->get(OAuthClientAdministration::class));
                 break;
@@ -301,21 +298,6 @@ class ModuleMcpStatus extends AbstractMcpModule
         } else {
             Message::addConfirmation($this->translate('pairing_closed', 'Pairing window closed.'));
         }
-
-        $this->redirectSelf();
-    }
-
-    private function handleGenerateIat(InitialAccessTokenManager $iat): void
-    {
-        $user = System::getContainer()->get('security.helper')->getUser();
-        $userId = $user instanceof BackendUser ? (int) $user->id : 0;
-
-        $result = $iat->generate($userId, 3600);
-        Message::addConfirmation(\sprintf(
-            '%s: <code>%s</code>',
-            $this->translate('iat_generated', 'New Initial Access Token (copy now — won\'t be shown again)'),
-            StringUtil::specialchars($result['plain']),
-        ));
 
         $this->redirectSelf();
     }

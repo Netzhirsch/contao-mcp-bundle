@@ -74,9 +74,7 @@
       <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.</source></trans-unit>
       <trans-unit id="mcp_server.pairing_closed"><source>Pairing window closed.</source></trans-unit>
       <trans-unit id="mcp_server.status_registration"><source>Client registration</source></trans-unit>
-      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens (scripts only)</source></trans-unit>
-      <trans-unit id="mcp_server.oauth_iat_help"><source>For scripts and automation only, and only where an Authorization header can be sent during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. Claude and mcp-remote cannot use this — they need the pairing window.</source></trans-unit>
-      <trans-unit id="mcp_server.button_generate_iat"><source>Generate IAT (scripts only)</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens (legacy, no longer issued)</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_id"><source>ID</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_created"><source>Created</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_expires"><source>Expires</source></trans-unit>
@@ -96,7 +94,6 @@
       <trans-unit id="mcp_server.oauth_clients_col_created"><source>Registered</source></trans-unit>
       <trans-unit id="mcp_server.oauth_client_confirm_revoke"><source>Revoke this client? All access + refresh tokens will be invalidated.</source></trans-unit>
       <trans-unit id="mcp_server.button_revoke_client"><source>Revoke</source></trans-unit>
-      <trans-unit id="mcp_server.iat_generated"><source>Initial Access Token generated. Copy it now — it will NOT be shown again: %s</source></trans-unit>
       <trans-unit id="mcp_server.client_revoke_missing_id"><source>Client ID missing — please use the Revoke button next to a client.</source></trans-unit>
       <trans-unit id="mcp_server.client_revoked"><source>Client "%s" revoked. All its tokens are now invalid.</source></trans-unit>
       <trans-unit id="mcp_server.client_not_found"><source>Client "%s" not found.</source></trans-unit>

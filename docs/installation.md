@@ -62,7 +62,7 @@ Beide Varianten durchlaufen automatisch dieselbe Kette:
 Standardmäßig verlangt die Client-Registrierung eine Freigabe. Zwei Wege:
 
 - **Pairing-Fenster (der Normalweg für Menschen):** Menüpunkt **MCP-Server → Status** → _„Registrierung für 15 Minuten öffnen"_, Client innerhalb des Fensters verbinden. Schließt nach 15 Minuten automatisch — kein Umstellen, kein Zurückstellen-Vergessen. Abgewiesene Versuche stehen mit Grund unter **MCP-Server → Aktivität**. Auch ein im Fenster registrierter Client erhält erst nach Backend-Login + Consent ein Token.
-- **Initial Access Token (für Skripte/Automation):** Menüpunkt **MCP-Server → Status** → _„Neues IAT erzeugen"_; das Skript sendet es bei der Registrierung als `Authorization: Bearer iat_…`. 1 h gültig, genau einmal einlösbar. Standard-MCP-Clients können diesen Header NICHT senden — für die nimm das Pairing-Fenster.
+- **Initial Access Token:** wird nicht mehr ausgegeben. Ein IAT konnte ohnehin nur die Registrierung automatisieren, nie die Autorisierung — auch danach musste ein Mensch sich im Backend anmelden und zustimmen. Das Pairing-Fenster ist der einzige Weg.
 
 Registrierte Clients bleiben dauerhaft verbunden (Refresh-Token), bis sie im Menüpunkt **MCP-Server → Status** widerrufen werden.
 

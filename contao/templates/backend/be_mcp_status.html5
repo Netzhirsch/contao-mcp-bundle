@@ -26,9 +26,6 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
     <?php elseif ($isOauth && $regRestricted): ?>
         <a href="<?= $actionLink('close_pairing') ?>" class="header_toggle"><?= $t('button_close_pairing', 'Close window now') ?></a>
     <?php endif; ?>
-    <?php if ($isOauth): ?>
-        <a href="<?= $actionLink('generate_iat') ?>" class="header_new" title="<?= htmlspecialchars($t('oauth_iat_help', 'For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. Claude and mcp-remote cannot use this — they need the pairing window.')) ?>"><?= $t('button_generate_iat', 'Generate IAT (scripts only)') ?></a>
-    <?php endif; ?>
     <?php
     // License / subscription actions. The license server URL is baked into the
     // bundle (RenewalClient::DEFAULT_LICENSE_SERVER_URL), so a server is always
@@ -150,7 +147,7 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
 <?php if ($isOauth): ?>
 
 <?php if (!empty($this->oauthIats)): ?>
-<h2 class="sub_headline" style="margin-top:1.5em;"><?= $t('oauth_iat_title', 'Initial Access Tokens (scripts only)') ?></h2>
+<h2 class="sub_headline" style="margin-top:1.5em;"><?= $t('oauth_iat_title', 'Initial Access Tokens (legacy, no longer issued)') ?></h2>
 <div class="tl_listing_container list_view">
     <table class="tl_listing showColumns">
         <thead>

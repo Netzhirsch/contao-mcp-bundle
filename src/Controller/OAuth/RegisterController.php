@@ -82,7 +82,7 @@ final class RegisterController
                 return $this->refuse(
                     $request,
                     'invalid_token',
-                    'Client registration is closed. Open the pairing window in MCP-Server → Status (button: "Registrierung für 15 Minuten öffnen") and connect the client while it is open. Scripts that can send an Authorization header during registration may present an Initial Access Token instead.',
+                    'Client registration is closed. Open the pairing window in MCP-Server → Status (button: "Registrierung für 15 Minuten öffnen") and connect the client while it is open.',
                     401,
                 );
             }

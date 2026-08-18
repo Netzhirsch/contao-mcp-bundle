@@ -78,9 +78,7 @@
       <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.</source><target>Die Client-Registrierung ist bis %s geöffnet — verbinde jetzt deinen MCP-Client. Das Fenster schließt sich nach der ersten erfolgreichen Registrierung automatisch.</target></trans-unit>
       <trans-unit id="mcp_server.pairing_closed"><source>Pairing window closed.</source><target>Pairing-Fenster geschlossen.</target></trans-unit>
       <trans-unit id="mcp_server.status_registration"><source>Client registration</source><target>Client-Registrierung</target></trans-unit>
-      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens (scripts only)</source><target>Initial Access Tokens (nur für Skripte)</target></trans-unit>
-      <trans-unit id="mcp_server.oauth_iat_help"><source>For scripts and automation only, and only where an Authorization header can be sent during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. Claude and mcp-remote cannot use this — they need the pairing window.</source><target>Nur für Skripte und Automationen, die bei der Registrierung einen Authorization-Header senden können: Einmal-Token generieren und als `Authorization: Bearer iat_…` mitsenden. Jeder Token verfällt nach 1 Stunde und ist genau einmal nutzbar. Claude und mcp-remote können damit nichts anfangen — die brauchen das Pairing-Fenster.</target></trans-unit>
-      <trans-unit id="mcp_server.button_generate_iat"><source>Generate IAT (scripts only)</source><target>IAT erzeugen (nur für Skripte)</target></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens (legacy, no longer issued)</source><target>Initial Access Tokens (Altbestand, werden nicht mehr ausgegeben)</target></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_id"><source>ID</source><target>ID</target></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_created"><source>Created</source><target>Erstellt</target></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_expires"><source>Expires</source><target>Läuft ab</target></trans-unit>
@@ -100,7 +98,6 @@
       <trans-unit id="mcp_server.oauth_clients_col_created"><source>Registered</source><target>Registriert</target></trans-unit>
       <trans-unit id="mcp_server.oauth_client_confirm_revoke"><source>Revoke this client? All access + refresh tokens will be invalidated.</source><target>Diesen Client widerrufen? Alle Access- und Refresh-Tokens werden ungültig.</target></trans-unit>
       <trans-unit id="mcp_server.button_revoke_client"><source>Revoke</source><target>Widerrufen</target></trans-unit>
-      <trans-unit id="mcp_server.iat_generated"><source>Initial Access Token generated. Copy it now — it will NOT be shown again: %s</source><target>Initial Access Token erzeugt. Jetzt kopieren — es wird NICHT erneut angezeigt: %s</target></trans-unit>
       <trans-unit id="mcp_server.client_revoke_missing_id"><source>Client ID missing — please use the Revoke button next to a client.</source><target>Client-ID fehlt — bitte den Widerrufen-Button neben einem Client benutzen.</target></trans-unit>
       <trans-unit id="mcp_server.client_revoked"><source>Client "%s" revoked. All its tokens are now invalid.</source><target>Client „%s" widerrufen. Alle zugehörigen Tokens sind jetzt ungültig.</target></trans-unit>
       <trans-unit id="mcp_server.client_not_found"><source>Client "%s" not found.</source><target>Client „%s" nicht gefunden.</target></trans-unit>

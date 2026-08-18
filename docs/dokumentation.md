@@ -325,7 +325,7 @@ Zusätzlich muss MCP pro Benutzer freigeschaltet sein: das Feld _„MCP-Server-Z
 
 Der Registrierungsmodus steht in `var/mcp/config.json` (`oauth_registration_mode`, Standard `restricted`) und hat bewusst kein Formularfeld mehr — neue Clients verbindet man über das Pairing-Fenster, Skripte über IATs. Die zwei Modi:
 
-- **Eingeschränkt (Standard)** — `POST /_mcp_oauth/register` verlangt einen einmaligen _Initial Access Token_ (IAT) als `Authorization: Bearer iat_…`. Der IAT ist 1h gültig, wird genau einmal eingelöst und ist danach gesperrt. Das ist der Weg für **Skripte/Automationen**, die Header senden können — Standard-MCP-Clients (mcp-remote, Claude Desktop) können das bei der Registrierung NICHT.
+- **Eingeschränkt (Standard)** — `POST /_mcp_oauth/register` wird nur angenommen, während das Pairing-Fenster offen ist (oder mit einem noch gültigen Initial Access Token aus dem Altbestand; neue werden nicht mehr ausgegeben). Das Fenster ist damit der Weg für **jeden** Client.
 - **Offen** — entspricht dem RFC-7591-Default: jeder, der die URL erreicht, darf einen Client registrieren. Praktisch fürs schnelle Testen, aber auf öffentlich erreichbaren Servern nicht zu empfehlen.
 
 **Pairing-Fenster (empfohlener Weg für neue Clients):** Der Button _„Registrierung für 15 Minuten öffnen"_ (Menüpunkt **MCP-Server → Status**, Abschnitt „Neuen Client verbinden") lässt im „Eingeschränkt"-Modus vorübergehend anonyme Registrierungen zu — 15 Minuten lang, egal wie viele Versuche das kostet. Danach verriegelt sich das Fenster selbst; das frühere manuelle Umschalten auf „Offen" (und das Zurückstellen-Vergessen) entfällt. Bis 1.4.0 schloss es zusätzlich nach der ersten erfolgreichen Registrierung — genau das ließ Retrys und zweite Clients ins Leere laufen. Sicherheitsnetz: Auch ein im Fenster registrierter Client erhält erst nach Backend-Login + Consent ein Token.
@@ -338,7 +338,7 @@ Wie Claude Desktop, MCP Inspector oder andere Clients sich gegen diesen Server a
 
 Die OAuth-Verwaltung im Menüpunkt **MCP-Server → Status** zeigt:
 
-- **Initial Access Tokens** — Button „Neues IAT erzeugen" liefert einen `iat_…`-String, der EINMAL als Confirmation-Message angezeigt wird (sofort kopieren — wird nicht erneut angezeigt). Tabelle listet alle IATs mit Status: aktiv / eingelöst / abgelaufen.
+- **Initial Access Tokens** — werden seit 1.5.1 nicht mehr ausgegeben; das Backend hat keinen Knopf mehr dafür. Der Registrierungs-Endpunkt akzeptiert ein noch gültiges Token weiterhin, und die Tabelle listet den Altbestand mit Status (aktiv / eingelöst / abgelaufen), bis er abläuft. Grund für den Rückbau: Ein IAT automatisierte nur die *Registrierung*, nie die Autorisierung — es gibt ausschließlich die Grants `authorization_code` und `refresh_token`, und `/authorize` verlangt einen eingeloggten Backend-User. Der Knopf sparte also einen Klick und kostete regelmäßig einen Irrweg.
 - **Registrierte Clients** — Tabelle aller per RFC 7591 registrierten Clients mit Name, _„Autorisiert von"_ (der Backend-Benutzer, der den Consent erteilt hat — wird beim Authorize gespeichert; „—" = registriert, aber noch nie autorisiert), Client-ID, Redirect-URIs und Datum. Der rote _„Widerrufen"_-Button löscht den Client komplett — sämtliche Access- + Refresh-Tokens werden ebenfalls revokiert, betroffene Apps müssen sich neu autorisieren.
 
 ### HTTPS-Warnung
