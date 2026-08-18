@@ -1903,14 +1903,22 @@ final class McpSmokeTestCommand extends Command
             fn ($r) => null === $r['denial']);
 
         // Permission mounts are references, but stale ones are harmless — they
-        // must never be what stops a deletion.
-        $this->connection->update('tl_user_group', ['pagemounts' => serialize([(string) $usagePageId])], ['id' => 1]);
+        // must never be what stops a deletion. Own group rather than an
+        // existing one: a fresh Contao has no user groups at all.
+        $this->connection->insert('tl_user_group', [
+            'tstamp' => time(),
+            'name' => 'MCP smoke usage group',
+            'pagemounts' => serialize([(string) $usagePageId]),
+        ]);
+        $usageGroupId = (int) $this->connection->lastInsertId();
 
         $expect('backend page mounts are reported but do not block',
             $this->usageTool->find('page', (string) $usagePageId),
             fn ($r) => [] !== array_filter(
                 $r['other_findings'],
-                static fn (array $ref): bool => 'tl_user_group' === ($ref['table'] ?? '') && false === ($ref['blocking'] ?? true),
+                static fn (array $ref): bool => 'tl_user_group' === ($ref['table'] ?? '')
+                    && $usageGroupId === ($ref['id'] ?? 0)
+                    && false === ($ref['blocking'] ?? true),
             ));
 
         // (FEATURE) references that live INSIDE files. An SCSS partial is the
@@ -2096,7 +2104,7 @@ final class McpSmokeTestCommand extends Command
         @unlink($twigDir.'/variant.html.twig');
         @rmdir($twigDir);
 
-        $this->connection->update('tl_user_group', ['pagemounts' => ''], ['id' => 1]);
+        $this->connection->delete('tl_user_group', ['id' => $usageGroupId]);
         $this->connection->delete('tl_content', ['id' => $usageContentId]);
         $this->connection->delete('tl_article', ['id' => $usageRefArticleId]);
         $this->connection->delete('tl_page', ['id' => $usageRefPageId]);
