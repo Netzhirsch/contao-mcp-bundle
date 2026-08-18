@@ -62,6 +62,15 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   MCP-Server → Aktivität.
 
 ### Changed
+- **Das Backend behauptete, ein IAT sei Pflicht.** Unter „Client-Registrierungs-
+  modus" hieß die Auswahl „Eingeschränkt (Initial Access Token erforderlich)",
+  und der Hilfetext darunter schickte einen namentlich zum Knopf „Neues IAT
+  erzeugen". Beides war schlicht falsch: Derselbe Modus wird genauso vom
+  Pairing-Fenster erfüllt, und ein Standard-MCP-Client kann überhaupt kein IAT
+  senden. Wer der Oberfläche folgte, erzeugte pflichtbewusst Token, die nichts
+  verbinden konnten. Die Aussage steckte in vier Strings gleichzeitig
+  (Auswahl-Option, Hilfetext, Status-Zeile, Template-Fallback) — ein Unit-Test
+  hält jetzt alle vier zusammen.
 - Der IAT-Knopf heißt jetzt „IAT erzeugen (nur für Skripte)". Er stand bisher
   gleichrangig neben dem Pairing-Fenster in derselben Button-Leiste, und im
   Alltag sieht man den Knopf, nicht den Tooltip — entsprechend oft wurde ein

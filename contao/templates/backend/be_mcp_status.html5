@@ -111,7 +111,7 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
                     <?php elseif ($pairingActive): ?>
                         <strong class="tl_green">●</strong> <?= \sprintf($t('pairing_active_until', 'Registration open until %s (%d min left)'), date('H:i', $pairingUntil), max(1, (int) ceil(($pairingUntil - time()) / 60))) ?>
                     <?php else: ?>
-                        <strong class="tl_green">●</strong> <?= $t('config_reg_mode_restricted', 'Restricted (Initial Access Token required)') ?>
+                        <strong class="tl_green">●</strong> <?= $t('config_reg_mode_restricted', 'Restricted (recommended) — registration only in the pairing window') ?>
                     <?php endif; ?>
                 </td>
             </tr>
@@ -150,7 +150,7 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
 <?php if ($isOauth): ?>
 
 <?php if (!empty($this->oauthIats)): ?>
-<h2 class="sub_headline" style="margin-top:1.5em;"><?= $t('oauth_iat_title', 'Initial Access Tokens') ?></h2>
+<h2 class="sub_headline" style="margin-top:1.5em;"><?= $t('oauth_iat_title', 'Initial Access Tokens (scripts only)') ?></h2>
 <div class="tl_listing_container list_view">
     <table class="tl_listing showColumns">
         <thead>

@@ -53,8 +53,8 @@
       <trans-unit id="mcp_server.config_backend_url_label"><source>Backend URL</source></trans-unit>
       <trans-unit id="mcp_server.config_backend_url_help"><source>Public base URL of the Contao Backend (e.g. https://www.example.com). Required when auth_mode=oauth — the server advertises this in its OAuth metadata so clients find /authorize, /token and /register.</source></trans-unit>
       <trans-unit id="mcp_server.config_reg_mode_label"><source>Client registration mode</source></trans-unit>
-      <trans-unit id="mcp_server.config_reg_mode_help"><source>Restricted: new clients must supply a valid Initial Access Token when registering (generated via the "Generate new IAT" button on the Status page). Recommended for production. Open: any client can register without a token — use only on private/localhost setups.</source></trans-unit>
-      <trans-unit id="mcp_server.config_reg_mode_restricted"><source>Restricted (Initial Access Token required)</source></trans-unit>
+      <trans-unit id="mcp_server.config_reg_mode_help"><source>Restricted: a new client can only register while the pairing window is open — Status page, button "Open registration for 15 minutes". That is the path for Claude and every other standard MCP client, and it needs no token. An Initial Access Token is the alternative for scripts that can send an Authorization header while registering; normal clients cannot use one. Recommended for production. Open: any client can register at any time without a token — private or localhost setups only.</source></trans-unit>
+      <trans-unit id="mcp_server.config_reg_mode_restricted"><source>Restricted (recommended) — registration only in the pairing window</source></trans-unit>
       <trans-unit id="mcp_server.config_reg_mode_open"><source>Open (anyone can register)</source></trans-unit>
       <trans-unit id="mcp_server.config_lazy_mode_label"><source>Lazy-Mode (Recommended for Claude)</source></trans-unit>
       <trans-unit id="mcp_server.config_lazy_mode_inline"><source>Hide all tools behind a discovery interface</source></trans-unit>
@@ -74,8 +74,8 @@
       <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.</source></trans-unit>
       <trans-unit id="mcp_server.pairing_closed"><source>Pairing window closed.</source></trans-unit>
       <trans-unit id="mcp_server.status_registration"><source>Client registration</source></trans-unit>
-      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens</source></trans-unit>
-      <trans-unit id="mcp_server.oauth_iat_help"><source>For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. For Claude Desktop / mcp-remote use the pairing window above instead.</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens (scripts only)</source></trans-unit>
+      <trans-unit id="mcp_server.oauth_iat_help"><source>For scripts and automation only, and only where an Authorization header can be sent during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. Claude and mcp-remote cannot use this — they need the pairing window.</source></trans-unit>
       <trans-unit id="mcp_server.button_generate_iat"><source>Generate IAT (scripts only)</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_id"><source>ID</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_created"><source>Created</source></trans-unit>

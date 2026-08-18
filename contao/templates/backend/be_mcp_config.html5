@@ -62,7 +62,7 @@ $config = $this->config;
                 <h3><label for="ctrl_reg_mode"><?= $t('config_reg_mode_label', 'Client registration mode') ?></label></h3>
                 <select name="oauth_registration_mode" id="ctrl_reg_mode" class="tl_select">
                     <?php $regMode = (string) ($config['oauth_registration_mode'] ?? 'restricted'); ?>
-                    <option value="restricted" <?= $regMode === 'restricted' ? 'selected' : '' ?>><?= $t('config_reg_mode_restricted', 'Restricted (Initial Access Token required)') ?></option>
+                    <option value="restricted" <?= $regMode === 'restricted' ? 'selected' : '' ?>><?= $t('config_reg_mode_restricted', 'Restricted (recommended) — registration only in the pairing window') ?></option>
                     <option value="open" <?= $regMode === 'open' ? 'selected' : '' ?>><?= $t('config_reg_mode_open', 'Open (anyone can register)') ?></option>
                 </select>
                 <p class="tl_help tl_tip"><?= $t('config_reg_mode_help') ?></p>
