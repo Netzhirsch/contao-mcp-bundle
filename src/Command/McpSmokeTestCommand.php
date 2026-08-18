@@ -2234,6 +2234,14 @@ final class McpSmokeTestCommand extends Command
         // register at all.
         $output->writeln("\n<comment>OAuth (Discovery + Pairing)</comment>");
 
+        // Both documents are built from `backend_url` and answer 503 while it
+        // is unset — which is the whole point of that guard, and exactly the
+        // state a freshly migrated instance is in. Pin a known value for the
+        // assertions (and restore it below) so this tests the document rather
+        // than whichever host happens to be configured.
+        $oauthConfigBefore = $this->configStorage->load();
+        $this->configStorage->save([...$oauthConfigBefore, 'backend_url' => 'https://smoke.example']);
+
         $prm = json_decode((string) $this->mcpController->oauthProtectedResourceMetadata()->getContent(), true);
 
         // RFC 9728. The 401 points clients here; before 1.5.0 this document
@@ -2250,10 +2258,15 @@ final class McpSmokeTestCommand extends Command
             [$prm, $asMeta],
             static fn (array $d) => ($d[0]['authorization_servers'][0] ?? 'a') === ($d[1]['issuer'] ?? 'b'));
 
+        // The resource identifier must be the MCP endpoint itself, not the
+        // host — a client compares it against the URL it is talking to.
+        $expect('the resource identifier is the MCP endpoint',
+            $prm,
+            fn ($d) => ($d['resource'] ?? '') === 'https://smoke.example/'.trim((string) ($this->configStorage->load()['path'] ?? 'mcp'), '/'));
+
         // Pairing window. Registration is gated in `restricted` mode; the
         // window is the only path a standard MCP client can take, because it
         // cannot send an IAT header.
-        $oauthConfigBefore = $this->configStorage->load();
         $registerRequest = static fn (string $name): Request => Request::create(
             '/_mcp_oauth/register',
             'POST',
