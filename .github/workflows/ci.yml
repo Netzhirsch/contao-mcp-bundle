@@ -71,12 +71,8 @@ jobs:
           restore-keys: |
             composer-phpstan-
 
-      # --no-plugins bypasses cweagans/composer-patches whose patch paths
-      # (`vendor/netzhirsch/contao-mcp-bundle/patches/...`) only resolve
-      # in a *consumer* install, not a stand-alone bundle install. PHPStan
-      # only reads source, never executes the patched php-mcp/server code.
       - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress --no-plugins
+        run: composer install --no-interaction --prefer-dist --no-progress
 
       # composer audit hits the GitHub Advisory DB for every installed
       # package + its transitives. Needs vendor/ in place — runs here
@@ -96,8 +92,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   # Unit + Integration tests via PHPUnit. Covers the dimensions the smoke
   # test can't reach — OAuth-crypto edge cases (dual-key rotation, expired
-  # IATs, single-use enforcement). Runs in parallel with phpstan: both
-  # install via --no-plugins (no patches needed for either), so the only
+  # IATs, single-use enforcement). Runs in parallel with phpstan; the only
   # extra cost is one composer install which the shared cache absorbs.
   # ─────────────────────────────────────────────────────────────────────
   phpunit:
@@ -126,7 +121,7 @@ jobs:
             composer-phpunit-
 
       - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress --no-plugins
+        run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit --no-coverage --testdox
@@ -239,8 +234,10 @@ jobs:
           composer config minimum-stability dev
           composer config prefer-stable true
 
-          # Allow the plugins the bundle + Contao 5 need at install time.
-          composer config allow-plugins.cweagans/composer-patches true
+          # Allow the plugins Contao 5 needs at install time. The bundle
+          # itself deliberately requires NO plugin — that is what keeps a
+          # Contao Manager install working, so this list must never grow a
+          # bundle-specific entry again.
           composer config allow-plugins.contao/manager-plugin true
           composer config allow-plugins.contao/core-bundle true
           composer config allow-plugins.contao-components/installer true
@@ -248,16 +245,12 @@ jobs:
           composer config allow-plugins.symfony/runtime true
           composer config allow-plugins.symfony/flex true
 
-          # Pull in the patch-applier + the bundle itself.
-          composer require --no-update cweagans/composer-patches:^1.7
+          # Exactly what a user types. No patch block, no extra plugin —
+          # if that ever stops being true, this step fails the way the
+          # Contao Manager did.
           composer require --no-update netzhirsch/contao-mcp-bundle:@dev
 
-          # Patches block in the ROOT composer.json — Composer ignores
-          # patch declarations coming from dependencies (security
-          # convention). We mirror the snippet from README.md.
-          composer config --json --merge extra.patches '{"php-mcp/server":{"Pluggable Bearer-auth + OAuth Authorization Server Metadata hooks":"vendor/netzhirsch/contao-mcp-bundle/patches/transport-auth-and-oauth-metadata.patch","Optional tool-filter for tools/list (Lazy-Mode)":"vendor/netzhirsch/contao-mcp-bundle/patches/dispatcher-tool-filter.patch"}}'
-
-          # Single install pass — applies patches + builds autoloader +
+          # Single install pass — builds autoloader +
           # runs Contao's manager-plugin auto-discovery. -v lifts the
           # log level just enough to surface real solver / patch errors
           # without flooding logs the way -vvv would.
