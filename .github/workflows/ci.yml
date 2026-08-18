@@ -322,3 +322,77 @@ jobs:
             app/var/mcp/
           if-no-files-found: ignore
           retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Legacy root config — every installation up to 1.4.0 was told to put an
+  # `extra.patches` block into its own composer.json pointing at
+  # vendor/netzhirsch/contao-mcp-bundle/patches/*.patch. That block lives
+  # in the host project and we cannot remove it for them, so those paths
+  # have to keep resolving until 2.0.0.
+  #
+  # Dropping the files does NOT degrade gracefully: composer-patches reads
+  # a non-existent local path as a URL, hands null to
+  # RemoteFilesystem::copy() and dies with a TypeError — an \Error, so its
+  # own `catch (\Exception)` ("Could not apply patch! Skipping.") never
+  # fires. composer install then exits 1 without writing vendor/autoload.php.
+  #
+  # No Contao, no database: this reproduces the composer mechanism alone
+  # and finishes in well under a minute.
+  # ─────────────────────────────────────────────────────────────────────
+  legacy-patch-config:
+    name: Install with a pre-1.4.1 root composer.json
+    runs-on: ubuntu-22.04
+    needs: [lint]
+    steps:
+      - name: Checkout bundle
+        uses: actions/checkout@v6
+        with:
+          path: bundle
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: openssl, mbstring, intl, dom, xml, curl, sodium, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Build a host project that still carries the old patch block
+        run: |
+          set -euo pipefail
+          mkdir app && cd app
+
+          composer init --no-interaction --name=netzhirsch/legacy-host --stability=dev
+          composer config repositories.bundle '{"type":"path","url":"../bundle","options":{"symlink":false}}'
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config allow-plugins.cweagans/composer-patches true
+          composer config allow-plugins.contao/manager-plugin true
+          composer config allow-plugins.contao/core-bundle true
+          composer config allow-plugins.contao-components/installer true
+          composer config allow-plugins.php-http/discovery true
+
+          # Verbatim from the ≤1.4.0 README.
+          composer config --json extra.patches '{
+            "php-mcp/server": {
+              "Pluggable Bearer-auth + OAuth Authorization Server Metadata hooks": "vendor/netzhirsch/contao-mcp-bundle/patches/transport-auth-and-oauth-metadata.patch",
+              "Optional tool-filter for tools/list (Lazy-Mode)": "vendor/netzhirsch/contao-mcp-bundle/patches/dispatcher-tool-filter.patch"
+            }
+          }'
+
+          composer require --no-update cweagans/composer-patches:^1.7
+          composer require --no-update netzhirsch/contao-mcp-bundle:@dev
+
+      - name: composer install must survive it
+        working-directory: app
+        run: composer install --no-interaction --prefer-dist --no-progress -v
+
+      - name: Assert the install actually completed
+        working-directory: app
+        run: |
+          set -euo pipefail
+          test -f vendor/autoload.php \
+            || { echo "::error::composer install produced no autoloader"; exit 1; }
+          grep -q netzhirsch vendor/php-mcp/server/src/Dispatcher.php \
+            || { echo "::error::the legacy patch block silently stopped applying"; exit 1; }
+          echo "Legacy patch block still resolves — existing installs can update untouched."

@@ -8,19 +8,19 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [1.4.1] – 2026-08-18
 
-> **Beim Update von ≤ 1.4.0 zwingend:** Die Patch-Dateien werden nicht mehr
-> mitgeliefert. Wer den bisher nötigen Patch-Block in seiner **Root**-
-> `composer.json` stehen hat, muss ihn **vor** dem Update entfernen — sonst
-> sucht `cweagans/composer-patches` nach
-> `vendor/netzhirsch/contao-mcp-bundle/patches/*.patch` und bricht ab. Zu
-> löschen sind:
+> **Update von ≤ 1.4.0: kein Handlungsbedarf.** `composer update` läuft durch,
+> ohne dass an der Root-`composer.json` etwas geändert werden muss. Die
+> `patches/`-Dateien bleiben deshalb bis 2.0.0 im Paket liegen — jede
+> Installation bis 1.4.0 zeigt mit ihrem `extra.patches`-Block genau auf diese
+> Pfade, und ein Wegfall wäre nicht harmlos: `cweagans/composer-patches`
+> behandelt einen nicht existierenden lokalen Pfad als URL und stirbt in
+> `RemoteFilesystem::copy()` an einem `TypeError`. Ein `TypeError` ist ein
+> `\Error`, kein `\Exception` — der `catch`, der sonst „Could not apply patch!
+> Skipping." ausgibt und weiterläuft, greift also nicht. `composer install`
+> bräche mit Exit 1 ab, ohne auch nur `vendor/autoload.php` zu schreiben.
 >
-> - der komplette `extra.patches`-Eintrag für `php-mcp/server`
-> - `"cweagans/composer-patches"` aus `require` (sofern nichts anderes es braucht)
-> - `"cweagans/composer-patches": true` aus `config.allow-plugins`
->
-> Danach `composer update netzhirsch/contao-mcp-bundle`. Neuinstallationen sind
-> nicht betroffen — dort ist einfach nichts mehr einzurichten.
+> Der Patch-Block darf jederzeit raus (Anleitung: [`patches/README.md`](patches/README.md)),
+> nötig ist er nur nicht mehr. Neuinstallationen sehen von alldem nichts.
 
 ### Fixed
 - **Installation über den Contao Manager war unmöglich.** Das Bundle verlangte
@@ -36,9 +36,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   `composer install` brach mit Exit-Code 1 ab. Betroffen war damit ausgerechnet
   der Weg, auf dem Contao-Erweiterungen normalerweise installiert werden.
 
-  **Die Patches sind jetzt weg**, und mit ihnen die Plugin-Abhängigkeit, der
-  `extra.patches`-Block und der `allow-plugins`-Eintrag. Installation ist wieder
-  ein nacktes `composer require netzhirsch/contao-mcp-bundle`.
+  **Das Bundle wendet keine Patches mehr an** — weg sind die
+  Plugin-Abhängigkeit, der `extra.patches`-Block und der
+  `allow-plugins`-Eintrag. Installation ist wieder ein nacktes
+  `composer require netzhirsch/contao-mcp-bundle`. Die beiden `.patch`-Dateien
+  selbst bleiben bis 2.0.0 im Paket, damit Bestandsinstallationen mit ihrem
+  alten Root-Block nicht auflaufen (siehe Kasten oben).
 
   Möglich war das, weil die beiden Patches unterschiedlich viel wert waren:
   - Der **Transport-Patch** hing an `StreamableHttpServerTransport` — dem
@@ -59,6 +62,14 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 - README (deutsch und englisch): Installationsabschnitt auf den einen
   Composer-Befehl eingedampft — der Patch-Block, den bisher jede Root-
   `composer.json` von Hand brauchte, entfällt ersatzlos.
+- `patches/` liegt weiter im Paket, aber als reine Altlast: die Dateien werden
+  von nichts mehr angewendet und verschwinden mit 2.0.0. Sie bleiben nur, damit
+  der alte `extra.patches`-Block in Bestandsinstallationen weiter ins Leere
+  zeigen darf, ohne Composer abzuschießen. Ein Unit-Test
+  (`tests/Unit/Compat/ShippedPatchFilesTest.php`) verhindert, dass sie vorher
+  versehentlich verschwinden.
+
+## [1.4.0] – 2026-08-18
 
 > **Verhaltensänderung:** `file_rename`, `file_move` und `template_rename`
 > können jetzt mit `still_in_use` abgelehnt werden. Wie beim Löschen hebelt

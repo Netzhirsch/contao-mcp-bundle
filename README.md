@@ -268,8 +268,9 @@ netzhirsch_contao_mcp:
 
 Stand `v1.4.1`:
 
-- **PHPUnit-Coverage** fokussiert OAuth-Crypto (KeyManager, IAT,
-  Rotation). Tool-Layer wird ausschließlich vom Smoke-Test exerziert.
+- **PHPUnit-Coverage** deckt OAuth-Crypto, die Permission-Map und den
+  Usage-Scanner ab. Der Tool-Layer wird stattdessen end-to-end vom Smoke-Test
+  exerziert.
 - **Encryption-Key-Rotation** ist NICHT implementiert. Der
   `var/mcp/oauth/encryption.key` schützt Refresh-Token-Payloads at
   rest — Rotation würde alle Refresh-Tokens invalidieren. (Die
@@ -337,15 +338,19 @@ Issues / Findings bitte ins Repo, plus Anhang:
 
 ## Update von einer Version ≤ 1.4.0
 
-Die Patch-Dateien entfallen ab 1.4.1. Steht in der **Root**-`composer.json` noch
-der frühere Patch-Block, **vor** dem Update entfernen — sonst sucht
-`cweagans/composer-patches` nach nicht mehr vorhandenen Dateien und bricht ab:
+**Nichts zu tun** — `composer update netzhirsch/contao-mcp-bundle` läuft durch,
+auch wenn in der Root-`composer.json` noch der frühere Patch-Block steht. Die
+`patches/`-Dateien liegen dafür bis 2.0.0 weiter im Paket; angewendet werden sie
+von nichts mehr.
 
-- den `extra.patches`-Eintrag für `php-mcp/server`
-- `"cweagans/composer-patches"` aus `require` (falls nichts anderes es braucht)
-- `"cweagans/composer-patches": true` aus `config.allow-plugins`
-
-Danach wie gewohnt `composer update netzhirsch/contao-mcp-bundle`.
+Wer aufräumen will (empfohlen, aber nicht dringend): `extra.patches`,
+`cweagans/composer-patches` aus `require` und den `allow-plugins`-Eintrag aus der
+Root-`composer.json` löschen, dann `composer update`. Der Vendor bleibt danach
+gepatcht — das Plugin installiert `php-mcp/server` bei geschrumpfter Patch-Liste
+nicht von sich aus neu. Folgenlos, weil `ContaoDispatcher` die betroffenen
+Methoden überschreibt; wer es sauber will, hängt ein
+`composer reinstall php-mcp/server` an. Details:
+[`patches/README.md`](patches/README.md).
 
 ## Wartung
 

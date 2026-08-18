@@ -266,15 +266,18 @@ entity tables, so they cannot be backed up separately).
 
 ## Updating from 1.4.0 or older
 
-The patch files are gone as of 1.4.1. If your **root** `composer.json` still
-carries the former patch block, remove it **before** updating — otherwise
-`cweagans/composer-patches` looks for files that no longer ship and aborts:
+**Nothing to do.** `composer update netzhirsch/contao-mcp-bundle` goes through
+even if your root `composer.json` still carries the former patch block. The
+`patches/` files stay in the package until 2.0.0 for exactly that reason —
+nothing applies them any more.
 
-- the `extra.patches` entry for `php-mcp/server`
-- `"cweagans/composer-patches"` from `require` (unless something else needs it)
-- `"cweagans/composer-patches": true` from `config.allow-plugins`
-
-Then update as usual with `composer update netzhirsch/contao-mcp-bundle`.
+To clean up (recommended, not urgent): delete `extra.patches`,
+`"cweagans/composer-patches"` from `require` and its `allow-plugins` entry, then
+run `composer update`. The vendor stays patched afterwards — a shrinking patch
+list does not make the plugin reinstall `php-mcp/server` on its own. That is
+harmless, because `ContaoDispatcher` overrides the patched methods; for a
+pristine vendor add `composer reinstall php-mcp/server`. Details:
+[`patches/README.md`](patches/README.md).
 
 ## Maintenance
 
