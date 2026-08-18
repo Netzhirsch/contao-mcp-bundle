@@ -30,6 +30,15 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 class ModuleMcpStatus extends AbstractMcpModule
 {
     /**
+     * How long the client-pairing window stays open. Ten minutes turned out
+     * to be tight: the admin opens it in the Backend, switches to the client,
+     * and a first attempt that fails for an unrelated reason already eats the
+     * window. Fifteen is still short enough that an unattended Backend does
+     * not leave registration open by accident.
+     */
+    private const PAIRING_WINDOW_SECONDS = 900;
+
+    /**
      * @var string
      */
     protected $strTemplate = 'be_mcp_status';
@@ -268,22 +277,25 @@ class ModuleMcpStatus extends AbstractMcpModule
     }
 
     /**
-     * Opens/closes the client-pairing window: 10 minutes during which the
-     * registration endpoint admits ONE anonymous registration despite
-     * restricted mode (standard MCP clients cannot send an IAT header).
-     * The window also closes itself after the first successful registration
-     * — see RegisterController.
+     * Opens/closes the client-pairing window: 15 minutes during which the
+     * registration endpoint admits anonymous registrations despite
+     * restricted mode (standard MCP clients cannot send an IAT header, so
+     * this window — not the IAT — is how a normal client gets paired).
+     *
+     * It stays open for the full duration: closing after the first
+     * successful registration meant a retrying client hit a locked door
+     * mid-flow and the admin had to reopen it for every attempt.
      */
     private function handlePairingWindow(McpServerConfigStorage $configStorage, bool $open): void
     {
-        $until = $open ? time() + 600 : 0;
+        $until = $open ? time() + self::PAIRING_WINDOW_SECONDS : 0;
         $result = $configStorage->save([...$configStorage->load(), 'registration_open_until' => $until]);
 
         if (!$result['saved']) {
             Message::addError($this->translate('config_save_failed'));
         } elseif ($open) {
             Message::addConfirmation(\sprintf(
-                $this->translate('pairing_opened', 'Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.'),
+                $this->translate('pairing_opened', 'Client registration is open until %s — connect your MCP client now. This is the button Claude and other standard clients need; an Initial Access Token only works for scripts that can send an Authorization header.'),
                 date('H:i', $until),
             ));
         } else {

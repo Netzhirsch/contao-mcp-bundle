@@ -116,8 +116,12 @@ final class McpController
                     ['error' => 'unauthorized', 'message' => 'Valid Authorization: Bearer <token> required.'],
                     401,
                     [
+                        // RFC 9728: this MUST point at the protected-resource
+                        // metadata, not at the authorization-server document.
+                        // Pointing it at the latter is what made spec-current
+                        // clients fail to discover where to authenticate.
                         'WWW-Authenticate' => sprintf(
-                            'Bearer realm="MCP", resource_metadata="%s/.well-known/oauth-authorization-server"',
+                            'Bearer realm="MCP", resource_metadata="%s/.well-known/oauth-protected-resource"',
                             rtrim((string) ($config['backend_url'] ?? ''), '/'),
                         ),
                         'Access-Control-Allow-Origin' => '*',
@@ -285,6 +289,57 @@ final class McpController
             'grant_types_supported' => ['authorization_code', 'refresh_token'],
             'token_endpoint_auth_methods_supported' => ['client_secret_post', 'client_secret_basic', 'none'],
             'code_challenge_methods_supported' => ['S256'],
+        ], 200, ['Access-Control-Allow-Origin' => '*']);
+    }
+
+    /**
+     * OAuth 2.0 Protected Resource Metadata (RFC 9728). This is the document
+     * a spec-current MCP client asks for FIRST: the 401 points at it, the
+     * client reads `authorization_servers` from it and only then fetches the
+     * authorization-server metadata above.
+     *
+     * We used to point `resource_metadata` at the RFC 8414 document instead
+     * and serve nothing here at all — a client following RFC 9728 to the
+     * letter found an AS document with no `authorization_servers` key, or a
+     * 404 when it built the well-known URL itself. Clients with a fallback
+     * survived that, which is why it only broke *sometimes*.
+     *
+     * Served at both the bare well-known path and the resource-suffixed one
+     * (RFC 9728 §3.1: a resource with a path component moves the document to
+     * `/.well-known/oauth-protected-resource/<path>`), because clients differ
+     * on which they construct.
+     */
+    #[Route(
+        path: '/.well-known/oauth-protected-resource/mcp',
+        name: 'netzhirsch_contao_mcp_oauth_prm_mcp_path',
+        methods: ['GET'],
+        defaults: ['_scope' => 'frontend'],
+    )]
+    #[Route(
+        path: '/.well-known/oauth-protected-resource',
+        name: 'netzhirsch_contao_mcp_oauth_prm_root',
+        methods: ['GET'],
+        defaults: ['_scope' => 'frontend'],
+    )]
+    public function oauthProtectedResourceMetadata(): JsonResponse
+    {
+        $config = $this->configStorage->load();
+        $backendUrl = rtrim((string) ($config['backend_url'] ?? ''), '/');
+
+        if ($backendUrl === '') {
+            return new JsonResponse([
+                'error' => 'backend_url_missing',
+                'message' => 'Protected-Resource-Metadata cannot be advertised: backend_url is not configured in var/mcp/config.json.',
+            ], 503);
+        }
+
+        $path = trim((string) ($config['path'] ?? 'mcp'), '/');
+
+        return new JsonResponse([
+            'resource' => $backendUrl.'/'.$path,
+            'authorization_servers' => [$backendUrl],
+            'scopes_supported' => ['mcp'],
+            'bearer_methods_supported' => ['header'],
         ], 200, ['Access-Control-Allow-Origin' => '*']);
     }
 

@@ -5,7 +5,7 @@
 *🇩🇪 [Deutsche Fassung](README.md) — the German README is the reference version and
 carries additional development notes.*
 
-**Status:** Stable — `v1.4.1`
+**Status:** Stable — `v1.5.0`
 **License:** proprietary, commercially licensed — 30-day free trial, then
 €49/month per Contao installation (see [License & trial](#license--trial) and
 [LICENSE](LICENSE))
@@ -130,12 +130,14 @@ Guides in this repository: [docs/installation.md](docs/installation.md)
 [docs/dokumentation.md](docs/dokumentation.md) (complete feature reference).
 Both are written in German.
 
-> **Gotcha with `oauth_registration_mode: restricted` (the default):** Claude,
-> `mcp-remote` and friends cannot send an Initial Access Token during
-> registration, so the IAT button does not help there. Instead click
-> **MCP-Server → Status → "Open registration for 10 minutes"** in the backend and
-> connect the client **immediately**. The window closes after the **first**
-> successful registration; reopen it for each further attempt.
+> **Connecting a client with `oauth_registration_mode: restricted` (the default):**
+> Claude, `mcp-remote` and friends cannot send an Initial Access Token during
+> registration, so the IAT button will not pair them — it is for scripts. Click
+> **MCP-Server → Status → "Open registration for 15 minutes"** in the backend
+> instead. The window stays open for the full 15 minutes, however many attempts
+> that takes (up to 1.4.0 it closed after the first successful registration,
+> which is why retries and second clients failed). Refused attempts are listed
+> with reason and IP under **MCP-Server → Aktivität**.
 
 A step-by-step walkthrough for local connector setup (`mcp-remote` bridge,
 `claude_desktop_config.json`, OAuth, schema cache and the usual traps) is in
@@ -303,7 +305,7 @@ license renewal depends on it.
 
 ## Known limitations
 
-As of `v1.4.1`:
+As of `v1.5.0`:
 
 - **PHPUnit coverage** focuses on OAuth crypto, the permission map and the usage
   scanner. The tool layer is exercised end-to-end by the smoke test instead.

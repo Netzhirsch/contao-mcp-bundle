@@ -4,7 +4,7 @@
 
 *🇬🇧 [English version](README.en.md) — diese deutsche Fassung ist die Referenz.*
 
-**Status:** Stable — `v1.4.1`
+**Status:** Stable — `v1.5.0`
 **Lizenz:** proprietär, kommerziell lizenziert — 30 Tage kostenlos testen,
 danach 49 €/Monat je Contao-Instanz (siehe [Lizenz & Testphase](#lizenz--testphase)
 und [LICENSE](LICENSE))
@@ -134,12 +134,14 @@ läuft normal weiter. Im Backend unter **MCP-Server → Status** oben auf
 (Client anbinden, online + lokal) und [docs/dokumentation.md](docs/dokumentation.md)
 (vollständige Funktionsreferenz). Im Backend selbst gibt es keinen Doku-Tab mehr.
 
-> **Stolperfalle bei `oauth_registration_mode: restricted` (Default):** Claude,
+> **Client verbinden bei `oauth_registration_mode: restricted` (Default):** Claude,
 > `mcp-remote` & Co. können bei der Registrierung **keinen** Initial Access Token
-> mitschicken — der IAT-Button hilft dort also nicht. Stattdessen im Backend
-> **MCP-Server → Status → „Registrierung für 10 Minuten öffnen"** klicken und den
-> Client **sofort** verbinden. Das Fenster schließt sich nach der **ersten**
-> erfolgreichen Registrierung; für jeden weiteren Versuch neu öffnen.
+> mitschicken — der IAT-Button verbindet sie also nicht, der ist für Skripte. Der
+> Weg ist **MCP-Server → Status → „Registrierung für 15 Minuten öffnen"**. Das
+> Fenster bleibt die vollen 15 Minuten offen, egal wie viele Versuche das kostet
+> (bis 1.4.0 schloss es nach der ersten erfolgreichen Registrierung — daher
+> scheiterten Retrys und ein zweiter Client). Abgewiesene Versuche stehen mit
+> Grund und IP unter **MCP-Server → Aktivität**.
 
 Schritt-für-Schritt-Anleitung für die lokale Connector-Einrichtung
 (`mcp-remote`-Bridge, `claude_desktop_config.json`, OAuth, Schema-Cache +
@@ -266,7 +268,7 @@ netzhirsch_contao_mcp:
 
 ## Bekannte Einschränkungen
 
-Stand `v1.4.1`:
+Stand `v1.5.0`:
 
 - **PHPUnit-Coverage** deckt OAuth-Crypto, die Permission-Map und den
   Usage-Scanner ab. Der Tool-Layer wird stattdessen end-to-end vom Smoke-Test

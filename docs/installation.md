@@ -15,7 +15,7 @@ Der MCP-Endpoint der Instanz ist `https://<backend-url>/mcp`. Diese Anleitung be
 Claude Web und aktuelle Claude-Desktop-Versionen sprechen den Server direkt an — ohne Node.js, ohne Config-Datei.
 
 1. **Server prüfen:** Menüpunkt **MCP-Server → Konfiguration** — `auth_mode` = _OAuth 2.1_ und `backend_url` = die öffentliche HTTPS-Adresse. Der Menüpunkt **MCP-Server → Status** muss den Endpoint grün zeigen.
-2. **Pairing-Fenster öffnen** _(nur im Modus „Eingeschränkt")_: Menüpunkt **MCP-Server → Status** → Kopfleisten-Button _„Registrierung für 10 Minuten öffnen"_. Das Fenster gilt für maximal 10 Minuten oder genau EINE erfolgreiche Registrierung und verriegelt sich danach selbst.
+2. **Pairing-Fenster öffnen** _(nur im Modus „Eingeschränkt")_: Menüpunkt **MCP-Server → Status** → Kopfleisten-Button _„Registrierung für 15 Minuten öffnen"_. Das Fenster gilt 15 Minuten und verriegelt sich danach selbst — beliebig viele Versuche in dieser Zeit.
 3. **Connector anlegen:**
    - _Claude Web_ (claude.ai): Settings → Connectors → _„Add custom connector"_ → URL `https://<backend-url>/mcp` → Connect.
    - _Claude Desktop_ (aktuell): Settings → Connectors → _„Add custom connector"_ → gleiche URL.
@@ -41,7 +41,7 @@ Lokale `.test`-Adressen sind aus dem Internet nicht erreichbar und laufen ohne H
    ```
 
    `--allow-http` ist nur bei `http://` nötig; der Schlüssel (`contao-lokal`) wird Anzeigename und Tool-Präfix. Mehrere Instanzen = mehrere Einträge nebeneinander.
-3. **Pairing-Fenster öffnen** _(nur im Modus „Eingeschränkt")_: Menüpunkt **MCP-Server → Status** → _„Registrierung für 10 Minuten öffnen"_.
+3. **Pairing-Fenster öffnen** _(nur im Modus „Eingeschränkt")_: Menüpunkt **MCP-Server → Status** → _„Registrierung für 15 Minuten öffnen"_.
 4. **App starten:** Claude Desktop liest die Config beim Boot. Beim ersten Connect öffnet sich der Browser für Backend-Login + Consent.
 5. **Prüfen:** Die `mcp__contao-lokal__*`-Tools erscheinen; der Menüpunkt **MCP-Server → Status** zeigt den Client mit „Autorisiert von".
 
@@ -61,7 +61,7 @@ Beide Varianten durchlaufen automatisch dieselbe Kette:
 
 Standardmäßig verlangt die Client-Registrierung eine Freigabe. Zwei Wege:
 
-- **Pairing-Fenster (der Normalweg für Menschen):** Menüpunkt **MCP-Server → Status** → _„Registrierung für 10 Minuten öffnen"_, Client innerhalb des Fensters verbinden. Schließt nach der ersten erfolgreichen Registrierung automatisch — kein Umstellen, kein Zurückstellen-Vergessen. Auch ein im Fenster registrierter Client erhält erst nach Backend-Login + Consent ein Token.
+- **Pairing-Fenster (der Normalweg für Menschen):** Menüpunkt **MCP-Server → Status** → _„Registrierung für 15 Minuten öffnen"_, Client innerhalb des Fensters verbinden. Schließt nach 15 Minuten automatisch — kein Umstellen, kein Zurückstellen-Vergessen. Abgewiesene Versuche stehen mit Grund unter **MCP-Server → Aktivität**. Auch ein im Fenster registrierter Client erhält erst nach Backend-Login + Consent ein Token.
 - **Initial Access Token (für Skripte/Automation):** Menüpunkt **MCP-Server → Status** → _„Neues IAT erzeugen"_; das Skript sendet es bei der Registrierung als `Authorization: Bearer iat_…`. 1 h gültig, genau einmal einlösbar. Standard-MCP-Clients können diesen Header NICHT senden — für die nimm das Pairing-Fenster.
 
 Registrierte Clients bleiben dauerhaft verbunden (Refresh-Token), bis sie im Menüpunkt **MCP-Server → Status** widerrufen werden.

@@ -6,7 +6,7 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-## [1.4.1] – 2026-08-18
+## [1.5.0] – 2026-08-18
 
 > **Update von ≤ 1.4.0: kein Handlungsbedarf.** `composer update` läuft durch,
 > ohne dass an der Root-`composer.json` etwas geändert werden muss. Die
@@ -21,6 +21,51 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 >
 > Der Patch-Block darf jederzeit raus (Anleitung: [`patches/README.md`](patches/README.md)),
 > nötig ist er nur nicht mehr. Neuinstallationen sehen von alldem nichts.
+
+### Fixed
+- **Ein MCP-Client konnte nicht zuverlässig herausfinden, wo er sich anmelden
+  soll.** Der `WWW-Authenticate`-Header einer 401 zeigte mit `resource_metadata`
+  auf das RFC-8414-Dokument (Authorization-Server-Metadata) — laut RFC 9728
+  gehört dort die **Protected Resource Metadata** hin. Die gab es gar nicht:
+  `/.well-known/oauth-protected-resource` lieferte 404. Clients mit Fallback
+  kamen durch, strikt spec-konforme nicht — daher scheiterte es *manchmal*.
+
+  Das Dokument wird jetzt ausgeliefert, an beiden Pfaden (`/.well-known/
+  oauth-protected-resource` und resource-suffixed `…/mcp`, weil Clients sich
+  uneins sind, welchen sie bauen), und der Header zeigt darauf. Nachgemessen
+  über echtes HTTP: 401 → `resource_metadata` → PRM (200, mit
+  `authorization_servers`) → AS-Metadata (200).
+
+- **Das Pairing-Fenster schloss sich nach der ersten Registrierung.** Damit lief
+  jeder Retry, jeder zweite Client und jeder Neuversuch nach einem
+  abgebrochenen Authorize-Schritt in eine verschlossene Tür — sichtbar beim
+  Nutzer nur als „Verbindung fehlgeschlagen", und das Fenster musste im Backend
+  von Hand neu geöffnet werden. Es bleibt jetzt die volle Zeit offen; die Dauer
+  steigt von 10 auf 15 Minuten. Die Tür geht weiterhin nur auf, wenn ein Admin
+  sie öffnet, und nur kurz.
+
+- **Ein Refresh-Token-Rennen warf den Client in den Browser zurück.** Bei jedem
+  `/token`-Austausch wird rotiert: der alte Token wird widerrufen, ein neuer
+  ausgestellt. Driften die gespeicherten Stände auseinander — zwei parallele
+  Refreshes, eine verlorene Antwort, ein Retry nach Timeout — legt der Client
+  einen gerade widerrufenen Token vor, wird abgewiesen und hat nur noch den
+  vollen Authorization-Code-Flow. Ein rotierter Token gilt jetzt noch 60
+  Sekunden weiter. Ein geleakter Token ist eine Minute später trotzdem wertlos;
+  gelöschte oder unbekannte Token bleiben sofort ungültig, sonst würde das
+  Widerrufen eines Clients wirkungslos.
+
+### Added
+- **Abgelehnte Registrierungen landen im Log.** Bisher wurde nur der Erfolgsfall
+  protokolliert — ausgerechnet in der Situation, die Erklärung braucht (ein
+  Client klopft an, wird abgewiesen, der Nutzer sieht nur „failed"), stand
+  nichts im Log. Jede Ablehnung erscheint jetzt mit Grund und IP unter
+  MCP-Server → Aktivität.
+
+### Changed
+- Das Backend sagt jetzt, welcher Knopf gemeint ist: Für Claude und jeden
+  anderen Standard-MCP-Client ist das **Pairing-Fenster** der Weg. Ein Initial
+  Access Token kann keiner dieser Clients benutzen — RFC-7591-Registrierung
+  lässt keinen `Authorization`-Header zu; IATs bleiben für Skripte.
 
 ### Fixed
 - **Installation über den Contao Manager war unmöglich.** Das Bundle verlangte

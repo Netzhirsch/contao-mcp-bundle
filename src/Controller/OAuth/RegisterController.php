@@ -79,9 +79,10 @@ final class RegisterController
             } elseif (time() < $config['registration_open_until']) {
                 $viaPairingWindow = true;
             } else {
-                return $this->error(
+                return $this->refuse(
+                    $request,
                     'invalid_token',
-                    'Dynamic client registration requires an Initial Access Token (`Authorization: Bearer iat_…`) — or open the pairing window in MCP-Server → Status and connect within 10 minutes.',
+                    'Dynamic client registration requires an Initial Access Token (`Authorization: Bearer iat_…`) — or open the pairing window in MCP-Server → Status and connect within 15 minutes. Standard MCP clients cannot send an IAT header — the pairing window is the path for them.',
                     401,
                 );
             }
@@ -89,7 +90,7 @@ final class RegisterController
 
         $body = json_decode($request->getContent(), true);
         if (!\is_array($body)) {
-            return $this->error('invalid_client_metadata', 'Request body must be a JSON object.', 400);
+            return $this->refuse($request, 'invalid_client_metadata', 'Request body must be a JSON object.', 400);
         }
 
         $name = (string) ($body['client_name'] ?? '');
@@ -98,7 +99,7 @@ final class RegisterController
         }
         $redirectUris = $body['redirect_uris'] ?? [];
         if (!\is_array($redirectUris) || $redirectUris === []) {
-            return $this->error('invalid_redirect_uri', 'redirect_uris must be a non-empty array.', 400);
+            return $this->refuse($request, 'invalid_redirect_uri', 'redirect_uris must be a non-empty array.', 400);
         }
         $redirectUris = array_values(array_map('strval', $redirectUris));
         $authMethod = (string) ($body['token_endpoint_auth_method'] ?? 'none');
@@ -109,7 +110,8 @@ final class RegisterController
 
         foreach ($redirectUris as $uri) {
             if (!self::isValidRedirectUri($uri, $isConfidential)) {
-                return $this->error(
+                return $this->refuse(
+                    $request,
                     'invalid_redirect_uri',
                     "Invalid redirect_uri: {$uri}. Public clients must use https://, custom schemes, or http://localhost / 127.0.0.1 (RFC 8252).",
                     400,
@@ -123,7 +125,8 @@ final class RegisterController
         // validation — otherwise we'd burn the token on a bad-shape body).
         if ($providedIat !== null) {
             if (!$this->iat->redeem($providedIat, $clientId)) {
-                return $this->error(
+                return $this->refuse(
+                    $request,
                     'invalid_token',
                     'Initial Access Token is invalid, expired, or has already been used.',
                     401,
@@ -139,19 +142,21 @@ final class RegisterController
             plainSecret: $clientSecret,
         );
 
-        // One pairing per window: the first successful registration closes
-        // it. Best-effort — a failed save leaves the window to expire on its
-        // own (max 10 min), it never blocks the registration response.
-        if ($viaPairingWindow) {
-            $this->configStorage->save([...$this->configStorage->load(), 'registration_open_until' => 0]);
-        }
+        // The window stays open for its full duration on purpose. It used to
+        // close on the first successful registration, which looked tidy and
+        // broke the common case: a client that registers and then retries —
+        // or a second client, or a re-run after a failed authorize step —
+        // hit a locked door mid-flow and reported nothing but "connection
+        // failed". The admin then had to walk back into the Backend for
+        // every attempt. Time-boxing alone is the safer trade: the door is
+        // still only open because an admin opened it, and only briefly.
 
         // Every successful registration lands in tl_log (ContaoContext,
         // source 'mcp_oauth') — visible in MCP-Server → Aktivität and the
         // system log; the Status page additionally flags recent
         // registrations as a backend notice.
         $via = $viaPairingWindow
-            ? 'pairing window (window closed)'
+            ? 'pairing window'
             : ($providedIat !== null ? 'Initial Access Token' : 'open registration');
         // No quotes in the message — Contao's table handler escapes them and
         // the activity panel would render literal &quot; entities.
@@ -174,6 +179,33 @@ final class RegisterController
         }
 
         return new JsonResponse($response, 201);
+    }
+
+    /**
+     * Refuses a registration — and says so in the log.
+     *
+     * Only *successful* registrations used to be logged, which left the
+     * operator blind in exactly the situation that needs explaining: a
+     * client tried to pair, was turned away, and all the admin saw was
+     * "connection failed" in a client they cannot debug. Every refusal now
+     * lands in tl_log under the same `mcp_oauth` source, so MCP-Server →
+     * Aktivität shows when someone knocked and why the door stayed shut.
+     */
+    private function refuse(Request $request, string $code, string $description, int $status): JsonResponse
+    {
+        $this->logger->warning(
+            \sprintf(
+                'MCP client registration refused (%s) from %s: %s',
+                $code,
+                $request->getClientIp() ?? 'unknown IP',
+                // Contao's table handler escapes quotes into entities, so the
+                // activity panel would render them literally.
+                str_replace(['"', "'"], '', $description),
+            ),
+            ['contao' => new ContaoContext(__METHOD__, ContaoContext::GENERAL, null, null, null, 'mcp_oauth')],
+        );
+
+        return $this->error($code, $description, $status);
     }
 
     private function error(string $code, string $description, int $status): JsonResponse

@@ -67,9 +67,9 @@
       <trans-unit id="mcp_server.http_warning"><source>OAuth is active but the Backend URL is plain http:// on a non-loopback host — access tokens travel in clear text. Use HTTPS in production.</source></trans-unit>
       <trans-unit id="mcp_server.oauth_admin_title"><source>OAuth administration</source></trans-unit>
       <!-- Client pairing window -->
-      <trans-unit id="mcp_server.pairing_help"><source>Standard MCP clients (mcp-remote, Claude Desktop) cannot send an Initial Access Token while registering. This button opens client registration for 10 minutes — or exactly ONE successful registration, whichever comes first — then locks itself again. Authorization still requires a backend login + consent, so the window never grants access by itself.</source></trans-unit>
+      <trans-unit id="mcp_server.pairing_help"><source>This is the button Claude and every other standard MCP client needs: they cannot send an Initial Access Token while registering, so an IAT will not pair them — it is for scripts. The window stays open for 15 minutes, however many attempts that takes, then locks itself again. Authorization still requires a backend login + consent, so the window never grants access by itself.</source></trans-unit>
       <trans-unit id="mcp_server.pairing_active_until"><source>Registration open until %s (%d min left)</source></trans-unit>
-      <trans-unit id="mcp_server.button_open_pairing"><source>Open registration for 10 minutes</source></trans-unit>
+      <trans-unit id="mcp_server.button_open_pairing"><source>Open registration for 15 minutes</source></trans-unit>
       <trans-unit id="mcp_server.button_close_pairing"><source>Close window now</source></trans-unit>
       <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.</source></trans-unit>
       <trans-unit id="mcp_server.pairing_closed"><source>Pairing window closed.</source></trans-unit>

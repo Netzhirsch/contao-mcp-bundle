@@ -84,7 +84,7 @@ Das schreibt die App selbst und ist die robusteste Variante.
    mit MCP-Zugriff anmelden und freigeben.
    **Bei Registrierungsmodus „Eingeschränkt":** vorher im Backend unter
    *MCP-Server → Status* den Button
-   **„Registrierung für 10 Minuten öffnen"** klicken und die App innerhalb des
+   **„Registrierung für 15 Minuten öffnen"** klicken und die App innerhalb des
    Fensters starten. Das Fenster schließt sich nach der ersten erfolgreichen
    Registrierung von selbst — kein manuelles Umstellen auf „Offen" und
    Zurückstellen mehr nötig.

@@ -52,6 +52,9 @@ use Netzhirsch\ContaoMcpBundle\Server\ToolFilter;
 use PhpMcp\Schema\Request\CallToolRequest;
 use PhpMcp\Schema\Request\ListToolsRequest;
 use PhpMcp\Schema\Result\CallToolResult;
+use Netzhirsch\ContaoMcpBundle\Controller\McpController;
+use Netzhirsch\ContaoMcpBundle\Controller\OAuth\RegisterController;
+use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 
 /**
@@ -108,6 +111,9 @@ final class McpSmokeTestCommand extends Command
         private readonly HttpDispatcherFactory $dispatcherFactory,
         private readonly ToolFilter $toolFilter,
         private readonly RegistryAccessor $registryAccessor,
+        private readonly McpController $mcpController,
+        private readonly RegisterController $registerController,
+        private readonly McpServerConfigStorage $configStorage,
         private readonly string $projectDir,
     ) {
         parent::__construct();
@@ -2221,6 +2227,73 @@ final class McpSmokeTestCommand extends Command
         $this->connection->delete('tl_article', ['id' => $usageArticleId]);
         $this->connection->delete('tl_module', ['id' => $usageModuleId]);
         $this->connection->delete('tl_page', ['id' => $usagePageId]);
+
+        // ═══════════════════════ OAuth-Discovery + Pairing ═════════
+        // The two things a connector trips over before it ever sends a tool
+        // call: finding out WHERE to authenticate, and being allowed to
+        // register at all.
+        $output->writeln("\n<comment>OAuth (Discovery + Pairing)</comment>");
+
+        $prm = json_decode((string) $this->mcpController->oauthProtectedResourceMetadata()->getContent(), true);
+
+        // RFC 9728. The 401 points clients here; before 1.5.0 this document
+        // did not exist and the header pointed at the RFC 8414 one instead.
+        $expect('protected-resource metadata names the resource',
+            $prm, static fn ($d) => \is_array($d) && !empty($d['resource']));
+        $expect('protected-resource metadata names an authorization server',
+            $prm, static fn ($d) => !empty($d['authorization_servers'][0]));
+
+        $asMeta = json_decode((string) $this->mcpController->oauthMetadata()->getContent(), true);
+        $expect('authorization-server metadata still advertises registration',
+            $asMeta, static fn ($d) => \is_array($d) && !empty($d['registration_endpoint']));
+        $expect('both documents agree on the issuer',
+            [$prm, $asMeta],
+            static fn (array $d) => ($d[0]['authorization_servers'][0] ?? 'a') === ($d[1]['issuer'] ?? 'b'));
+
+        // Pairing window. Registration is gated in `restricted` mode; the
+        // window is the only path a standard MCP client can take, because it
+        // cannot send an IAT header.
+        $oauthConfigBefore = $this->configStorage->load();
+        $registerRequest = static fn (string $name): Request => Request::create(
+            '/_mcp_oauth/register',
+            'POST',
+            [],
+            [],
+            [],
+            ['REMOTE_ADDR' => '127.0.0.1'],
+            json_encode(['client_name' => $name, 'redirect_uris' => ['https://example.com/cb']]),
+        );
+
+        $this->configStorage->save([
+            ...$oauthConfigBefore,
+            'oauth_registration_mode' => 'restricted',
+            'registration_open_until' => 0,
+        ]);
+
+        $closed = $this->registerController->__invoke($registerRequest("{$stamp}_closed"));
+        $expect('a closed window refuses registration', $closed->getStatusCode(), static fn ($c) => $c === 401);
+
+        $this->configStorage->save([...$this->configStorage->load(), 'registration_open_until' => time() + 900]);
+
+        $first = $this->registerController->__invoke($registerRequest("{$stamp}_first"));
+        $second = $this->registerController->__invoke($registerRequest("{$stamp}_second"));
+
+        $expect('an open window admits a registration', $first->getStatusCode(), static fn ($c) => $c === 201);
+
+        // The regression this replaces: the window used to close itself after
+        // the first success, so a retrying client — or a second one — hit a
+        // locked door mid-flow and the admin had to reopen it every time.
+        $expect('the window stays open for a second registration',
+            $second->getStatusCode(), static fn ($c) => $c === 201);
+
+        $this->configStorage->save($oauthConfigBefore);
+
+        foreach ([$first, $second] as $response) {
+            $body = json_decode((string) $response->getContent(), true);
+            if (\is_array($body) && isset($body['client_id'])) {
+                $this->connection->delete('tl_mcp_oauth_client', ['client_id' => $body['client_id']]);
+            }
+        }
 
         // ═══════════════════════ Dispatcher ════════════════════════
         // This is what used to be the vendor patch. Every section above calls
