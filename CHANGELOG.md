@@ -6,6 +6,47 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.4.0] – 2026-08-18
+
+> **Verhaltensänderung:** `file_rename`, `file_move` und `template_rename`
+> können jetzt mit `still_in_use` abgelehnt werden. Wie beim Löschen hebelt
+> `ignore_references=true` das aus.
+
+### Added
+- **Umbenennen und Verschieben laufen durch denselben Referenz-Check** —
+  `file_rename`, `file_move`, `template_rename`. Das war die offensichtliche
+  Lücke in 1.3.0: eine Datei zu verschieben bricht ein `{{file::files/x.svg}}`
+  genauso wie sie zu löschen.
+
+  Entscheidend ist dabei, **nicht pauschal zu blockieren**. Contao behält beim
+  Umbenennen die Zeile, die ID und die UUID und schreibt nur `tl_files.path`
+  neu (nachgeprüft gegen `Dbafs::moveResource`: ID und UUID bleiben über
+  `file_rename` *und* `file_move` identisch). Also überlebt eine Referenz per
+  `singleSRC`/`multiSRC` oder `{{file::<uuid>}}` das Umbenennen, während
+  `{{file::files/x.svg}}`, ein SCSS-`@import` und ein hartcodierter Pfad im
+  Template brechen.
+
+  Jede gefundene Referenz trägt deshalb jetzt `identity` — `uuid`, `path`,
+  `name` oder `id`. Gelöscht wird alles, umbenannt nur der Pfad bzw. der Name:
+  - `*_delete` → blockiert bei jeder Identität
+  - `file_rename` / `file_move` → blockiert nur bei `path`
+  - `template_rename` → blockiert nur, wenn sich der Template-**Name**
+    tatsächlich ändert. Ein `.html5` in einen anderen Ordner zu verschieben
+    ändert ihn nicht (Contao findet Legacy-Templates über den Basisnamen), ein
+    `.html.twig` schon (dessen Name ist der volle Pfad). Ersteres wird daher
+    gar nicht erst blockiert.
+
+  Referenzen, die die Operation übersteht, verschwinden nicht — sie stehen in
+  `other_findings`, nur eben nicht als Grund für die Ablehnung. Ein Wächter,
+  der auch bei harmlosen Operationen anschlägt, wird abgeschaltet.
+
+### Fixed
+- Ordner-Referenzen per Insert-Tag wurden übersehen:
+  `{{file::files/theme/logo.svg}}` ist auch eine Referenz auf den Ordner
+  `files/theme`, denn dessen Löschung oder Umbenennung nimmt den Pfad mit. Das
+  Muster erlaubt für Ordner-Ziele jetzt einen `/`-Suffix — ohne dabei auf ein
+  Nachbarverzeichnis wie `files/theme2` anzuspringen.
+
 ## [1.3.0] – 2026-08-18
 
 > **Verhaltensänderung:** `*_delete`-Aufrufe, die bisher durchliefen, können

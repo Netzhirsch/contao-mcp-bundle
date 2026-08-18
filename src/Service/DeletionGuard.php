@@ -42,17 +42,36 @@ final class DeletionGuard
     private const MAX_REPORTED = 25;
 
     /**
-     * Delete tools whose target is a PATH, not a table row. They are gated by
-     * backend MODULE permission rather than by a DataContainer requirement, so
-     * they cannot be recognised the way the record tools are. All three take
-     * the path in an argument called `path`.
+     * Tools whose target is a PATH, not a table row. They are gated by backend
+     * MODULE permission rather than by a DataContainer requirement, so they
+     * cannot be recognised the way the record tools are. All of them take the
+     * path in an argument called `path`.
      *
-     * @var array<string, string> tool => usage type
+     * `breaks` is what makes rename usable: a rename or move rewrites
+     * `tl_files.path` and keeps the row, the id and the UUID (Contao's
+     * Dbafs::moveResource — verified). So `singleSRC = <uuid>` and
+     * `{{file::<uuid>}}` survive it and must NOT block, while
+     * `{{file::files/x.svg}}`, an `@import` and a hardcoded template path do
+     * break and must. Deletions take everything with them, so they break every
+     * identity.
+     *
+     * @var array<string, array{type: string, verb: string, breaks: list<string>}>
      */
     private const PATH_TOOLS = [
-        'file_delete' => 'file',
-        'folder_delete' => 'folder',
-        'template_delete' => 'template',
+        'file_delete' => ['type' => 'file', 'verb' => 'Deleting', 'breaks' => self::ALL_IDENTITIES],
+        'folder_delete' => ['type' => 'folder', 'verb' => 'Deleting', 'breaks' => self::ALL_IDENTITIES],
+        'template_delete' => ['type' => 'template', 'verb' => 'Deleting', 'breaks' => self::ALL_IDENTITIES],
+        'file_rename' => ['type' => 'file', 'verb' => 'Renaming', 'breaks' => [UsageScanner::IDENTITY_PATH]],
+        'file_move' => ['type' => 'file', 'verb' => 'Moving', 'breaks' => [UsageScanner::IDENTITY_PATH]],
+        // A template is addressed by name, and renaming is what changes it.
+        'template_rename' => ['type' => 'template', 'verb' => 'Renaming', 'breaks' => [UsageScanner::IDENTITY_NAME, UsageScanner::IDENTITY_PATH]],
+    ];
+
+    private const ALL_IDENTITIES = [
+        UsageScanner::IDENTITY_ID,
+        UsageScanner::IDENTITY_UUID,
+        UsageScanner::IDENTITY_PATH,
+        UsageScanner::IDENTITY_NAME,
     ];
 
     public function __construct(
@@ -90,6 +109,16 @@ final class DeletionGuard
             return null;
         }
 
+        $operation = self::PATH_TOOLS[$tool] ?? ['type' => $target->type, 'verb' => 'Deleting', 'breaks' => self::ALL_IDENTITIES];
+        $breaks = $this->breakingIdentities($tool, $args, $target, $operation['breaks']);
+
+        // Nothing this operation could break — e.g. moving a legacy .html5
+        // template into another folder, where the template NAME is the
+        // basename and therefore stays exactly the same.
+        if ([] === $breaks) {
+            return null;
+        }
+
         try {
             $result = $this->scanner->scan(
                 $target,
@@ -111,7 +140,11 @@ final class DeletionGuard
             return null;
         }
 
-        $blocking = array_values(array_filter($result['references'], static fn (array $r): bool => UsageScanner::blocks($r)));
+        $blocking = array_values(array_filter(
+            $result['references'],
+            static fn (array $r): bool => UsageScanner::blocks($r)
+                && \in_array($r['identity'] ?? UsageScanner::IDENTITY_ID, $breaks, true),
+        ));
         $blocking = $this->forgiveHandledReferences($tool, $args, $blocking);
 
         if ([] === $blocking) {
@@ -121,21 +154,23 @@ final class DeletionGuard
         return [
             'error' => 'still_in_use',
             'message' => sprintf(
-                '%s "%s" is still referenced %d time(s) — deleting it would break those places. '
-                .'Review the list, remove or repoint the references first, or pass %s=true to delete anyway.',
-                ucfirst($target->type),
+                '%s %s "%s" would break %d place(s) that reference it. '
+                .'Review the list, remove or repoint the references first, or pass %s=true to proceed anyway.',
+                $operation['verb'],
+                $target->type,
                 $target->label,
                 \count($blocking),
                 self::OVERRIDE_ARGUMENT,
             ),
             'target' => $target->describe(),
             'references' => $blocking,
-            // Everything found but not strong enough to refuse on: file names
-            // that merely look right, and permission mounts that go stale
-            // harmlessly. Shown so the caller can judge, not to be acted on.
+            // Everything found that this operation does NOT break: file names
+            // that merely look right, permission mounts that go stale
+            // harmlessly — and, for a rename, every reference anchored on the
+            // id or UUID, which survives it. Shown so the caller can judge.
             'other_findings' => array_values(array_filter(
                 $result['references'],
-                static fn (array $r): bool => !UsageScanner::blocks($r),
+                static fn (array $r): bool => !\in_array($r, $blocking, true),
             )),
             'truncated' => $result['truncated'],
             'notes' => $result['notes'],
@@ -148,6 +183,35 @@ final class DeletionGuard
     }
 
     /**
+     * Which of the identities this operation touches actually change here.
+     *
+     * Only `template_rename` needs the extra thought: a legacy `.html5`
+     * template is addressed by its basename, so moving it into another folder
+     * leaves every `customTpl` and `$this->extend()` working. Refusing that
+     * move would be a false alarm, and false alarms are how a guard rail ends
+     * up switched off.
+     *
+     * @param array<string, mixed> $args
+     * @param list<string>         $declared
+     *
+     * @return list<string>
+     */
+    private function breakingIdentities(string $tool, array $args, UsageTarget $target, array $declared): array
+    {
+        if ('template_rename' !== $tool) {
+            return $declared;
+        }
+
+        $newName = TargetResolver::templateNameFor(\is_string($args['new_path'] ?? null) ? $args['new_path'] : '');
+
+        if (null !== $newName && $newName === ($target->aliases[0] ?? null)) {
+            return array_values(array_diff($declared, [UsageScanner::IDENTITY_NAME]));
+        }
+
+        return $declared;
+    }
+
+    /**
      * @param array<string, mixed> $args
      */
     private function targetFor(string $tool, array $args): ?UsageTarget
@@ -156,7 +220,7 @@ final class DeletionGuard
         $type = null;
 
         if (isset(self::PATH_TOOLS[$tool])) {
-            $type = self::PATH_TOOLS[$tool];
+            $type = self::PATH_TOOLS[$tool]['type'];
             $identifier = \is_string($args['path'] ?? null) ? $args['path'] : null;
         } else {
             $requirement = $this->map->requirement($tool, $args);

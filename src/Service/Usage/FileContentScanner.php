@@ -88,14 +88,19 @@ final class FileContentScanner
                 $relative = $this->relative($file);
                 $hit = null;
 
-                foreach ($needles as $needle) {
-                    $position = strpos($content, $needle);
+                foreach ($needles as $needle => $identity) {
+                    $position = strpos($content, (string) $needle);
 
                     if (false !== $position) {
                         $hit = [
                             'confidence' => UsageScanner::CONFIDENCE_CERTAIN,
                             'blocking' => true,
-                            'detail' => sprintf('%s contains the literal path/UUID', $relative),
+                            'identity' => $identity,
+                            'detail' => sprintf(
+                                '%s contains the literal %s',
+                                $relative,
+                                UsageScanner::IDENTITY_UUID === $identity ? 'UUID' : 'path',
+                            ),
                             'snippet' => self::line($content, $position),
                         ];
                         break;
@@ -106,6 +111,9 @@ final class FileContentScanner
                     $hit = [
                         'confidence' => UsageScanner::CONFIDENCE_CERTAIN,
                         'blocking' => true,
+                        // An @import resolves by file NAME, so renaming the
+                        // partial breaks it just as surely as deleting it.
+                        'identity' => UsageScanner::IDENTITY_PATH,
                         'detail' => sprintf('%s imports it by name (stylesheet @import/@use/url)', $relative),
                         'snippet' => self::line($content, (int) strpos($content, $importName)),
                     ];
@@ -115,6 +123,7 @@ final class FileContentScanner
                     $hit = [
                         'confidence' => UsageScanner::CONFIDENCE_POSSIBLE,
                         'blocking' => false,
+                        'identity' => UsageScanner::IDENTITY_PATH,
                         'detail' => sprintf('%s mentions the file name — check whether it means this file', $relative),
                         'snippet' => self::line($content, $position),
                     ];
@@ -193,6 +202,9 @@ final class FileContentScanner
                         'file' => $this->relative($file),
                         'confidence' => UsageScanner::CONFIDENCE_CERTAIN,
                         'blocking' => true,
+                        // Templates are pulled in by NAME, so a rename breaks
+                        // this exactly as a deletion would.
+                        'identity' => UsageScanner::IDENTITY_NAME,
                         'detail' => sprintf('%s extends/includes this template', $this->relative($file)),
                         'snippet' => self::line($content, $position),
                     ];
@@ -255,10 +267,14 @@ final class FileContentScanner
     }
 
     /**
-     * Spellings that prove a reference: the DBAFS path, the same path without
-     * the upload prefix, and the UUID as written in `{{file::…}}`.
+     * Spellings that prove a reference, each mapped to what it is anchored on:
+     * the DBAFS path, the same path without the upload prefix, and the UUID as
+     * written in `{{file::…}}`.
      *
-     * @return list<string>
+     * The identity matters because a rename changes the path and keeps the
+     * UUID — so a hit on the UUID survives it and must not block.
+     *
+     * @return array<string, string> needle => identity
      */
     private function certainNeedles(UsageTarget $target): array
     {
@@ -266,22 +282,22 @@ final class FileContentScanner
         $path = (string) $target->path;
 
         if ('' !== $path) {
-            $needles[] = $path;
+            $needles[$path] = UsageScanner::IDENTITY_PATH;
 
             if (false !== ($slash = strpos($path, '/'))) {
-                $needles[] = substr($path, $slash + 1);
+                $needles[substr($path, $slash + 1)] = UsageScanner::IDENTITY_PATH;
             }
         }
 
         if (null !== $target->uuid && '' !== $target->uuid) {
-            $needles[] = $target->uuid;
+            $needles[$target->uuid] = UsageScanner::IDENTITY_UUID;
         }
 
         // Longest first: matching "files/x/logo.svg" is more informative than
         // matching the "x/logo.svg" tail it contains.
-        usort($needles, static fn (string $a, string $b): int => \strlen($b) <=> \strlen($a));
+        uksort($needles, static fn (string $a, string $b): int => \strlen($b) <=> \strlen($a));
 
-        return array_values(array_unique($needles));
+        return $needles;
     }
 
     /**

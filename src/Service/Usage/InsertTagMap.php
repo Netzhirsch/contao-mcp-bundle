@@ -58,11 +58,17 @@ final class InsertTagMap
      * Group 1 is the tag name — callers report which tag matched, so this
      * must stay a CAPTURING group.
      *
+     * `$allowPathSuffix` additionally accepts a `/` after the needle, for
+     * folder targets: `{{file::files/theme/logo.svg}}` IS a reference to the
+     * folder `files/theme`, because deleting or renaming the folder takes that
+     * path with it. Off by default — for anything else a trailing `/` would
+     * mean a different record.
+     *
      * @param list<string> $tags
      */
-    public static function pattern(array $tags, string $needle): string
+    public static function pattern(array $tags, string $needle, bool $allowPathSuffix = false): string
     {
         return '/\{\{\s*('.implode('|', array_map(static fn (string $t): string => preg_quote($t, '/'), $tags))
-            .')::'.preg_quote($needle, '/').'(?=[|?}\s])/i';
+            .')::'.preg_quote($needle, '/').'(?=['.($allowPathSuffix ? '\/' : '').'|?}\s])/i';
     }
 }

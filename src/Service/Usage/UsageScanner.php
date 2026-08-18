@@ -37,6 +37,21 @@ final class UsageScanner
     public const CONFIDENCE_POSSIBLE = 'possible';
 
     /**
+     * What a reference is anchored on. This decides which OPERATIONS break it:
+     * a rename changes the path and nothing else, so `{{file::files/x.svg}}`
+     * dies while `singleSRC = <uuid>` and `{{file::<uuid>}}` sail through
+     * untouched — Contao's Dbafs keeps the row, the id and the UUID and only
+     * rewrites `tl_files.path` (verified against Dbafs::moveResource).
+     *
+     * Without this distinction the guard would have to refuse every rename,
+     * which would make it noise people switch off.
+     */
+    public const IDENTITY_ID = 'id';
+    public const IDENTITY_UUID = 'uuid';
+    public const IDENTITY_PATH = 'path';
+    public const IDENTITY_NAME = 'name';
+
+    /**
      * Tables that are never "usage": caches, logs and history. A hit in
      * tl_search only means the crawler saw the page once; a hit in tl_version
      * or tl_undo is a snapshot of the PAST, and blocking a deletion because
@@ -301,6 +316,7 @@ final class UsageScanner
                         'source' => 'db_field',
                         'confidence' => self::CONFIDENCE_CERTAIN,
                         'blocking' => !$isPermission,
+                        'identity' => ReferenceFieldMap::identityFor($entry['encoding']),
                         'table' => $table,
                         'id' => $id,
                         'field' => $entry['field'],
@@ -318,11 +334,14 @@ final class UsageScanner
                     continue;
                 }
 
-                foreach ($this->matchInsertTags($value, $tags, $needles) as $match) {
+                foreach ($this->matchInsertTags($value, $target, $tags, $needles) as $match) {
                     $out[] = [
                         'source' => 'insert_tag',
                         'confidence' => self::CONFIDENCE_CERTAIN,
                         'blocking' => true,
+                        // An insert tag can spell the SAME target as a UUID or
+                        // as a path; only the second breaks on a rename.
+                        'identity' => $match['identity'],
                         'table' => $table,
                         'id' => $id,
                         'field' => $column,
@@ -412,15 +431,21 @@ final class UsageScanner
      * @param list<string> $tags
      * @param list<string> $needles
      *
-     * @return list<array{tag: string, snippet: string}>
+     * @return list<array{tag: string, snippet: string, identity: string}>
      */
-    private function matchInsertTags(string $value, array $tags, array $needles): array
+    private function matchInsertTags(string $value, UsageTarget $target, array $tags, array $needles): array
     {
         $out = [];
         $seen = [];
+        $uuids = array_fill_keys($target->uuids(), true);
 
         foreach ($needles as $needle) {
-            if (1 !== preg_match(InsertTagMap::pattern($tags, $needle), $value, $m, PREG_OFFSET_CAPTURE)) {
+            // A folder is spelled as the PREFIX of the paths inside it, so
+            // `{{file::files/theme/logo.svg}}` is a reference to the folder
+            // `files/theme` — deleting or renaming it breaks that tag.
+            $pattern = InsertTagMap::pattern($tags, $needle, $target->isFolder);
+
+            if (1 !== preg_match($pattern, $value, $m, PREG_OFFSET_CAPTURE)) {
                 continue;
             }
 
@@ -431,7 +456,15 @@ final class UsageScanner
             }
 
             $seen[$tag] = true;
-            $out[] = ['tag' => $tag, 'snippet' => self::snippet($value, (int) $m[0][1])];
+            $out[] = [
+                'tag' => $tag,
+                'snippet' => self::snippet($value, (int) $m[0][1]),
+                'identity' => match (true) {
+                    isset($uuids[$needle]) => self::IDENTITY_UUID,
+                    $needle === $target->path => self::IDENTITY_PATH,
+                    default => self::IDENTITY_ID,
+                },
+            ];
         }
 
         return $out;

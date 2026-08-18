@@ -92,6 +92,31 @@ final class TargetResolver
     }
 
     /**
+     * The name a template override is referenced by, from its path relative to
+     * `templates/`. Null when the file is not a template at all.
+     *
+     * Legacy templates are indexed by BASENAME — Contao finds `x.html5`
+     * wherever it sits — while a Twig template's name is its full path in the
+     * managed namespace. That asymmetry is why moving a `.html5` between
+     * folders breaks nothing, and moving a `.html.twig` breaks everything
+     * pointing at it.
+     */
+    public static function templateNameFor(string $relative): ?string
+    {
+        $relative = ltrim(str_replace('\\', '/', $relative), '/');
+
+        if (str_starts_with($relative, 'templates/')) {
+            $relative = substr($relative, \strlen('templates/'));
+        }
+
+        if (str_ends_with($relative, '.html.twig')) {
+            return substr($relative, 0, -\strlen('.html.twig'));
+        }
+
+        return str_ends_with($relative, '.html5') ? basename($relative, '.html5') : null;
+    }
+
+    /**
      * The name a human would use for a table — "page", not "tl_page". Falls
      * back to the table name so unknown tables still read sensibly.
      */
@@ -225,11 +250,9 @@ final class TargetResolver
             ];
         }
 
-        if (str_ends_with($relative, '.html.twig')) {
-            $name = substr($relative, 0, -\strlen('.html.twig'));
-        } elseif (str_ends_with($relative, '.html5')) {
-            $name = basename($relative, '.html5');
-        } else {
+        $name = self::templateNameFor($relative);
+
+        if (null === $name) {
             return [
                 'error' => 'invalid_input',
                 'message' => sprintf('templates/%s is neither a .html5 nor a .html.twig template.', $relative),

@@ -84,7 +84,12 @@ final class FileContentScannerTest extends TestCase
         self::assertStringContainsString('logo.svg', $references[0]['snippet']);
     }
 
-    public function testFindsTheUuidSpelling(): void
+    /**
+     * A UUID reference survives a rename — Contao keeps `tl_files.uuid` and
+     * only rewrites the path — so it must be reported as UUID-anchored, or the
+     * guard would refuse renames it has no business refusing.
+     */
+    public function testFindsTheUuidSpellingAndMarksItUuidAnchored(): void
     {
         $this->write('files/theme/logo.svg', '<svg/>');
         $this->write('templates/fe_page.html5', '{{file::a1b2c3d4-0000-1111-2222-333344445555}}');
@@ -92,6 +97,35 @@ final class FileContentScannerTest extends TestCase
         $references = $this->scanFile('files/theme/logo.svg', 'a1b2c3d4-0000-1111-2222-333344445555');
 
         self::assertCount(1, $references);
+        self::assertSame(UsageScanner::IDENTITY_UUID, $references[0]['identity']);
+    }
+
+    public function testLiteralPathHitIsPathAnchored(): void
+    {
+        $this->write('files/theme/logo.svg', '<svg/>');
+        $this->write('templates/fe_page.html5', '<img src="files/theme/logo.svg">');
+
+        self::assertSame(UsageScanner::IDENTITY_PATH, $this->scanFile('files/theme/logo.svg')[0]['identity']);
+    }
+
+    /**
+     * An @import resolves by file name, so renaming the partial breaks it just
+     * as surely as deleting it would.
+     */
+    public function testScssImportIsPathAnchored(): void
+    {
+        $this->write('files/theme/_colors.scss', '$brand: #c00;');
+        $this->write('files/theme/app.scss', "@import 'colors';");
+
+        self::assertSame(UsageScanner::IDENTITY_PATH, $this->scanFile('files/theme/_colors.scss')[0]['identity']);
+    }
+
+    public function testTemplateReferenceIsNameAnchored(): void
+    {
+        $this->write('templates/parent.html5', 'x');
+        $this->write('templates/child.html5', '<?php $this->extend(\'parent\'); ?>');
+
+        self::assertSame(UsageScanner::IDENTITY_NAME, $this->scanTemplate('templates/parent.html5', 'parent')[0]['identity']);
     }
 
     /**

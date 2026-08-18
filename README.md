@@ -69,6 +69,16 @@ System-Einstellungen.
   **beweisbar und schädlich** ist; Backend-Rechte-Mounts und bloße
   Namensnennungen werden berichtet, halten aber nichts auf. Überschreiben mit
   `ignore_references=true` (landet in `tl_log`).
+- **Umbenennen und Verschieben werden mitgeprüft — aber nur, wo es wirklich
+  bricht**: `file_rename`, `file_move` und `template_rename` laufen durch
+  denselben Check. Contao behält beim Umbenennen Zeile, ID und UUID und
+  schreibt nur `tl_files.path` neu — also überleben `singleSRC = <uuid>` und
+  `{{file::<uuid>}}` das problemlos, während `{{file::files/x.svg}}`, ein
+  SCSS-`@import` und ein hartcodierter Template-Pfad brechen. Blockiert wird
+  deshalb **nur, was an diesem Pfad bzw. Namen hängt**; alles UUID-/ID-basierte
+  wird gezeigt, hält aber nichts auf. Ein `.html5`-Template in einen anderen
+  Ordner zu verschieben ist folgerichtig gar nicht blockiert: Contao findet es
+  über den Basisnamen, der sich dabei nicht ändert.
 - **Backend-Modul** „MCP-Server" mit vier Bereichen: Status (Lizenz + Testphase/
   Abo starten, OAuth-Clients, IATs), Konfiguration, Aktivitätslog, Tool-Panel
   (jedes Tool einzeln abschaltbar) — **nur für Contao-Administratoren**.

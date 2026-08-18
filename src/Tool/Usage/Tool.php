@@ -75,6 +75,16 @@ final class Tool
             filemount …), where a stale entry is harmless. Reported for a human to judge,
             never blocking.
 
+            Each reference carries `identity` — what it is anchored on: "uuid", "path",
+            "name" or "id". This is what separates a delete from a rename. Renaming or
+            moving a file rewrites tl_files.path but keeps the row, the id and the UUID, so
+            `singleSRC = <uuid>` and `{{file::<uuid>}}` survive it, while
+            `{{file::files/x.svg}}`, an SCSS `@import` and a hardcoded template path do not.
+            file_rename / file_move are therefore only refused for `identity: "path"`, and
+            template_rename only when the template NAME actually changes — moving a legacy
+            `.html5` between folders keeps its basename, so nothing breaks and nothing is
+            refused. Deletions take everything, so they are refused for any of them.
+
             Rows that the deletion would remove anyway (a page's own articles, a folder's own
             files) are NOT counted — they are the cascade, not a dangling reference.
 

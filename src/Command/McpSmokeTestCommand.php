@@ -1933,16 +1933,19 @@ final class McpSmokeTestCommand extends Command
         file_put_contents($usageFileDir.'/_colors.scss', '$brand: #c00;'."\n");
         file_put_contents($usageFileDir.'/app.scss', "@import 'colors';\n");
         file_put_contents($usageFileDir.'/unrelated.scss', ".colors { color: red; }\n");
+        // Referenced ONLY by UUID (via singleSRC below), so it can show that a
+        // rename leaves such a reference intact.
+        file_put_contents($usageFileDir.'/logo.svg', "<svg/>\n");
 
         $usageFileIds = [];
 
-        foreach (['_colors.scss', 'app.scss', 'unrelated.scss'] as $i => $name) {
+        foreach (['_colors.scss', 'app.scss', 'unrelated.scss', 'logo.svg'] as $i => $name) {
             $this->connection->insert('tl_files', [
                 'tstamp' => time(),
                 'uuid' => StringUtil::uuidToBin(sprintf('%08x-0000-11f1-9000-%012x', crc32($stamp), $i + 1)),
                 'type' => 'file',
                 'path' => 'files/'.$stamp.'_usage/'.$name,
-                'extension' => 'scss',
+                'extension' => pathinfo($name, \PATHINFO_EXTENSION),
                 'hash' => md5($name),
                 'found' => 1,
                 'name' => $name,
@@ -1989,7 +1992,12 @@ final class McpSmokeTestCommand extends Command
                     && $usageContentId === ($ref['id'] ?? 0),
             ));
 
-        $this->connection->update('tl_content', ['singleSRC' => null], ['id' => $usageContentId]);
+        $expect('a UUID reference is reported as UUID-anchored, not path-anchored',
+            $this->usageTool->find('file', $partialPath),
+            fn ($r) => [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'singleSRC' === ($ref['field'] ?? '') && 'uuid' === ($ref['identity'] ?? ''),
+            ));
 
         $expect('an unreferenced file deletes without complaint',
             ['denial' => $this->deletionGuard->check(
@@ -1998,6 +2006,70 @@ final class McpSmokeTestCommand extends Command
             )],
             fn ($r) => null === $r['denial']);
 
+        // Rename/move rewrite tl_files.path and keep the row, the id and the
+        // UUID — verified against Dbafs::moveResource. So a UUID reference
+        // survives them and must NOT stop them, while a path-shaped one must.
+        // `_colors.scss` carries BOTH: an @import (path) and a singleSRC (uuid).
+        $renameDenial = $this->deletionGuard->check(
+            'file_rename',
+            ['path' => $partialPath, 'new_name' => '_colours.scss'],
+        );
+
+        $expect('rename IS blocked by a path reference (an SCSS @import)',
+            ['denial' => $renameDenial],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        $expect('only path-anchored references are given as the reason',
+            ['denial' => $renameDenial],
+            fn ($r) => [] === array_filter(
+                $r['denial']['references'],
+                static fn (array $ref): bool => 'path' !== ($ref['identity'] ?? ''),
+            ));
+
+        $expect('the surviving UUID reference is still reported, just not as a blocker',
+            ['denial' => $renameDenial],
+            fn ($r) => [] !== array_filter(
+                $r['denial']['other_findings'],
+                static fn (array $ref): bool => 'uuid' === ($ref['identity'] ?? ''),
+            ));
+
+        $expect('move is judged the same way as rename',
+            ['denial' => $this->deletionGuard->check(
+                'file_move',
+                ['path' => $partialPath, 'new_parent_path' => $stamp.'_usage'],
+            )],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        // logo.svg is referenced ONLY by UUID — nothing about it changes when
+        // it is renamed, so the guard must stay out of the way. The same file
+        // must still be protected from deletion.
+        $this->connection->update('tl_content', ['singleSRC' => (string) $this->connection->fetchOne(
+            'SELECT uuid FROM tl_files WHERE id = ?',
+            [$usageFileIds['logo.svg']],
+        )], ['id' => $usageContentId]);
+
+        $expect('rename is NOT blocked by a UUID reference, which survives it',
+            [
+                'rename' => $this->deletionGuard->check(
+                    'file_rename',
+                    ['path' => $stamp.'_usage/logo.svg', 'new_name' => 'logo-renamed.svg'],
+                ),
+                'move' => $this->deletionGuard->check(
+                    'file_move',
+                    ['path' => $stamp.'_usage/logo.svg', 'new_parent_path' => $stamp.'_usage'],
+                ),
+            ],
+            fn ($r) => null === $r['rename'] && null === $r['move']);
+
+        $expect('the same UUID reference still stops the DELETE',
+            ['denial' => $this->deletionGuard->check(
+                'file_delete',
+                ['path' => $stamp.'_usage/logo.svg', 'confirm_destructive' => true],
+            )],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        $this->connection->update('tl_content', ['singleSRC' => null], ['id' => $usageContentId]);
+
         foreach ($usageFileIds as $fileId) {
             $this->connection->delete('tl_files', ['id' => $fileId]);
         }
@@ -2005,6 +2077,7 @@ final class McpSmokeTestCommand extends Command
         @unlink($usageFileDir.'/_colors.scss');
         @unlink($usageFileDir.'/app.scss');
         @unlink($usageFileDir.'/unrelated.scss');
+        @unlink($usageFileDir.'/logo.svg');
         @rmdir($usageFileDir);
 
         // (FEATURE) templates. Deleting an override that a content element or
@@ -2096,6 +2169,33 @@ final class McpSmokeTestCommand extends Command
                 ['path' => $legacy('parent').'.html5', 'confirm_destructive' => true, 'ignore_references' => true],
             )],
             fn ($r) => null === $r['denial']);
+
+        $expect('renaming a used template is blocked — the name is how it is found',
+            ['denial' => $this->deletionGuard->check(
+                'template_rename',
+                ['path' => $legacy('parent').'.html5', 'new_path' => $legacy('parent_renamed').'.html5'],
+            )],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        $expect('MOVING a legacy .html5 template is not blocked — its name is the basename',
+            // Contao finds .html5 templates by basename wherever they sit, so
+            // a pure folder move changes nothing that references them.
+            ['denial' => $this->deletionGuard->check(
+                'template_rename',
+                ['path' => $legacy('parent').'.html5', 'new_path' => 'sub/'.$legacy('parent').'.html5'],
+            )],
+            fn ($r) => null === $r['denial']);
+
+        $this->connection->update('tl_content', ['customTpl' => $twigName], ['id' => $usageContentId]);
+
+        $expect('moving a Twig template IS blocked — its name is its full path',
+            ['denial' => $this->deletionGuard->check(
+                'template_rename',
+                ['path' => $stamp.'_tpl/variant.html.twig', 'new_path' => 'other/variant.html.twig'],
+            )],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        $this->connection->update('tl_content', ['customTpl' => ''], ['id' => $usageContentId]);
 
         foreach (['custom', 'parent', 'parent_extra', 'child', 'orphan'] as $suffix) {
             @unlink($tplDir.'/'.$legacy($suffix).'.html5');

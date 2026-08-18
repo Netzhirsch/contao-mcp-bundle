@@ -91,6 +91,19 @@ final class ReferenceFieldMap
     }
 
     /**
+     * What a column anchors its reference on — see {@see UsageScanner}'s
+     * IDENTITY_* constants. Drives whether a rename breaks it.
+     */
+    public static function identityFor(string $encoding): string
+    {
+        return match ($encoding) {
+            self::ENC_UUID, self::ENC_UUID_LIST => UsageScanner::IDENTITY_UUID,
+            self::ENC_TEMPLATE_NAME => UsageScanner::IDENTITY_NAME,
+            default => UsageScanner::IDENTITY_ID,
+        };
+    }
+
+    /**
      * Columns that can hold a reference to `$targetTable`.
      *
      * @param list<string> $tables Tables to inspect
