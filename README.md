@@ -335,6 +335,18 @@ Issues / Findings bitte ins Repo, plus Anhang:
 - Backend-User-Rolle + Contao-Version
 - Relevante Einträge aus `var/log/prod.log` (Symfony-Standard-Log)
 
+## Update von einer Version ≤ 1.4.0
+
+Die Patch-Dateien entfallen ab 1.4.1. Steht in der **Root**-`composer.json` noch
+der frühere Patch-Block, **vor** dem Update entfernen — sonst sucht
+`cweagans/composer-patches` nach nicht mehr vorhandenen Dateien und bricht ab:
+
+- den `extra.patches`-Eintrag für `php-mcp/server`
+- `"cweagans/composer-patches"` aus `require` (falls nichts anderes es braucht)
+- `"cweagans/composer-patches": true` aus `config.allow-plugins`
+
+Danach wie gewohnt `composer update netzhirsch/contao-mcp-bundle`.
+
 ## Wartung
 
 Composer-Updates des Bundles:

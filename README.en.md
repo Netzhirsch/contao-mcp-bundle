@@ -264,6 +264,18 @@ Recommended: `tar` over `var/mcp/`, a mysqldump of the five `tl_mcp_oauth_*`
 tables, and a dump of the full Contao schema (the external-ID columns live on the
 entity tables, so they cannot be backed up separately).
 
+## Updating from 1.4.0 or older
+
+The patch files are gone as of 1.4.1. If your **root** `composer.json` still
+carries the former patch block, remove it **before** updating — otherwise
+`cweagans/composer-patches` looks for files that no longer ship and aborts:
+
+- the `extra.patches` entry for `php-mcp/server`
+- `"cweagans/composer-patches"` from `require` (unless something else needs it)
+- `"cweagans/composer-patches": true` from `config.allow-plugins`
+
+Then update as usual with `composer update netzhirsch/contao-mcp-bundle`.
+
 ## Maintenance
 
 ```bash

@@ -8,6 +8,20 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [1.4.1] – 2026-08-18
 
+> **Beim Update von ≤ 1.4.0 zwingend:** Die Patch-Dateien werden nicht mehr
+> mitgeliefert. Wer den bisher nötigen Patch-Block in seiner **Root**-
+> `composer.json` stehen hat, muss ihn **vor** dem Update entfernen — sonst
+> sucht `cweagans/composer-patches` nach
+> `vendor/netzhirsch/contao-mcp-bundle/patches/*.patch` und bricht ab. Zu
+> löschen sind:
+>
+> - der komplette `extra.patches`-Eintrag für `php-mcp/server`
+> - `"cweagans/composer-patches"` aus `require` (sofern nichts anderes es braucht)
+> - `"cweagans/composer-patches": true` aus `config.allow-plugins`
+>
+> Danach `composer update netzhirsch/contao-mcp-bundle`. Neuinstallationen sind
+> nicht betroffen — dort ist einfach nichts mehr einzurichten.
+
 ### Fixed
 - **Installation über den Contao Manager war unmöglich.** Das Bundle verlangte
   `cweagans/composer-patches`, um zwei Patches gegen `php-mcp/server`
