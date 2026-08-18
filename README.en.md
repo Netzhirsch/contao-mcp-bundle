@@ -5,7 +5,7 @@
 *🇩🇪 [Deutsche Fassung](README.md) — the German README is the reference version and
 carries additional development notes.*
 
-**Status:** Stable — `v1.4.0`
+**Status:** Stable — `v1.4.1`
 **License:** proprietary, commercially licensed — 30-day free trial, then
 €49/month per Contao installation (see [License & trial](#license--trial) and
 [LICENSE](LICENSE))
@@ -85,52 +85,23 @@ URL rewrites, form leads, maintenance and system settings.
 
 ## Installation
 
-### 1. The Contao project's composer.json
-
-The bundle is on [Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle),
-so no `repositories` entry is needed. What *is* required is the patch block, because
-two patches are applied against `php-mcp/server`:
-
-```json
-{
-    "require": {
-        "netzhirsch/contao-mcp-bundle": "^1.0",
-        "cweagans/composer-patches": "^1.7"
-    },
-    "config": {
-        "allow-plugins": {
-            "cweagans/composer-patches": true
-        }
-    },
-    "extra": {
-        "patches": {
-            "php-mcp/server": {
-                "Pluggable Bearer-auth + OAuth Authorization Server Metadata hooks": "vendor/netzhirsch/contao-mcp-bundle/patches/transport-auth-and-oauth-metadata.patch",
-                "Optional tool-filter for tools/list (Lazy-Mode)": "vendor/netzhirsch/contao-mcp-bundle/patches/dispatcher-tool-filter.patch"
-            }
-        }
-    }
-}
-```
-
-> The `extra.patches` block must live in the **root** `composer.json` — Composer
-> ignores patch declarations coming from dependencies, by design.
-
-### 2. Composer
+### 1. Composer
 
 ```bash
 composer require netzhirsch/contao-mcp-bundle
 ```
 
-Alternatively, search for "Contao MCP Bundle" in the **Contao Manager** and
-install it there — no token and no repository entry required.
+That is all — no `repositories` entry, no patch block, no `allow-plugins`. The
+bundle is on [Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle).
 
-### 3. Register the bundle
+Or search for "Contao MCP Bundle" in the **Contao Manager** and install it there.
+
+### 2. Register the bundle
 
 Handled by the Contao Manager Plugin — there is nothing to add to
 `config/bundles.php`.
 
-### 4. Schema migrations and initial config
+### 3. Schema migrations and initial config
 
 ```bash
 vendor/bin/contao-console contao:migrate --env=prod
@@ -145,14 +116,14 @@ The MCP endpoint is live immediately after the migration at
 `https://<backend_url>/mcp` — Apache/PHP-FPM serves it like any other Symfony
 route. No daemon, no port, no reverse proxy.
 
-### 5. Activate the license (30 days free)
+### 4. Activate the license (30 days free)
 
 Without an active license every tool answers `license_inactive` — Contao itself
 keeps running normally. In the backend under **MCP-Server → Status**, click
 **"Start trial"**: 30 days, no payment details. See
 [License & trial](#license--trial).
 
-### 6. Connect a client
+### 5. Connect a client
 
 Guides in this repository: [docs/installation.md](docs/installation.md)
 (connecting a client, online and locally) and
@@ -299,9 +270,10 @@ entity tables, so they cannot be backed up separately).
 composer update netzhirsch/contao-mcp-bundle
 ```
 
-Vendor patches against `php-mcp/server` are reapplied automatically on
-`composer install`/`update`. After a `php-mcp/server` major bump the patches may
-need adjusting — see `patches/README.md`.
+**No vendor patches are applied.** What the bundle needs from the dispatcher
+(the lazy-mode tool filter and the post-call cleanup) lives in
+`Server\ContaoDispatcher`, a subclass. After a `php-mcp/server` major bump,
+check there that `handleToolList()` and `handleToolCall()` still line up.
 
 | Command | Purpose | Suggested cadence |
 |---|---|---|
@@ -316,12 +288,8 @@ license renewal depends on it.
 
 ## Known limitations
 
-As of `v1.4.0`:
+As of `v1.4.1`:
 
-- **Vendor patches** against `php-mcp/server` (two, via
-  `cweagans/composer-patches`) are needed until upstream PR #59 (PSR-7 middleware
-  support) is released. The second patch (`dispatcher-tool-filter`) is expected to
-  stay permanently as our own extension — no upstream equivalent is planned.
 - **PHPUnit coverage** focuses on OAuth crypto, the permission map and the usage
   scanner. The tool layer is exercised end-to-end by the smoke test instead.
 - **Encryption-key rotation** is not implemented. `var/mcp/oauth/encryption.key`

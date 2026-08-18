@@ -6,7 +6,45 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-## [1.4.0] – 2026-08-18
+## [1.4.1] – 2026-08-18
+
+### Fixed
+- **Installation über den Contao Manager war unmöglich.** Das Bundle verlangte
+  `cweagans/composer-patches`, um zwei Patches gegen `php-mcp/server`
+  anzuwenden. Das ist ein Composer-**Plugin**, und Composer verweigert die
+  Ausführung nicht freigegebener Plugins — der Contao Manager kann aber nichts
+  zu `allow-plugins` in der Root-`composer.json` hinzufügen. Ergebnis auf einer
+  frischen Instanz:
+
+  > cweagans/composer-patches contains a Composer plugin which is blocked by
+  > your allow-plugins config.
+
+  `composer install` brach mit Exit-Code 1 ab. Betroffen war damit ausgerechnet
+  der Weg, auf dem Contao-Erweiterungen normalerweise installiert werden.
+
+  **Die Patches sind jetzt weg**, und mit ihnen die Plugin-Abhängigkeit, der
+  `extra.patches`-Block und der `allow-plugins`-Eintrag. Installation ist wieder
+  ein nacktes `composer require netzhirsch/contao-mcp-bundle`.
+
+  Möglich war das, weil die beiden Patches unterschiedlich viel wert waren:
+  - Der **Transport-Patch** hing an `StreamableHttpServerTransport` — dem
+    ReactPHP-Daemon, den das Bundle seit der Umstellung auf HTTP-only gar nicht
+    mehr benutzt. Er hat toten Code gepatcht.
+  - Der **Dispatcher-Patch** (Lazy-Mode-Filter, Post-Call-Cleanup) war echt, ließ
+    sich aber ersetzen: `Dispatcher` ist weder final noch geschlossen, also
+    erledigt das jetzt `Server\ContaoDispatcher` als Subklasse. Die Factory baut
+    sie direkt, statt den intern erzeugten Dispatcher herauszureflektieren — was
+    nebenbei den Reflection-Hack für den `ObjectAwareSchemaValidator` überflüssig
+    macht, der bisher nachträglich hineingetauscht wurde.
+
+  Verifiziert gegen einen **ungepatchten** Vendor: Lazy-Mode aus → 175 Tools in
+  `tools/list`, Lazy-Mode an → genau die sechs Discovery-/Probe-Tools, versteckte
+  Tools weiterhin über `contao_call` erreichbar. Smoke-Test 273/273.
+
+### Changed
+- README (deutsch und englisch): Installationsabschnitt auf den einen
+  Composer-Befehl eingedampft — der Patch-Block, den bisher jede Root-
+  `composer.json` von Hand brauchte, entfällt ersatzlos.
 
 > **Verhaltensänderung:** `file_rename`, `file_move` und `template_rename`
 > können jetzt mit `still_in_use` abgelehnt werden. Wie beim Löschen hebelt

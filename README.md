@@ -4,7 +4,7 @@
 
 *🇬🇧 [English version](README.en.md) — diese deutsche Fassung ist die Referenz.*
 
-**Status:** Stable — `v1.4.0`
+**Status:** Stable — `v1.4.1`
 **Lizenz:** proprietär, kommerziell lizenziert — 30 Tage kostenlos testen,
 danach 49 €/Monat je Contao-Instanz (siehe [Lizenz & Testphase](#lizenz--testphase)
 und [LICENSE](LICENSE))
@@ -88,52 +88,25 @@ System-Einstellungen.
 
 ## Installation
 
-### 1. composer.json des Contao-Projekts
-
-Das Bundle liegt auf [Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle)
-— kein `repositories`-Eintrag nötig. Erforderlich ist nur der Patch-Block, weil
-zwei Patches gegen `php-mcp/server` angewendet werden müssen:
-
-```json
-{
-    "require": {
-        "netzhirsch/contao-mcp-bundle": "^1.0",
-        "cweagans/composer-patches": "^1.7"
-    },
-    "config": {
-        "allow-plugins": {
-            "cweagans/composer-patches": true
-        }
-    },
-    "extra": {
-        "patches": {
-            "php-mcp/server": {
-                "Pluggable Bearer-auth + OAuth Authorization Server Metadata hooks": "vendor/netzhirsch/contao-mcp-bundle/patches/transport-auth-and-oauth-metadata.patch",
-                "Optional tool-filter for tools/list (Lazy-Mode)": "vendor/netzhirsch/contao-mcp-bundle/patches/dispatcher-tool-filter.patch"
-            }
-        }
-    }
-}
-```
-
-> Die `extra.patches`-Block muss in der **root** `composer.json` stehen —
-> Composer ignoriert Patch-Declarations aus Dependencies (by design).
-
-### 2. Composer
+### 1. Composer
 
 ```bash
 composer require netzhirsch/contao-mcp-bundle
 ```
 
-Alternativ im **Contao Manager** nach „Contao MCP Bundle" suchen und
-installieren — kein Token, kein Repository-Eintrag nötig.
+Mehr ist nicht nötig — kein `repositories`-Eintrag, kein Patch-Block, kein
+`allow-plugins`. Das Bundle liegt auf
+[Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle).
 
-### 3. Bundle registrieren
+Alternativ im **Contao Manager** nach „Contao MCP Bundle" suchen und
+installieren.
+
+### 2. Bundle registrieren
 
 Auto-Discovery über das Contao Manager Plugin — kein manuelles Eintragen in
 `config/bundles.php` nötig.
 
-### 4. Schema-Migrationen + erste Konfig
+### 3. Schema-Migrationen + erste Konfig
 
 ```bash
 vendor/bin/contao-console contao:migrate --env=prod
@@ -148,14 +121,14 @@ Der MCP-Endpoint ist nach der Migration sofort live unter
 `https://<backend_url>/mcp` — Apache/PHP-FPM serviert ihn wie jede andere
 Symfony-Route. Kein Daemon, kein Port, kein Reverse-Proxy nötig.
 
-### 5. Lizenz aktivieren (30 Tage kostenlos)
+### 4. Lizenz aktivieren (30 Tage kostenlos)
 
 Ohne aktive Lizenz antworten alle Tools mit `license_inactive` — Contao selbst
 läuft normal weiter. Im Backend unter **MCP-Server → Status** oben auf
 **„Testphase starten"** klicken: 30 Tage, ohne Zahlungsdaten. Details siehe
 [Lizenz & Testphase](#lizenz--testphase).
 
-### 6. In Claude Desktop / Cowork einbinden
+### 5. In Claude Desktop / Cowork einbinden
 
 **Anleitungen im Repo:** [docs/installation.md](docs/installation.md)
 (Client anbinden, online + lokal) und [docs/dokumentation.md](docs/dokumentation.md)
@@ -293,13 +266,8 @@ netzhirsch_contao_mcp:
 
 ## Bekannte Einschränkungen
 
-Stand `v1.4.0`:
+Stand `v1.4.1`:
 
-- **Vendor-Patches** an `php-mcp/server` (zwei Patches via
-  `cweagans/composer-patches`) sind notwendig, bis upstream PR #59
-  (PSR-7-Middleware-Support) released ist. Der zweite Patch
-  (`dispatcher-tool-filter`) bleibt voraussichtlich permanent als
-  eigene Erweiterung — kein Upstream-Pendant geplant.
 - **PHPUnit-Coverage** fokussiert OAuth-Crypto (KeyManager, IAT,
   Rotation). Tool-Layer wird ausschließlich vom Smoke-Test exerziert.
 - **Encryption-Key-Rotation** ist NICHT implementiert. Der
@@ -375,9 +343,10 @@ Composer-Updates des Bundles:
 composer update netzhirsch/contao-mcp-bundle
 ```
 
-Vendor-Patches (php-mcp/server) werden automatisch beim
-`composer install`/`update` reapplied. Bei einem `php-mcp/server`-Major-Bump
-ggf. Patches anpassen — siehe `patches/README.md`.
+Es werden **keine Vendor-Patches** mehr angewendet: was das Bundle am
+Dispatcher braucht (Lazy-Mode-Filter, Post-Call-Cleanup), liegt in
+`Server\ContaoDispatcher` als Subklasse. Bei einem `php-mcp/server`-Major-Bump
+dort prüfen, ob `handleToolList()`/`handleToolCall()` noch passen.
 
 ### Console-Kommandos
 

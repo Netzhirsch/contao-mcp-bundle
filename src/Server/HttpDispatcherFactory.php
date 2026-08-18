@@ -8,6 +8,7 @@ use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\ContaoMcpBundle;
 use PhpMcp\Server\Server;
 use PhpMcp\Server\Dispatcher;
+use PhpMcp\Server\Session\SubscriptionManager;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -51,6 +52,7 @@ final class HttpDispatcherFactory
         private readonly McpServerConfigStorage $configStorage,
         private readonly RegistryAccessor $registryAccessor,
         private readonly ToolFilter $toolFilter,
+        private readonly PostCallHook $postCallHook,
         private readonly ExtensionToolRegistrar $extensionToolRegistrar,
         private readonly RequestStack $requestStack,
         private readonly string $serverName,
@@ -82,27 +84,54 @@ final class HttpDispatcherFactory
             }
         }
 
-        // The Dispatcher is constructed internally by Server::build() but is
-        // not exposed by a public accessor. Reflect into it ONCE; cheap.
-        $rc = new \ReflectionObject($server);
-        $protocolProp = $rc->getProperty('protocol');
-        $protocolProp->setAccessible(true);
-        $protocol = $protocolProp->getValue($server);
-
-        $rcp = new \ReflectionObject($protocol);
-        $dispatcherProp = $rcp->getProperty('dispatcher');
-        $dispatcherProp->setAccessible(true);
-        $this->dispatcher = $dispatcherProp->getValue($protocol);
-
-        // Swap the Dispatcher's internally-built SchemaValidator for our
-        // object-aware one. Fixes false-positive rejection of empty object
-        // params (`fields: {}` → opis "received unknown") without a vendor
-        // patch — see ObjectAwareSchemaValidator for the why.
-        $svProp = (new \ReflectionObject($this->dispatcher))->getProperty('schemaValidator');
-        $svProp->setAccessible(true);
-        $svProp->setValue($this->dispatcher, new ObjectAwareSchemaValidator($this->logger));
+        // Build OUR dispatcher rather than using the one Server::build()
+        // constructed internally. ContaoDispatcher adds the Lazy-Mode tool
+        // filter and the post-call cleanup that used to live in a vendor
+        // patch — see that class for why patching had to go.
+        //
+        // It also takes the object-aware SchemaValidator straight through the
+        // constructor, instead of swapping the internally-built one in by
+        // reflection afterwards (it rejects empty object params like
+        // `fields: {}` — see ObjectAwareSchemaValidator).
+        $this->dispatcher = new ContaoDispatcher(
+            $server->getConfiguration(),
+            $server->getRegistry(),
+            $this->subscriptionManagerOf($server),
+            new ObjectAwareSchemaValidator($this->logger),
+            $this->toolFilter,
+            $this->postCallHook,
+            $this->logger,
+        );
 
         return $this->dispatcher;
+    }
+
+    /**
+     * The SubscriptionManager the Server built for itself. Reused rather than
+     * newly constructed so a subscription made through the Protocol and one
+     * seen by the Dispatcher stay the same object — the bundle exposes no MCP
+     * resources today, but a fresh instance would be a silent trap the day it
+     * does. Falls back to a new instance if the internals ever move.
+     */
+    private function subscriptionManagerOf(Server $server): SubscriptionManager
+    {
+        try {
+            $dispatcherProp = (new \ReflectionObject($protocol = $server->getProtocol()))->getProperty('dispatcher');
+            $dispatcherProp->setAccessible(true);
+            $vendorDispatcher = $dispatcherProp->getValue($protocol);
+
+            $smProp = (new \ReflectionObject($vendorDispatcher))->getProperty('subscriptionManager');
+            $smProp->setAccessible(true);
+            $subscriptionManager = $smProp->getValue($vendorDispatcher);
+
+            if ($subscriptionManager instanceof SubscriptionManager) {
+                return $subscriptionManager;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('Could not reuse the server SubscriptionManager.', ['exception' => $e]);
+        }
+
+        return new SubscriptionManager($this->logger);
     }
 
     public function getServer(): Server
