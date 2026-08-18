@@ -45,6 +45,13 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Netzhirsch\ContaoMcpBundle\Server\ContaoDispatcher;
+use Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory;
+use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
+use Netzhirsch\ContaoMcpBundle\Server\ToolFilter;
+use PhpMcp\Schema\Request\CallToolRequest;
+use PhpMcp\Schema\Request\ListToolsRequest;
+use PhpMcp\Schema\Result\CallToolResult;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 
 /**
@@ -98,6 +105,9 @@ final class McpSmokeTestCommand extends Command
         private readonly \Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard $permissionGuard,
         private readonly \Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer $permissionEnforcer,
         private readonly McpCallContext $mcpCallContext,
+        private readonly HttpDispatcherFactory $dispatcherFactory,
+        private readonly ToolFilter $toolFilter,
+        private readonly RegistryAccessor $registryAccessor,
         private readonly string $projectDir,
     ) {
         parent::__construct();
@@ -2211,6 +2221,79 @@ final class McpSmokeTestCommand extends Command
         $this->connection->delete('tl_article', ['id' => $usageArticleId]);
         $this->connection->delete('tl_module', ['id' => $usageModuleId]);
         $this->connection->delete('tl_page', ['id' => $usagePageId]);
+
+        // ═══════════════════════ Dispatcher ════════════════════════
+        // This is what used to be the vendor patch. Every section above calls
+        // the Tool services directly, so nothing there ever goes through the
+        // dispatcher — these asserts are the only coverage the lazy-mode
+        // filter and the post-call hook get.
+        $output->writeln("\n<comment>Dispatcher (Lazy-Mode + Post-Call-Hook)</comment>");
+
+        $dispatcher = $this->dispatcherFactory->getDispatcher();
+
+        $expect('factory builds the Contao subclass, not the vendor Dispatcher',
+            $dispatcher, static fn ($d) => $d instanceof ContaoDispatcher);
+
+        $listNames = static fn ($d): array => array_map(
+            static fn ($t) => $t->name,
+            $d->handleToolList(new ListToolsRequest(1))->tools,
+        );
+
+        // lazy_mode defaults to false, but a dev instance may already have it
+        // on — and enable() has no counterpart. So only assert the unfiltered
+        // list while it is genuinely still unfiltered.
+        if (!$this->toolFilter->isEnabled()) {
+            $expect('unfiltered tools/list exposes the full catalogue',
+                $listNames($dispatcher), static fn (array $n) => \count($n) > 100);
+        } else {
+            $output->writeln('  <comment>~ unfiltered list skipped — lazy_mode is already on here</comment>');
+        }
+
+        $this->toolFilter->enable();
+        $lazyNames = $listNames($dispatcher);
+
+        $expect('lazy-mode tools/list keeps the discovery tools',
+            $lazyNames,
+            static fn (array $n) => \in_array('contao_call', $n, true)
+                && \in_array('contao_search_tools', $n, true)
+                && \in_array('ping', $n, true));
+
+        $expect('lazy-mode tools/list drops everything else',
+            $lazyNames,
+            fn (array $n) => !\in_array('pages_list', $n, true)
+                && \count($n) <= \count($this->toolFilter->exposedNames()));
+
+        // Hidden is not gone: contao_call proxies to tools that tools/list
+        // never showed. If this breaks, lazy-mode silently amputates the API.
+        $expect('a hidden tool is still resolvable for contao_call',
+            $this->registryAccessor->get()->getTool('pages_list'),
+            static fn ($t) => $t !== null);
+
+        // Post-call hook — the second half of the old patch. Observable side
+        // effect: it clears the per-call identity context.
+        $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
+        $pingResult = $dispatcher->handleToolCall(new CallToolRequest(2, 'ping', []));
+
+        $expect('tools/call through the dispatcher returns a result',
+            $pingResult, static fn ($r) => $r instanceof CallToolResult && !$r->isError);
+        $expect('post-call hook cleared the call context',
+            $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
+
+        // …and it must run on the failure path too, or a throwing tool leaks
+        // the previous caller's identity into the next call. That is exactly
+        // what the `finally` in ContaoDispatcher::handleToolCall is for.
+        $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
+        $threw = false;
+
+        try {
+            $dispatcher->handleToolCall(new CallToolRequest(3, 'no_such_tool_'.$stamp, []));
+        } catch (\Throwable) {
+            $threw = true;
+        }
+
+        $expect('an unknown tool still raises', $threw, static fn ($t) => $t === true);
+        $expect('post-call hook ran even though the call threw',
+            $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
 
         // ═══════════════════════ Cleanup ═══════════════════════════
         if (!$keep) {

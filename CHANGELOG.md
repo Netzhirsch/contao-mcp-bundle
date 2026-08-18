@@ -68,6 +68,14 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   zeigen darf, ohne Composer abzuschießen. Ein Unit-Test
   (`tests/Unit/Compat/ShippedPatchFilesTest.php`) verhindert, dass sie vorher
   versehentlich verschwinden.
+- Smoke-Test deckt jetzt den Dispatcher selbst ab (8 neue Asserts, 281 gesamt).
+  Die Tool-Sektionen rufen die Services direkt auf, gingen also nie durch
+  `ContaoDispatcher` — der Ersatz für den Patch war damit ausgerechnet an der
+  Stelle ungetestet, an der er den Patch ersetzt: Lazy-Mode-Filter in
+  `tools/list`, versteckte Tools weiterhin über die Registry auflösbar,
+  `tools/call` über den Dispatcher, und der Post-Call-Hook auf **beiden**
+  Pfaden — Erfolg wie Exception (das `finally`; ohne das würde eine werfende
+  Tool-Ausführung die Identität des vorigen Aufrufers stehen lassen).
 
 ## [1.4.0] – 2026-08-18
 
