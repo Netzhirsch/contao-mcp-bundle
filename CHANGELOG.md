@@ -62,6 +62,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   MCP-Server → Aktivität.
 
 ### Changed
+- **Auch die Ablehnungsmeldung führte mit dem IAT.** Der Text, der im
+  Aktivitätslog landet und den der Client zurückbekommt, begann mit „requires
+  an Initial Access Token" und nannte das Pairing-Fenster erst als Nachsatz.
+  Wer den Log liest, liest den Anfang. Er beginnt jetzt mit der Handlung:
+  „Client registration is closed. Open the pairing window in MCP-Server →
+  Status …" — das IAT steht am Ende, als Skript-Alternative.
 - **Das Backend behauptete, ein IAT sei Pflicht.** Unter „Client-Registrierungs-
   modus" hieß die Auswahl „Eingeschränkt (Initial Access Token erforderlich)",
   und der Hilfetext darunter schickte einen namentlich zum Knopf „Neues IAT

@@ -35,6 +35,12 @@ final class PairingWordingTest extends TestCase
         yield 'en catalogue' => ['contao/languages/en/mcp_server.xlf'];
         yield 'status template' => ['contao/templates/backend/be_mcp_status.html5'];
         yield 'config template' => ['contao/templates/backend/be_mcp_config.html5'];
+        // The refusal message is operator-facing too: it is what lands in
+        // tl_log when a client is turned away, and what the client itself
+        // gets back. Scoping this test to contao/ let it keep leading with
+        // "requires an Initial Access Token" while every other string had
+        // already been corrected.
+        yield 'registration endpoint' => ['src/Controller/OAuth/RegisterController.php'];
     }
 
     /**
@@ -46,6 +52,7 @@ final class PairingWordingTest extends TestCase
             'Initial Access Token required',
             'Initial Access Token erforderlich',
             'must supply a valid Initial Access Token',
+            'requires an Initial Access Token',
             'müssen beim Registrieren ein gültiges Initial Access Token',
         ];
     }

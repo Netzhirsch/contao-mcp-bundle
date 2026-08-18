@@ -82,7 +82,7 @@ final class RegisterController
                 return $this->refuse(
                     $request,
                     'invalid_token',
-                    'Dynamic client registration requires an Initial Access Token (`Authorization: Bearer iat_…`) — or open the pairing window in MCP-Server → Status and connect within 15 minutes. Standard MCP clients cannot send an IAT header — the pairing window is the path for them.',
+                    'Client registration is closed. Open the pairing window in MCP-Server → Status (button: "Registrierung für 15 Minuten öffnen") and connect the client while it is open. Scripts that can send an Authorization header during registration may present an Initial Access Token instead.',
                     401,
                 );
             }
