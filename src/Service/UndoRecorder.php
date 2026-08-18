@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Service;
 
-use Contao\Controller;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\ToolPermissionMap;
@@ -33,6 +32,7 @@ final class UndoRecorder
         private readonly Connection $connection,
         private readonly ToolPermissionMap $map,
         private readonly AuthorResolver $authorResolver,
+        private readonly DeletionScope $scope,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -103,12 +103,11 @@ final class UndoRecorder
 
         try {
             $this->framework->initialize();
-            $this->framework->getAdapter(Controller::class)->loadDataContainer($table);
 
-            $ids = [$table => $this->collectIds($table, $id)];
-            foreach ($ids[$table] as $rowId) {
-                $ids = $this->collectChildren($table, $rowId, $ids);
-            }
+            // The cascade walk (and the DCA loading it needs) lives in
+            // DeletionScope, so the undo snapshot and the delete guard can
+            // never disagree about which rows a deletion removes.
+            $ids = $this->scope->collect($table, $id);
 
             $data = [];
             $affected = 0;
@@ -151,95 +150,6 @@ final class UndoRecorder
             $this->logger->warning('Could not record MCP undo snapshot.', ['table' => $table, 'id' => $id, 'exception' => $e]);
 
             return 0;
-        }
-    }
-
-    /**
-     * The record itself plus, for tree tables (pid but no parent table), all
-     * of its descendants — deleting a page takes its subpages with it.
-     *
-     * @return list<int>
-     */
-    private function collectIds(string $table, int $id): array
-    {
-        $dca = $GLOBALS['TL_DCA'][$table]['config'] ?? [];
-        $isTree = empty($dca['ptable']) && $this->columnExists($table, 'pid');
-
-        if (!$isTree) {
-            return [$id];
-        }
-
-        $ids = [$id];
-        $level = [$id];
-
-        // Iterative instead of recursive: a deep page tree would otherwise
-        // recurse as deep as the tree is.
-        while ([] !== $level) {
-            $level = array_map('intval', $this->connection->fetchFirstColumn(
-                'SELECT id FROM '.$this->connection->quoteIdentifier($table).' WHERE pid IN (?)',
-                [$level],
-                [\Doctrine\DBAL\ArrayParameterType::INTEGER],
-            ));
-            $level = array_diff($level, $ids); // cycle guard
-            $ids = [...$ids, ...$level];
-        }
-
-        return $ids;
-    }
-
-    /**
-     * Walk the DCA `ctable` relations, exactly like DC_Table::deleteChildren().
-     *
-     * @param array<string, list<int>> $ids
-     *
-     * @return array<string, list<int>>
-     */
-    private function collectChildren(string $table, int $id, array $ids): array
-    {
-        $ctables = $GLOBALS['TL_DCA'][$table]['config']['ctable'] ?? [];
-
-        if (!\is_array($ctables) || [] === $ctables) {
-            return $ids;
-        }
-
-        foreach ($ctables as $child) {
-            if (1 !== preg_match(self::TABLE_PATTERN, (string) $child)) {
-                continue;
-            }
-
-            $this->framework->getAdapter(Controller::class)->loadDataContainer($child);
-
-            if ($GLOBALS['TL_DCA'][$child]['config']['doNotDeleteRecords'] ?? false) {
-                continue;
-            }
-
-            $quoted = $this->connection->quoteIdentifier($child);
-
-            // Dynamic parent tables (tl_content) need the ptable as well,
-            // otherwise the snapshot would grab rows of a foreign parent.
-            $childIds = ($GLOBALS['TL_DCA'][$child]['config']['dynamicPtable'] ?? false)
-                ? $this->connection->fetchFirstColumn("SELECT id FROM $quoted WHERE pid = ? AND ptable = ?", [$id, $table])
-                : $this->connection->fetchFirstColumn("SELECT id FROM $quoted WHERE pid = ?", [$id]);
-
-            foreach (array_map('intval', $childIds) as $childId) {
-                if (\in_array($childId, $ids[$child] ?? [], true)) {
-                    continue;
-                }
-
-                $ids[$child] = [...($ids[$child] ?? []), $childId];
-                $ids = $this->collectChildren($child, $childId, $ids);
-            }
-        }
-
-        return $ids;
-    }
-
-    private function columnExists(string $table, string $column): bool
-    {
-        try {
-            return $this->connection->createSchemaManager()->introspectTable($table)->hasColumn($column);
-        } catch (\Throwable) {
-            return false;
         }
     }
 }

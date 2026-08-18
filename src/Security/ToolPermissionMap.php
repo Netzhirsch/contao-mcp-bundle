@@ -139,6 +139,13 @@ final class ToolPermissionMap
         // their access depends on frontend member groups, not backend rights.)
         'search_query' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'search_index_status' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
+
+        // Reference lookup. It reads across every table to answer "what breaks
+        // if I delete this", so it cannot be expressed as one DataContainer
+        // permission — and a restricted user seeing that "some tl_module row
+        // links here" would still be a disclosure. Admin-only, matching the
+        // MCP backend modules.
+        'usage_find' => ['kind' => 'admin'],
     ];
 
     /**

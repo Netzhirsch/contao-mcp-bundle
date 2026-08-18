@@ -53,6 +53,22 @@ System-Einstellungen.
   Kind-Datensätzen in `tl_undo` — wiederherstellbar über **Contaos normales
   „Rückgängig"** im Backend. Wiederherstellen bleibt bewusst Handarbeit: Die KI
   kann löschen, aber nichts stillschweigend zurückholen.
+- **Löschungen, die etwas kaputt machen würden, werden blockiert**:
+  `usage_find` beantwortet „wo wird das benutzt?" für Seiten, Dateien, Bilder,
+  Artikel, Module, Formulare, Templates, Bildgrößen und alles Weitere — und
+  **derselbe Check läuft automatisch vor jedem `*_delete`**. Gefunden wird an
+  vier Stellen: DB-Felder (aus der DCA abgeleitet, also inkl. Extension-Feldern),
+  **Insert-Tags in beliebigen Textspalten** (`{{link::42}}`, auch per Alias,
+  `{{file::…}}`, `{{insert_module::…}}`), **in Dateien selbst** —
+  `@import`/`url()` in SCSS/CSS, hartcodierte Pfade in Templates — und bei
+  **Templates** jede `customTpl`/`…Tpl`-Spalte, die darauf zeigt, plus
+  `{% extends %}` / `$this->extend()` aus anderen Templates. Damit fallen auch
+  die Fälle auf, die keine Datenbankabfrage sieht: `_colors.scss` wird als
+  `@import 'colors'` eingebunden, und ein gelöschtes `ce_text_custom` ändert
+  stillschweigend, wie ein Content-Element rendert. Blockiert wird nur, was
+  **beweisbar und schädlich** ist; Backend-Rechte-Mounts und bloße
+  Namensnennungen werden berichtet, halten aber nichts auf. Überschreiben mit
+  `ignore_references=true` (landet in `tl_log`).
 - **Backend-Modul** „MCP-Server" mit vier Bereichen: Status (Lizenz + Testphase/
   Abo starten, OAuth-Clients, IATs), Konfiguration, Aktivitätslog, Tool-Panel
   (jedes Tool einzeln abschaltbar) — **nur für Contao-Administratoren**.

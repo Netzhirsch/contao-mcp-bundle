@@ -12,6 +12,7 @@ use Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController;
 use Netzhirsch\ContaoMcpBundle\License\LicenseToken;
 use Netzhirsch\ContaoMcpBundle\OAuth\KeyManager;
 use Netzhirsch\ContaoMcpBundle\Service\McpCallContext;
+use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Tool\Article\Tool as ArticleTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Content\Tool as ContentTool;
@@ -35,6 +36,7 @@ use Netzhirsch\ContaoMcpBundle\Tool\Sorting\Tool as SortingTool;
 use Netzhirsch\ContaoMcpBundle\Tool\System\Tool as SystemTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Template\Tool as TemplateTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Theme\Tool as ThemeTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Usage\Tool as UsageTool;
 use Netzhirsch\ContaoMcpBundle\Tool\User\Tool as UserTool;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -73,6 +75,8 @@ final class McpSmokeTestCommand extends Command
         private readonly SystemTool $systemTool,
         private readonly SearchTool $searchTool,
         private readonly UndoRecorder $undoRecorder,
+        private readonly DeletionGuard $deletionGuard,
+        private readonly UsageTool $usageTool,
         private readonly ExternalIdTool $externalIdTool,
         private readonly MultilingualTool $multilingualTool,
         private readonly ContentTool $contentTool,
@@ -1783,6 +1787,322 @@ final class McpSmokeTestCommand extends Command
         $this->connection->delete('tl_content', ['id' => $undoContentId]);
         $this->connection->delete('tl_news', ['id' => $undoNewsId]);
         $this->connection->delete('tl_news_archive', ['id' => $undoArchiveId]);
+
+        // ═══════════════════ Usage / delete guard ═══════════════════
+        // Deleting something that is still referenced breaks the site
+        // silently. usage_find surfaces the references; DeletionGuard refuses
+        // the deletion until they are gone — unless the caller overrides.
+        $output->writeln("\n<comment>Usage lookup + delete guard</comment>");
+
+        // A page nobody links to, a module nobody placed, and a content
+        // element that references BOTH via insert tags.
+        $this->connection->insert('tl_page', [
+            'pid' => 0, 'tstamp' => time(), 'sorting' => 4096, 'title' => 'MCP smoke usage page',
+            'alias' => 'mcp-smoke-usage-'.time(), 'type' => 'regular', 'published' => 1,
+        ]);
+        $usagePageId = (int) $this->connection->lastInsertId();
+
+        $this->connection->insert('tl_module', [
+            'pid' => 0, 'tstamp' => time(), 'name' => 'MCP smoke usage module', 'type' => 'html',
+        ]);
+        $usageModuleId = (int) $this->connection->lastInsertId();
+
+        $this->connection->insert('tl_article', [
+            'pid' => $usagePageId, 'tstamp' => time(), 'sorting' => 128, 'title' => 'MCP smoke usage article',
+            'alias' => 'mcp-smoke-usage-article-'.time(), 'inColumn' => 'main', 'published' => 1, 'author' => 1,
+        ]);
+        $usageArticleId = (int) $this->connection->lastInsertId();
+
+        $usageResult = $this->usageTool->find('page', (string) $usagePageId);
+
+        $expect('usage_find reports an unreferenced page as unused',
+            $usageResult,
+            fn ($r) => false === $r['in_use'] && 0 === $r['blocking']);
+
+        $expect('usage_find does NOT count rows the cascade removes anyway',
+            $usageResult,
+            // The article's pid points at the page, but page_delete takes the
+            // article with it — counting it would block every page deletion.
+            fn ($r) => [] === array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'tl_article' === ($ref['table'] ?? ''),
+            ));
+
+        $expect('delete guard lets an unreferenced delete through',
+            ['denial' => $this->deletionGuard->check('page_delete', ['id' => $usagePageId, 'confirm_destructive' => true])],
+            fn ($r) => null === $r['denial']);
+
+        // The referring content element must live OUTSIDE the target page:
+        // anything inside it is part of the cascade, and would rightly be
+        // ignored (which is what the previous assertion just proved).
+        $this->connection->insert('tl_page', [
+            'pid' => 0, 'tstamp' => time(), 'sorting' => 8192, 'title' => 'MCP smoke usage referrer page',
+            'alias' => 'mcp-smoke-usage-ref-'.time(), 'type' => 'regular', 'published' => 1,
+        ]);
+        $usageRefPageId = (int) $this->connection->lastInsertId();
+
+        $this->connection->insert('tl_article', [
+            'pid' => $usageRefPageId, 'tstamp' => time(), 'sorting' => 128, 'title' => 'MCP smoke usage referrer article',
+            'alias' => 'mcp-smoke-usage-ref-article-'.time(), 'inColumn' => 'main', 'published' => 1, 'author' => 1,
+        ]);
+        $usageRefArticleId = (int) $this->connection->lastInsertId();
+
+        // One reference by ALIAS (the common spelling in editor content), one
+        // by id — both must be found.
+        $usagePageAlias = (string) $this->connection->fetchOne('SELECT alias FROM tl_page WHERE id = ?', [$usagePageId]);
+        $this->connection->insert('tl_content', [
+            'pid' => $usageRefArticleId, 'ptable' => 'tl_article', 'tstamp' => time(), 'type' => 'text', 'sorting' => 128,
+            'text' => '<p>See {{link::'.$usagePageAlias.'}} and {{insert_module::'.$usageModuleId.'}}.</p>',
+        ]);
+        $usageContentId = (int) $this->connection->lastInsertId();
+
+        $expect('usage_find finds an insert tag that uses the ALIAS, not the id',
+            $this->usageTool->find('page', (string) $usagePageId),
+            fn ($r) => true === $r['in_use'] && [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'insert_tag' === ($ref['source'] ?? '')
+                    && $usageContentId === ($ref['id'] ?? 0),
+            ));
+
+        $expect('usage_find finds {{insert_module::id}}',
+            $this->usageTool->find('module', (string) $usageModuleId),
+            fn ($r) => true === $r['in_use'] && [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'insert_tag' === ($ref['source'] ?? ''),
+            ));
+
+        $expect('usage_find does not confuse a different id (module id+1)',
+            $this->usageTool->find('module', (string) ($usageModuleId + 1000)),
+            fn ($r) => isset($r['error']) && 'not_found' === $r['error']);
+
+        $guardDenial = $this->deletionGuard->check('module_delete', ['id' => $usageModuleId, 'confirm_destructive' => true]);
+
+        $expect('delete guard refuses a delete while an insert tag uses it',
+            ['denial' => $guardDenial],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']
+                && $r['denial']['references'] !== []);
+
+        $expect('the refusal names the override argument',
+            ['denial' => $guardDenial],
+            fn ($r) => str_contains((string) $r['denial']['message'], 'ignore_references'));
+
+        $expect('ignore_references=true overrides the guard',
+            ['denial' => $this->deletionGuard->check(
+                'module_delete',
+                ['id' => $usageModuleId, 'confirm_destructive' => true, 'ignore_references' => true],
+            )],
+            fn ($r) => null === $r['denial']);
+
+        $expect('guard stays out of the way without confirm_destructive',
+            // The tool refuses on its own, so a scan would be wasted work.
+            ['denial' => $this->deletionGuard->check('module_delete', ['id' => $usageModuleId, 'confirm_destructive' => false])],
+            fn ($r) => null === $r['denial']);
+
+        $expect('guard ignores non-deleting tools',
+            ['denial' => $this->deletionGuard->check('module_update', ['id' => $usageModuleId])],
+            fn ($r) => null === $r['denial']);
+
+        // Permission mounts are references, but stale ones are harmless — they
+        // must never be what stops a deletion.
+        $this->connection->update('tl_user_group', ['pagemounts' => serialize([(string) $usagePageId])], ['id' => 1]);
+
+        $expect('backend page mounts are reported but do not block',
+            $this->usageTool->find('page', (string) $usagePageId),
+            fn ($r) => [] !== array_filter(
+                $r['other_findings'],
+                static fn (array $ref): bool => 'tl_user_group' === ($ref['table'] ?? '') && false === ($ref['blocking'] ?? true),
+            ));
+
+        // (FEATURE) references that live INSIDE files. An SCSS partial is the
+        // hard case: `_colors.scss` is imported as `@import 'colors'`, so no
+        // path search and no database column can ever see the dependency.
+        $usageFileDir = $this->projectDir.\DIRECTORY_SEPARATOR.'files'.\DIRECTORY_SEPARATOR.$stamp.'_usage';
+
+        if (!is_dir($usageFileDir)) {
+            mkdir($usageFileDir, 0o755, true);
+        }
+
+        file_put_contents($usageFileDir.'/_colors.scss', '$brand: #c00;'."\n");
+        file_put_contents($usageFileDir.'/app.scss', "@import 'colors';\n");
+        file_put_contents($usageFileDir.'/unrelated.scss', ".colors { color: red; }\n");
+
+        $usageFileIds = [];
+
+        foreach (['_colors.scss', 'app.scss', 'unrelated.scss'] as $i => $name) {
+            $this->connection->insert('tl_files', [
+                'tstamp' => time(),
+                'uuid' => StringUtil::uuidToBin(sprintf('%08x-0000-11f1-9000-%012x', crc32($stamp), $i + 1)),
+                'type' => 'file',
+                'path' => 'files/'.$stamp.'_usage/'.$name,
+                'extension' => 'scss',
+                'hash' => md5($name),
+                'found' => 1,
+                'name' => $name,
+            ]);
+            $usageFileIds[$name] = (int) $this->connection->lastInsertId();
+        }
+
+        $partialPath = $stamp.'_usage/_colors.scss';
+
+        $expect('usage_find follows an SCSS @import that names the partial without path or underscore',
+            $this->usageTool->find('file', $partialPath),
+            fn ($r) => true === $r['in_use'] && [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'file_content' === ($ref['source'] ?? '')
+                    && str_ends_with((string) ($ref['file'] ?? ''), 'app.scss'),
+            ));
+
+        $expect('a file that only mentions the word is not treated as a reference',
+            $this->usageTool->find('file', $partialPath),
+            fn ($r) => [] === array_filter(
+                [...$r['references'], ...$r['other_findings']],
+                static fn (array $ref): bool => str_ends_with((string) ($ref['file'] ?? ''), 'unrelated.scss'),
+            ));
+
+        $expect('delete guard refuses to delete a file a stylesheet imports',
+            ['denial' => $this->deletionGuard->check('file_delete', ['path' => $partialPath, 'confirm_destructive' => true])],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        // The everyday case: "is this image still used?". The reference is a
+        // raw binary(16) UUID in a picker column, not a readable id — so this
+        // covers an encoding nothing else in the suite touches.
+        $partialUuid = (string) $this->connection->fetchOne(
+            'SELECT uuid FROM tl_files WHERE id = ?',
+            [$usageFileIds['_colors.scss']],
+        );
+        $this->connection->update('tl_content', ['singleSRC' => $partialUuid], ['id' => $usageContentId]);
+
+        $expect('usage_find resolves a binary UUID reference (tl_content.singleSRC)',
+            $this->usageTool->find('file', $partialPath),
+            fn ($r) => [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'db_field' === ($ref['source'] ?? '')
+                    && 'singleSRC' === ($ref['field'] ?? '')
+                    && $usageContentId === ($ref['id'] ?? 0),
+            ));
+
+        $this->connection->update('tl_content', ['singleSRC' => null], ['id' => $usageContentId]);
+
+        $expect('an unreferenced file deletes without complaint',
+            ['denial' => $this->deletionGuard->check(
+                'file_delete',
+                ['path' => $stamp.'_usage/unrelated.scss', 'confirm_destructive' => true],
+            )],
+            fn ($r) => null === $r['denial']);
+
+        foreach ($usageFileIds as $fileId) {
+            $this->connection->delete('tl_files', ['id' => $fileId]);
+        }
+
+        @unlink($usageFileDir.'/_colors.scss');
+        @unlink($usageFileDir.'/app.scss');
+        @unlink($usageFileDir.'/unrelated.scss');
+        @rmdir($usageFileDir);
+
+        // (FEATURE) templates. Deleting an override that a content element or
+        // module selects as its customTpl changes how that record renders —
+        // and the reference is a bare NAME in a varchar column, so nothing
+        // about it looks like a reference until you know the convention.
+        $tplDir = $this->projectDir.\DIRECTORY_SEPARATOR.'templates';
+        $twigDir = $tplDir.\DIRECTORY_SEPARATOR.$stamp.'_tpl';
+        $legacy = static fn (string $suffix): string => $stamp.'_'.$suffix;
+
+        if (!is_dir($twigDir)) {
+            mkdir($twigDir, 0o755, true);
+        }
+
+        // Legacy overrides: one selected via customTpl, one extended by
+        // another template, one used by nobody, and one whose name merely
+        // starts with another's (the precision case).
+        file_put_contents($tplDir.'/'.$legacy('custom').'.html5', "<p>custom</p>\n");
+        file_put_contents($tplDir.'/'.$legacy('parent').'.html5', "<?php \$this->block('x'); ?>\n");
+        file_put_contents($tplDir.'/'.$legacy('parent_extra').'.html5', "<p>unrelated but prefixed</p>\n");
+        file_put_contents($tplDir.'/'.$legacy('child').'.html5', "<?php \$this->extend('".$legacy('parent')."'); ?>\n");
+        file_put_contents($tplDir.'/'.$legacy('orphan').'.html5', "<p>nobody uses me</p>\n");
+
+        // Twig override: Contao stores the FULL path without extension.
+        file_put_contents($twigDir.'/variant.html.twig', "{% extends '@Contao/content_element/text.html.twig' %}\n");
+        $twigName = $stamp.'_tpl/variant';
+
+        $this->connection->update('tl_content', ['customTpl' => $legacy('custom')], ['id' => $usageContentId]);
+
+        $expect('usage_find finds a template selected via customTpl',
+            $this->usageTool->find('template', $legacy('custom').'.html5'),
+            fn ($r) => true === $r['in_use'] && [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'db_field' === ($ref['source'] ?? '')
+                    && 'customTpl' === ($ref['field'] ?? '')
+                    && $usageContentId === ($ref['id'] ?? 0),
+            ));
+
+        $this->connection->update('tl_content', ['customTpl' => $twigName], ['id' => $usageContentId]);
+
+        $expect('usage_find matches a Twig template by its full path name, not its basename',
+            $this->usageTool->find('template', $stamp.'_tpl/variant.html.twig'),
+            fn ($r) => true === $r['in_use'] && [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'db_field' === ($ref['source'] ?? '') && 'customTpl' === ($ref['field'] ?? ''),
+            ));
+
+        $this->connection->update('tl_content', ['customTpl' => ''], ['id' => $usageContentId]);
+
+        $expect('usage_find follows $this->extend() from one template to another',
+            $this->usageTool->find('template', $legacy('parent').'.html5'),
+            fn ($r) => true === $r['in_use'] && [] !== array_filter(
+                $r['references'],
+                static fn (array $ref): bool => 'template' === ($ref['source'] ?? '')
+                    && str_contains((string) ($ref['file'] ?? ''), $legacy('child')),
+            ));
+
+        $expect('a template whose name only PREFIXES another is not a reference',
+            // "<stamp>_parent_extra" must not be seen as used just because
+            // "<stamp>_parent" is extended somewhere.
+            $this->usageTool->find('template', $legacy('parent_extra').'.html5'),
+            fn ($r) => false === $r['in_use']);
+
+        $expect('an unused template override reports as unused',
+            $this->usageTool->find('template', $legacy('orphan').'.html5'),
+            fn ($r) => false === $r['in_use'] && 0 === $r['blocking']);
+
+        $expect('usage_find rejects a template that does not exist',
+            $this->usageTool->find('template', $stamp.'_nope.html5'),
+            fn ($r) => isset($r['error']) && 'not_found' === $r['error']);
+
+        $expect('delete guard refuses to delete a template another one extends',
+            ['denial' => $this->deletionGuard->check(
+                'template_delete',
+                ['path' => $legacy('parent').'.html5', 'confirm_destructive' => true],
+            )],
+            fn ($r) => \is_array($r['denial']) && 'still_in_use' === $r['denial']['error']);
+
+        $expect('delete guard lets an unused template override go',
+            ['denial' => $this->deletionGuard->check(
+                'template_delete',
+                ['path' => $legacy('orphan').'.html5', 'confirm_destructive' => true],
+            )],
+            fn ($r) => null === $r['denial']);
+
+        $expect('ignore_references=true also overrides the template guard',
+            ['denial' => $this->deletionGuard->check(
+                'template_delete',
+                ['path' => $legacy('parent').'.html5', 'confirm_destructive' => true, 'ignore_references' => true],
+            )],
+            fn ($r) => null === $r['denial']);
+
+        foreach (['custom', 'parent', 'parent_extra', 'child', 'orphan'] as $suffix) {
+            @unlink($tplDir.'/'.$legacy($suffix).'.html5');
+        }
+
+        @unlink($twigDir.'/variant.html.twig');
+        @rmdir($twigDir);
+
+        $this->connection->update('tl_user_group', ['pagemounts' => ''], ['id' => 1]);
+        $this->connection->delete('tl_content', ['id' => $usageContentId]);
+        $this->connection->delete('tl_article', ['id' => $usageRefArticleId]);
+        $this->connection->delete('tl_page', ['id' => $usageRefPageId]);
+        $this->connection->delete('tl_article', ['id' => $usageArticleId]);
+        $this->connection->delete('tl_module', ['id' => $usageModuleId]);
+        $this->connection->delete('tl_page', ['id' => $usagePageId]);
 
         // ═══════════════════════ Cleanup ═══════════════════════════
         if (!$keep) {

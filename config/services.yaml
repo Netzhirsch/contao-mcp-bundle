@@ -15,6 +15,9 @@ services:
             # UploadValidator wraps Contao\Config (not a service) — the File
             # Tool instantiates it on demand via the framework adapter.
             - '../src/Tool/File/UploadValidator.php'
+            # Value object carrying the record a usage lookup is about — has
+            # scalar constructor arguments, so it must not be autowired.
+            - '../src/Service/Usage/UsageTarget.php'
 
     # Tools are resolved by php-mcp/server through the PSR-11 container via FQCN.
     # Symfony's service_container only exposes public services, so tools must be public.
@@ -287,6 +290,17 @@ services:
         arguments:
             $projectDir: '%kernel.project_dir%'
             $uploadPath: '%contao.upload_path%'
+
+    # Reads stylesheets/templates off disk to find references that never touch
+    # the database (SCSS @import, url(), hardcoded paths in templates).
+    Netzhirsch\ContaoMcpBundle\Service\Usage\FileContentScanner:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
+    # Needs the project dir to resolve template overrides in templates/.
+    Netzhirsch\ContaoMcpBundle\Service\Usage\TargetResolver:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
 
     Netzhirsch\ContaoMcpBundle\Tool\File\Tool:
         public: true

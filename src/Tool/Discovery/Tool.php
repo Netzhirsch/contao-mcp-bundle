@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Discovery;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
+use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Server\ToolGroups;
@@ -43,6 +44,7 @@ final class Tool
         private readonly AuthorResolver $authorResolver,
         private readonly McpPermissionEnforcer $permissionEnforcer,
         private readonly UndoRecorder $undoRecorder,
+        private readonly DeletionGuard $deletionGuard,
     ) {
     }
 
@@ -218,9 +220,13 @@ final class Tool
             return $denial;
         }
 
-        // Same reasoning as the permission check above: without this, deleting
-        // through the lazy-mode proxy would skip the undo snapshot that direct
-        // tools/call requests get.
+        // Same reasoning as the permission check above: without these, deleting
+        // through the lazy-mode proxy would skip the reference guard and the
+        // undo snapshot that direct tools/call requests get.
+        if ($inUse = $this->deletionGuard->check($name, $arguments)) {
+            return $inUse;
+        }
+
         $undoId = $this->undoRecorder->beforeToolCall($name, $arguments);
 
         try {

@@ -6,7 +6,78 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.3.0] – 2026-08-18
+
+> **Verhaltensänderung:** `*_delete`-Aufrufe, die bisher durchliefen, können
+> jetzt mit `still_in_use` abgelehnt werden. Das ist der Sinn der Sache — wer
+> bewusst trotzdem löschen will, übergibt `ignore_references=true`. Keine
+> Signatur ändert sich, bestehende Automatisierungen brauchen aber ggf. dieses
+> eine zusätzliche Argument.
+
 ### Added
+- **`usage_find` — „wo wird das benutzt?" — und ein Löschschutz, der darauf
+  aufbaut.** Bisher konnte die KI eine Seite, ein Bild oder ein Modul löschen,
+  das anderswo noch verlinkt war; der Schaden fiel erst später auf. Jetzt sucht
+  ein Scan an den vier Stellen, an denen Contao überhaupt referenziert:
+  1. **DB-Felder** — aus der DCA abgeleitet (`relation`, `foreignKey`,
+     `pageTree`/`fileTree`/`imageSize`), also inklusive Extension-Feldern statt
+     einer gepflegten Liste. Ergänzt um die zwei Referenzen, die Contao gar
+     nicht deklariert: `tl_layout.modules` und `tl_content.cteAlias`.
+  2. **Insert-Tags in beliebigen Textspalten** — `{{link::42}}` ebenso wie
+     `{{link::mein-alias}}`, `{{insert_module::7}}`, `{{file::<uuid>}}`.
+  3. **Datei-Inhalte** (bei `type=file`/`folder`) — `@import`/`@use`/`url()` in
+     SCSS/CSS und hartcodierte Pfade in Templates. Deckt damit den Fall ab, den
+     keine Datenbankabfrage findet: `_colors.scss` wird als `@import 'colors'`
+     eingebunden, ohne Pfad, ohne Endung, ohne Unterstrich.
+  4. **Templates** (bei `type=template`) — jede `customTpl`/`template`/`…Tpl`-
+     Spalte, die das Template auswählt (also das Content-Element oder Modul,
+     das darüber gerendert wird), plus andere Templates, die es per
+     `{% extends %}`/`{% include %}`/`{% embed %}`/`{% use %}` oder per
+     `$this->extend()`/`$this->insert()` einbinden. Die Namensform hängt an der
+     Dateiendung: `.html5` wird unter dem Basisnamen gespeichert
+     (`nav_default`), `.html.twig` unter dem vollen Pfad
+     (`content_element/text/slider`) — beides gegen echte Datenbankwerte
+     verifiziert.
+
+  Derselbe Scan läuft **automatisch vor jedem `*_delete`** — an denselben zwei
+  Stellen wie Rechteprüfung und Undo-Snapshot (Controller + `contao_call`), also
+  auch für später hinzukommende Delete-Tools. Wer trotzdem löschen will, übergibt
+  `ignore_references=true`; das wird in `tl_log` protokolliert.
+
+  Zwei Dinge, die Fehlalarme verhindern und deshalb bewusst so gebaut sind:
+  Zeilen, die **die Löschung ohnehin mitnimmt** (die Artikel einer Seite, die
+  Dateien eines Ordners), zählen nicht als Referenz — sonst wäre jede Seite
+  unlöschbar. Und **Backend-Rechte-Mounts** (`tl_user.pagemounts`, `filemount` …)
+  werden berichtet, blockieren aber nicht: Contao ignoriert dort tote IDs, und
+  praktisch jede Startseite steckt in irgendeinem Mount. Blockiert wird nur, was
+  beweisbar **und** schädlich ist; alles Schwächere landet in `other_findings`.
+
+  Caches und Historie (`tl_search`, `tl_version`, `tl_undo`, `tl_log`) werden
+  übersprungen — ein Treffer dort ist die Vergangenheit, nicht die aktuelle
+  Nutzung. Die aus der DCA abgeleitete Feldkarte wird gecacht (`cache:clear`
+  invalidiert sie), weil ihr Aufbau jede DCA im Projekt lädt: ohne Cache ~3 s,
+  mit Cache liegt der eigentliche Scan bei ~0,2 s.
+
+  `usage_find` ist **Admin-only** — es liest quer über alle Tabellen, was sich
+  nicht auf eine einzelne DataContainer-Berechtigung abbilden lässt.
+
+  Getestet: 46 neue Unit-Tests (laufen in der CI, ohne Datenbank) über die
+  Insert-Tag-Erkennung, die Wert-Verifikation je Kodierung, die Template-
+  Namensableitung und den Datei-/Template-Scan; dazu 26 neue Smoke-Test-
+  Asserts gegen ein echtes Contao. Zwei Fehler sind dabei aufgefallen und
+  behoben worden: eine nicht-fangende Regex-Gruppe, die den kompletten
+  Insert-Tag-Scan hat werfen lassen, und Pfadangaben, die absolut statt
+  projektrelativ zurückkamen, wenn `kernel.project_dir` ein Symlink oder ein
+  Windows-8.3-Kurzname ist.
+
+### Changed
+- Der Kaskaden-Walk (welche Zeilen eine Löschung mitnimmt) liegt jetzt in
+  `DeletionScope` statt in `UndoRecorder`, weil ihn beide brauchen: der
+  Undo-Snapshot und der Löschschutz dürfen sich über den Umfang einer Löschung
+  nicht uneinig sein. Dabei ist aufgefallen, dass ein `pid` allein noch keinen
+  Baum macht — `tl_files.pid` ist die binäre UUID des Ordners; der Walk prüft
+  jetzt, dass die Spalte wirklich ganzzahlig ist.
+
 - **`SECURITY.md`** — privater Meldeweg für Sicherheitslücken (GitHub Security
   Advisory oder E-Mail) statt eines öffentlichen Issues, dazu Reaktionszeiten,
   Geltungsbereich und die bewusst akzeptierten Grenzen (patchbares Gate,

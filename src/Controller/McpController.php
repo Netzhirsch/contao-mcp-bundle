@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Controller;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseGate;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
+use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory;
@@ -72,6 +73,7 @@ final class McpController
         private readonly McpPermissionGuard $permissionGuard,
         private readonly McpPermissionEnforcer $permissionEnforcer,
         private readonly UndoRecorder $undoRecorder,
+        private readonly DeletionGuard $deletionGuard,
         private readonly LicenseGate $licenseGate,
         private readonly LoggerInterface $logger,
     ) {
@@ -327,16 +329,26 @@ final class McpController
             ));
         }
 
-        // Snapshot deletions into tl_undo BEFORE they happen, so a human can
-        // recover them through Contao's own backend undo. No-op for everything
-        // that isn't a delete. See Service\UndoRecorder.
+        // Refuse a deletion while something still points at the record —
+        // checked before the undo snapshot, because a blocked delete removes
+        // nothing and must not leave a snapshot behind. See Service\DeletionGuard.
         $undoId = 0;
         if ('tools/call' === $request->method) {
             $params = \is_array($request->params ?? null) ? $request->params : [];
-            $undoId = $this->undoRecorder->beforeToolCall(
-                (string) ($params['name'] ?? ''),
-                \is_array($params['arguments'] ?? null) ? $params['arguments'] : [],
-            );
+            $toolName = (string) ($params['name'] ?? '');
+            $toolArgs = \is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
+
+            if ($inUse = $this->deletionGuard->check($toolName, $toolArgs)) {
+                return JsonRpcResponse::make($id, new CallToolResult(
+                    [new TextContent((string) json_encode($inUse))],
+                    true,
+                ));
+            }
+
+            // Snapshot deletions into tl_undo BEFORE they happen, so a human can
+            // recover them through Contao's own backend undo. No-op for everything
+            // that isn't a delete. See Service\UndoRecorder.
+            $undoId = $this->undoRecorder->beforeToolCall($toolName, $toolArgs);
         }
 
         $lastError = null;
