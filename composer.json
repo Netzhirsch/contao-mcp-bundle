@@ -1,6 +1,6 @@
 {
     "name": "netzhirsch/contao-mcp-bundle",
-    "description": "Connects Claude and other AI agents to Contao 5 via the Model Context Protocol — ~170 MCP tools for pages, articles, news, files, templates, members, forms, newsletters and more, secured with OAuth 2.1 (PKCE + Dynamic Client Registration). Commercial extension: 30-day trial, then a subscription per Contao installation.",
+    "description": "Connects Claude and other AI agents to Contao 5 via the Model Context Protocol — 175 MCP tools for pages, articles, news, files, templates, members, forms, newsletters and more, secured with OAuth 2.1 (PKCE + Dynamic Client Registration). Commercial extension: 30-day trial, then a subscription per Contao installation.",
     "type": "contao-bundle",
     "license": "proprietary",
     "homepage": "https://www.netzhirsch.de/contao-mcp.html",

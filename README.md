@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/Netzhirsch/contao-mcp-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/Netzhirsch/contao-mcp-bundle/actions/workflows/ci.yml)
 
-**Status:** Stable — `v1.0.4`
+*🇬🇧 [English version](README.en.md) — diese deutsche Fassung ist die Referenz.*
+
+**Status:** Stable — `v1.4.0`
 **Lizenz:** proprietär, kommerziell lizenziert — 30 Tage kostenlos testen,
 danach 49 €/Monat je Contao-Instanz (siehe [Lizenz & Testphase](#lizenz--testphase)
 und [LICENSE](LICENSE))
@@ -16,7 +18,7 @@ Statt jeder KI-Aufgabe einen eigenen API-Endpunkt nachzuziehen, bekommt die
 KI-Session strukturierten Zugriff auf den gesamten DCA-Stack: Redakteure können
 per natürlichsprachlichem Auftrag Inhalte anlegen, Pipelines können Seiten
 vollautomatisch aus Drittsystemen befüllen, Entwickler können Strukturmigrationen
-skripten — alles über dieselben ~170 Tools, abgesichert mit denselben
+skripten — alles über dieselben 175 Tools, abgesichert mit denselben
 Backend-Benutzerrechten wie beim manuellen Bearbeiten.
 
 **Unterstützte Entitäten:** News, Seiten, Artikel, Kalender, FAQ, Mitglieder,
@@ -26,7 +28,7 @@ System-Einstellungen.
 
 ## Was drin ist
 
-- **~170 Tools** über Contao-Kernentitäten + populäre Extensions.
+- **175 Tools** über Contao-Kernentitäten + populäre Extensions.
 - **Lazy-Mode-Discovery**: drei Meta-Tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) verstecken die übrigen vor
   `tools/list` — spart bei Claude Desktop ~12 KB System-Prompt-Overhead pro
@@ -291,7 +293,7 @@ netzhirsch_contao_mcp:
 
 ## Bekannte Einschränkungen
 
-Stand `v1.0.4`:
+Stand `v1.4.0`:
 
 - **Vendor-Patches** an `php-mcp/server` (zwei Patches via
   `cweagans/composer-patches`) sind notwendig, bis upstream PR #59
