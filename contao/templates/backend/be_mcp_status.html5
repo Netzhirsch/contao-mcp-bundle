@@ -22,12 +22,12 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
     <a href="<?= $this->referer ?>" class="header_back" title="<?= $this->backTitle ?>" accesskey="b" onclick="Backend.getScrollOffset()"><?= $this->backLabel ?></a>
     <a href="<?= $this->actionUrl ?>" class="header_sync"><?= $t('button_refresh', 'Refresh') ?></a>
     <?php if ($isOauth && $regRestricted && !$pairingActive): ?>
-        <a href="<?= $actionLink('open_pairing') ?>" class="header_new" title="<?= htmlspecialchars($t('pairing_help', 'Standard MCP clients (mcp-remote, Claude Desktop) cannot send an Initial Access Token while registering. This button opens client registration for 10 minutes — or exactly ONE successful registration, whichever comes first — then locks itself again. Authorization still requires a backend login + consent, so the window never grants access by itself.')) ?>"><?= $t('button_open_pairing', 'Open registration for 10 minutes') ?></a>
+        <a href="<?= $actionLink('open_pairing') ?>" class="header_new" title="<?= htmlspecialchars($t('pairing_help', 'This is the button Claude and every other standard MCP client needs: they cannot send an Initial Access Token while registering, so an IAT will not pair them — it is for scripts. The window stays open for 15 minutes, however many attempts that takes, then locks itself again. Authorization still requires a backend login + consent, so the window never grants access by itself.')) ?>"><?= $t('button_open_pairing', 'Open registration for 15 minutes') ?></a>
     <?php elseif ($isOauth && $regRestricted): ?>
         <a href="<?= $actionLink('close_pairing') ?>" class="header_toggle"><?= $t('button_close_pairing', 'Close window now') ?></a>
     <?php endif; ?>
     <?php if ($isOauth): ?>
-        <a href="<?= $actionLink('generate_iat') ?>" class="header_new" title="<?= htmlspecialchars($t('oauth_iat_help', 'For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. For Claude Desktop / mcp-remote use the pairing window instead.')) ?>"><?= $t('button_generate_iat', 'Generate new IAT') ?></a>
+        <a href="<?= $actionLink('generate_iat') ?>" class="header_new" title="<?= htmlspecialchars($t('oauth_iat_help', 'For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. Claude and mcp-remote cannot use this — they need the pairing window.')) ?>"><?= $t('button_generate_iat', 'Generate IAT (scripts only)') ?></a>
     <?php endif; ?>
     <?php
     // License / subscription actions. The license server URL is baked into the

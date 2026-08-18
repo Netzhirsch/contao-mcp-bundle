@@ -62,6 +62,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   MCP-Server → Aktivität.
 
 ### Changed
+- Der IAT-Knopf heißt jetzt „IAT erzeugen (nur für Skripte)". Er stand bisher
+  gleichrangig neben dem Pairing-Fenster in derselben Button-Leiste, und im
+  Alltag sieht man den Knopf, nicht den Tooltip — entsprechend oft wurde ein
+  IAT erzeugt, das keinen einzigen Client verbinden kann.
+- Die hartcodierten Fallback-Texte im Backend-Template zogen nicht mit: Ohne
+  geladene XLF stand dort weiterhin „10 minutes" und „exactly ONE successful
+  registration".
 - Das Backend sagt jetzt, welcher Knopf gemeint ist: Für Claude und jeden
   anderen Standard-MCP-Client ist das **Pairing-Fenster** der Weg. Ein Initial
   Access Token kann keiner dieser Clients benutzen — RFC-7591-Registrierung

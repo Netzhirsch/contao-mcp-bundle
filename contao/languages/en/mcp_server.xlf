@@ -76,7 +76,7 @@
       <trans-unit id="mcp_server.status_registration"><source>Client registration</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_help"><source>For scripts and automation that CAN send an Authorization header during registration: generate a one-time token and pass it as `Authorization: Bearer iat_…`. Each token expires after 1 hour and can be used exactly once. For Claude Desktop / mcp-remote use the pairing window above instead.</source></trans-unit>
-      <trans-unit id="mcp_server.button_generate_iat"><source>Generate new IAT</source></trans-unit>
+      <trans-unit id="mcp_server.button_generate_iat"><source>Generate IAT (scripts only)</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_id"><source>ID</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_created"><source>Created</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_col_expires"><source>Expires</source></trans-unit>
