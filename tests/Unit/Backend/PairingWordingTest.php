@@ -41,6 +41,11 @@ final class PairingWordingTest extends TestCase
         // "requires an Initial Access Token" while every other string had
         // already been corrected.
         yield 'registration endpoint' => ['src/Controller/OAuth/RegisterController.php'];
+        // Sixth place the claim turned up: the config table called restricted
+        // mode "IAT-Pflicht". Operators read the README before they ever open
+        // the backend, so it belongs in the same net.
+        yield 'readme (de)' => ['README.md'];
+        yield 'readme (en)' => ['README.en.md'];
     }
 
     /**
@@ -53,6 +58,8 @@ final class PairingWordingTest extends TestCase
             'Initial Access Token erforderlich',
             'must supply a valid Initial Access Token',
             'requires an Initial Access Token',
+            'IAT-Pflicht',
+            '(IAT required)',
             'müssen beim Registrieren ein gültiges Initial Access Token',
         ];
     }

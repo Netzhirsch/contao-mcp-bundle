@@ -24,6 +24,15 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
+                ->arrayNode('preview')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('basic_auth')
+                            ->defaultValue('%env(default::MCP_PREVIEW_BASIC_AUTH)%')
+                            ->info('Credentials as "user:pass" for page_preview when the site sits behind HTTP basic auth (typical staging protection). Defaults to the MCP_PREVIEW_BASIC_AUTH env var; leave unset for sites without basic auth. Belongs in .env.local, never in the repository.')
+                        ->end()
+                    ->end()
+                ->end()
             ->end()
         ;
 

@@ -255,7 +255,7 @@ Felder:
 | `pagination_limit` | `500` | Max Tools pro `tools/list` (irrelevant in Lazy-Mode) |
 | `auth_mode` | `none` | `none` oder `oauth` |
 | `backend_url` | `""` | Public Base-URL des Contao-Backends (Pflicht bei OAuth) |
-| `oauth_registration_mode` | `restricted` | `restricted` (IAT-Pflicht) oder `open` |
+| `oauth_registration_mode` | `restricted` | `restricted` (Registrierung nur im Pairing-Fenster) oder `open` |
 | `lazy_mode` | `false` | Wenn `true`: nur 6 Discovery-Tools in `tools/list` |
 
 Bundle-eigene Konfig in `config/packages/netzhirsch_contao_mcp.yaml`:
@@ -264,7 +264,22 @@ Bundle-eigene Konfig in `config/packages/netzhirsch_contao_mcp.yaml`:
 netzhirsch_contao_mcp:
     write:
         default_author_id: 1   # Fallback wenn auth_mode=none
+    preview:
+        # Nur nötig, wenn die Instanz hinter HTTP-Basic-Auth liegt.
+        # Default ist die Env-Variable; ohne sie bleibt alles wie bisher.
+        basic_auth: '%env(default::MCP_PREVIEW_BASIC_AUTH)%'
 ```
+
+`page_preview` holt die Seite über ihre **öffentliche** URL — steht davor ein
+Basic-Auth-Schutz (typisch auf Staging), antwortet der Webserver mit 401, bevor
+Contao überhaupt läuft. Dann in der `.env.local` der Instanz:
+
+```dotenv
+MCP_PREVIEW_BASIC_AUTH="user:pass"
+```
+
+Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
+`.env.local`, nie in der Antwort oder im Log.
 
 ## Bekannte Einschränkungen
 

@@ -29,6 +29,14 @@ services:
             # constructor deps the container can't autowire.
             - '../src/Tool/File/UploadValidator.php'
 
+    # page_preview fetches the page over its PUBLIC url, so a staging instance
+    # behind HTTP basic auth answers 401 before Contao ever runs. The scalar
+    # cannot be autowired; null (env unset) keeps the request unauthenticated.
+    Netzhirsch\ContaoMcpBundle\Tool\PagePreview\Tool:
+        public: true
+        arguments:
+            $previewBasicAuth: '%netzhirsch_contao_mcp.preview_basic_auth%'
+
     # Smoke-test command takes the project_dir as raw string param to seed
     # files for the files_search regression tests.
     Netzhirsch\ContaoMcpBundle\Command\McpSmokeTestCommand:

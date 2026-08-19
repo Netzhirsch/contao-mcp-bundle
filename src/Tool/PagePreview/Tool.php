@@ -23,7 +23,40 @@ final class Tool
         private readonly ContaoFramework $framework,
         private readonly ContentUrlGenerator $contentUrlGenerator,
         private readonly HttpClientInterface $httpClient,
+        /**
+         * "user:pass" when the site sits behind HTTP basic auth (staging
+         * protection on the webserver). Null keeps the request exactly as it
+         * was before this option existed.
+         */
+        private readonly ?string $previewBasicAuth = null,
     ) {
+    }
+
+    /**
+     * Request options for the preview fetch.
+     *
+     * Split out so the credential handling is testable without booting Contao:
+     * the tool itself needs PageModel and the framework, this decision needs
+     * neither.
+     */
+    public static function requestOptions(?string $basicAuth): array
+    {
+        $options = [
+            'timeout' => 10,
+            'max_redirects' => 5,
+            'headers' => ['User-Agent' => 'Contao-MCP-Bundle/page_preview'],
+        ];
+
+        // Deliberately no shape validation beyond "not empty": silently
+        // dropping a typo'd value would surface as a bare 401 with nothing to
+        // go on. Symfony accepts "user:pass" and treats a bare "user" as an
+        // empty password.
+        $basicAuth = null !== $basicAuth ? trim($basicAuth) : '';
+        if ('' !== $basicAuth) {
+            $options['auth_basic'] = $basicAuth;
+        }
+
+        return $options;
     }
 
     /**
@@ -93,8 +126,11 @@ final class Tool
             to receive a structured summary instead: `{title, h1, meta_description, body_text}`
             — useful for content checks without dragging full markup into the LLM context.
 
-            Note: invokes the daemon's OWN site (loopback). Authentication / member-area pages
-            will be unauthenticated; the preview shows what an anonymous visitor sees.
+            Note: the request goes to the page's PUBLIC url (the root page's dns/domain), not
+            over loopback. Member-area pages are fetched unauthenticated — the preview shows
+            what an anonymous visitor sees. If the site sits behind HTTP basic auth, set
+            MCP_PREVIEW_BASIC_AUTH="user:pass" in the instance's .env.local, otherwise the
+            webserver answers 401 before Contao runs.
         DESC,
     )]
     public function pagePreview(int $page_id, bool $excerpt_only = false): array
@@ -108,11 +144,7 @@ final class Tool
         $url = (string) $urlResult['url'];
 
         try {
-            $response = $this->httpClient->request('GET', $url, [
-                'timeout' => 10,
-                'max_redirects' => 5,
-                'headers' => ['User-Agent' => 'Contao-MCP-Bundle/page_preview'],
-            ]);
+            $response = $this->httpClient->request('GET', $url, self::requestOptions($this->previewBasicAuth));
             $status = $response->getStatusCode();
             $contentType = $response->getHeaders(false)['content-type'][0] ?? '';
             $body = $response->getContent(false);
@@ -131,25 +163,33 @@ final class Tool
             $truncated = true;
         }
 
-        if ($excerpt_only) {
-            return [
-                'url' => $url,
-                'status' => $status,
-                'content_type' => $contentType,
-                'summary' => self::summariseHtml($body),
-                'body_size' => \strlen($body),
-                'truncated' => $truncated,
-            ];
-        }
-
-        return [
+        $result = [
             'url' => $url,
             'status' => $status,
             'content_type' => $contentType,
-            'body' => $body,
             'body_size' => \strlen($body),
             'truncated' => $truncated,
         ];
+
+        // A 401/403 here is almost never Contao's doing — Contao answers 403
+        // with a rendered error page, not a bare challenge. It is the webserver
+        // in front of it, and without this hint the caller sees a status code
+        // and an empty-looking body with nothing to act on.
+        if (401 === $status || 403 === $status) {
+            $result['hint'] = null === $this->previewBasicAuth || '' === trim($this->previewBasicAuth)
+                ? 'The target host refused the request before Contao ran — typically HTTP basic auth on the webserver (staging protection). Set MCP_PREVIEW_BASIC_AUTH="user:pass" in the instance .env.local.'
+                : 'Credentials are configured but were rejected. Check MCP_PREVIEW_BASIC_AUTH in the instance .env.local, or whether the protection expects something other than basic auth.';
+        }
+
+        if ($excerpt_only) {
+            $result['summary'] = self::summariseHtml($body);
+
+            return $result;
+        }
+
+        $result['body'] = $body;
+
+        return $result;
     }
 
     // ─────────────────────────── helpers ────────────────────────────

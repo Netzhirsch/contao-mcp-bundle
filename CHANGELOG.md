@@ -6,6 +6,34 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Fixed
+- **`page_preview` scheiterte an HTTP-Basic-Auth** (Briefing aus dem
+  Bootstrap-Projekt, gegen den echten Code verifiziert). Das Tool holt die Seite
+  über ihre **öffentliche** URL — `ContentUrlGenerator` mit `ABSOLUTE_URL`, also
+  `dns`/Domain der Root-Seite. Liegt davor ein Basic-Auth-Schutz (typisch auf
+  Staging), antwortet der Webserver mit 401, bevor Contao überhaupt läuft, und
+  die KI kann nach einem Edit nichts verifizieren.
+
+  Neu: `MCP_PREVIEW_BASIC_AUTH="user:pass"` in der `.env.local` der Instanz
+  (Bundle-Parameter `netzhirsch_contao_mcp.preview.basic_auth`). Ist nichts
+  gesetzt, geht der Request unverändert raus wie bisher — keine Regression für
+  Instanzen ohne Basic Auth. Zugangsdaten landen weder in der Antwort noch im
+  Log.
+
+  Dazu ein Hinweis bei 401/403, der den Unterschied benennt: keine Credentials
+  konfiguriert vs. konfiguriert und abgelehnt. Ohne den sieht der Aufrufer nur
+  einen Statuscode.
+
+  Verifiziert am echten Container: ohne Credentials kein `Authorization`-Header,
+  mit Credentials `Authorization: Basic …`, kein Leak in der Tool-Antwort.
+
+- Die Tool-Beschreibung behauptete, `page_preview` rufe „the daemon's OWN site
+  (loopback)" auf. Genau deshalb greift der Public-vhost-Schutz überhaupt — der
+  Request geht über die öffentliche DNS. Text korrigiert.
+
+- Die Konfig-Tabelle im README nannte `restricted` „IAT-Pflicht" — die sechste
+  Stelle derselben Falschaussage. Beide READMEs hängen jetzt mit im
+  `PairingWordingTest`.
 ### Removed
 - **Der Knopf „IAT erzeugen" ist weg.** Ein Initial Access Token automatisierte
   nur die *Registrierung*, nie die Autorisierung: Es gibt ausschließlich die
@@ -598,6 +626,34 @@ danke an [@zoglo](https://github.com/zoglo)).
   = `https://license.netzhirsch.de`); Config-Feld `license_server_url` nur noch
   optionaler Override für Dev/Test (leer = Default). Kunden setzen die URL nie.
 
+### Fixed
+- **`page_preview` scheiterte an HTTP-Basic-Auth** (Briefing aus dem
+  Bootstrap-Projekt, gegen den echten Code verifiziert). Das Tool holt die Seite
+  über ihre **öffentliche** URL — `ContentUrlGenerator` mit `ABSOLUTE_URL`, also
+  `dns`/Domain der Root-Seite. Liegt davor ein Basic-Auth-Schutz (typisch auf
+  Staging), antwortet der Webserver mit 401, bevor Contao überhaupt läuft, und
+  die KI kann nach einem Edit nichts verifizieren.
+
+  Neu: `MCP_PREVIEW_BASIC_AUTH="user:pass"` in der `.env.local` der Instanz
+  (Bundle-Parameter `netzhirsch_contao_mcp.preview.basic_auth`). Ist nichts
+  gesetzt, geht der Request unverändert raus wie bisher — keine Regression für
+  Instanzen ohne Basic Auth. Zugangsdaten landen weder in der Antwort noch im
+  Log.
+
+  Dazu ein Hinweis bei 401/403, der den Unterschied benennt: keine Credentials
+  konfiguriert vs. konfiguriert und abgelehnt. Ohne den sieht der Aufrufer nur
+  einen Statuscode.
+
+  Verifiziert am echten Container: ohne Credentials kein `Authorization`-Header,
+  mit Credentials `Authorization: Basic …`, kein Leak in der Tool-Antwort.
+
+- Die Tool-Beschreibung behauptete, `page_preview` rufe „the daemon's OWN site
+  (loopback)" auf. Genau deshalb greift der Public-vhost-Schutz überhaupt — der
+  Request geht über die öffentliche DNS. Text korrigiert.
+
+- Die Konfig-Tabelle im README nannte `restricted` „IAT-Pflicht" — die sechste
+  Stelle derselben Falschaussage. Beide READMEs hängen jetzt mit im
+  `PairingWordingTest`.
 ### Removed
 - **`bin/build-pro-edition.php`** und **`.github/workflows/release-pro.yml`** —
   keine `-pro`-Build-Transform / kein zweites Paket mehr (durch die Ein-Edition
@@ -1948,6 +2004,34 @@ endgültig klargemacht.
   „Debian-Linux-Daemon-Setup" raus. §1 ist jetzt eine kurze „Wie der
   Server läuft"-Erklärung.
 
+### Fixed
+- **`page_preview` scheiterte an HTTP-Basic-Auth** (Briefing aus dem
+  Bootstrap-Projekt, gegen den echten Code verifiziert). Das Tool holt die Seite
+  über ihre **öffentliche** URL — `ContentUrlGenerator` mit `ABSOLUTE_URL`, also
+  `dns`/Domain der Root-Seite. Liegt davor ein Basic-Auth-Schutz (typisch auf
+  Staging), antwortet der Webserver mit 401, bevor Contao überhaupt läuft, und
+  die KI kann nach einem Edit nichts verifizieren.
+
+  Neu: `MCP_PREVIEW_BASIC_AUTH="user:pass"` in der `.env.local` der Instanz
+  (Bundle-Parameter `netzhirsch_contao_mcp.preview.basic_auth`). Ist nichts
+  gesetzt, geht der Request unverändert raus wie bisher — keine Regression für
+  Instanzen ohne Basic Auth. Zugangsdaten landen weder in der Antwort noch im
+  Log.
+
+  Dazu ein Hinweis bei 401/403, der den Unterschied benennt: keine Credentials
+  konfiguriert vs. konfiguriert und abgelehnt. Ohne den sieht der Aufrufer nur
+  einen Statuscode.
+
+  Verifiziert am echten Container: ohne Credentials kein `Authorization`-Header,
+  mit Credentials `Authorization: Basic …`, kein Leak in der Tool-Antwort.
+
+- Die Tool-Beschreibung behauptete, `page_preview` rufe „the daemon's OWN site
+  (loopback)" auf. Genau deshalb greift der Public-vhost-Schutz überhaupt — der
+  Request geht über die öffentliche DNS. Text korrigiert.
+
+- Die Konfig-Tabelle im README nannte `restricted` „IAT-Pflicht" — die sechste
+  Stelle derselben Falschaussage. Beide READMEs hängen jetzt mit im
+  `PairingWordingTest`.
 ### Removed
 
 - `McpServeCommand` + `McpServerProcessManager` + `McpServerFactory`

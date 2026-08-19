@@ -223,7 +223,7 @@ opened). There is no `config.yaml` to edit and no environment variable to set.
 | `pagination_limit` | `500` | Max tools per `tools/list` (irrelevant in lazy mode) |
 | `auth_mode` | `none` | `none` or `oauth` |
 | `backend_url` | `""` | Public base URL of the Contao backend (required for OAuth) |
-| `oauth_registration_mode` | `restricted` | `restricted` (IAT required) or `open` |
+| `oauth_registration_mode` | `restricted` | `restricted` (registration only while the pairing window is open) or `open` |
 | `lazy_mode` | `false` | When `true`, only 6 discovery tools appear in `tools/list` |
 
 Bundle configuration in `config/packages/netzhirsch_contao_mcp.yaml`:

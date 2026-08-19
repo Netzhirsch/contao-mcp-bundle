@@ -20,6 +20,11 @@ final class ContaoMcpExtension extends Extension
             $config['write']['default_author_id'],
         );
 
+        $container->setParameter(
+            'netzhirsch_contao_mcp.preview_basic_auth',
+            $config['preview']['basic_auth'],
+        );
+
         $loader = new YamlFileLoader(
             $container,
             new FileLocator(__DIR__.'/../../config'),
