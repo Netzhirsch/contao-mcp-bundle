@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Theme;
 use Contao\FilesModel;
 use Contao\StringUtil;
 use Contao\ThemeModel;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
 /**
  * Maps the MCP-facing parameter dict to ThemeModel column writes.
@@ -21,12 +22,39 @@ use Contao\ThemeModel;
 final class FieldMapper
 {
     /**
-     * @return array{errors: list<string>, applied: int}
+     * The columns this mapper owns itself. Extensions add more through field
+     * providers — see allowedFields().
+     */
+    private const FIXED_FIELDS = ['name', 'author', 'templates', 'folders', 'screenshot'];
+
+    public function __construct(
+        private readonly ProviderFields $providerFields,
+    ) {
+    }
+
+    /**
+     * Everything a caller may submit, including provider-contributed columns.
+     * Providers are listed whether or not their extension is installed: an
+     * uninstalled one earns a precise error, not "unknown field".
+     *
+     * @return list<string>
+     */
+    public function allowedFields(): array
+    {
+        return array_values(array_unique(array_merge(
+            self::FIXED_FIELDS,
+            $this->providerFields->declaredFor('tl_theme'),
+        )));
+    }
+
+    /**
+     * @return array{errors: list<string>, applied: int, applied_keys: list<string>}
      */
     public function apply(ThemeModel $theme, array $input): array
     {
         $errors = [];
         $applied = 0;
+        $appliedKeys = [];
 
         if (\array_key_exists('name', $input)) {
             $value = (string) $input['name'];
@@ -35,6 +63,7 @@ final class FieldMapper
             } else {
                 $theme->name = mb_substr($value, 0, 128);
                 ++$applied;
+                $appliedKeys[] = 'name';
             }
         }
 
@@ -45,12 +74,14 @@ final class FieldMapper
             } else {
                 $theme->author = mb_substr($value, 0, 128);
                 ++$applied;
+                $appliedKeys[] = 'author';
             }
         }
 
         if (\array_key_exists('templates', $input)) {
             $theme->templates = (string) $input['templates'];
             ++$applied;
+            $appliedKeys[] = 'templates';
         }
 
         if (\array_key_exists('folders', $input)) {
@@ -60,6 +91,7 @@ final class FieldMapper
             } else {
                 $theme->folders = $serialized;
                 ++$applied;
+                $appliedKeys[] = 'folders';
             }
         }
 
@@ -70,10 +102,20 @@ final class FieldMapper
             } else {
                 $theme->screenshot = $uuid;
                 ++$applied;
+                $appliedKeys[] = 'screenshot';
             }
         }
 
-        return ['errors' => $errors, 'applied' => $applied];
+        // Providers last: their apply() may reject the value (the bootstrap
+        // provider compiles the SCSS it is handed), and the Tool layer refuses
+        // to save when errors came back — so a rejected value writes nothing,
+        // not even the fields that mapped cleanly above.
+        $fromProviders = $this->providerFields->apply('tl_theme', $theme, $input);
+        $applied += \count($fromProviders['applied']);
+        $appliedKeys = array_merge($appliedKeys, $fromProviders['applied']);
+        $errors = array_merge($errors, $fromProviders['errors']);
+
+        return ['errors' => $errors, 'applied' => $applied, 'applied_keys' => $appliedKeys];
     }
 
     /**

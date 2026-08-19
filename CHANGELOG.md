@@ -6,6 +6,39 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **`tl_theme` nimmt Erweiterungsfelder an** (Briefing aus AL-01, Projekt Autohaus
+  Lau; alle drei Befunde gegen den Code nachgeprüft). `theme_create`,
+  `theme_update` und `theme_get` konsultieren jetzt Field-Provider, so wie es
+  `tl_article` schon tat. Ein Bundle wie `netzhirsch/contao-bootstrap-bundle`
+  kann damit seine Theme-Spalten über MCP schreib- und lesbar machen, und der
+  Aufbau einer Instanz bricht nicht mehr an der Stelle ab, an der die
+  Design-Tokens ins Theme müssen.
+
+  Die Mechanik liegt als `Service\ProviderFields` an **einer** Stelle statt pro
+  Tabelle: `declaredFor()`, `serialize()`, `apply()`. `tl_layout` und
+  `tl_content` können sie mit zwei Aufrufen übernehmen, ohne dass wieder eine
+  Sonderlösung entsteht. Provider-`apply()` darf ablehnen — die Meldungen werden
+  gesammelt und verhindern das Speichern, sodass etwa fehlerhaftes SCSS als
+  Fehler des Tool-Calls ankommt statt als stilles „erfolgreich, Seite ohne
+  Stylesheet". Ein Feld, dessen Erweiterung fehlt, nennt die Erweiterung beim
+  Namen statt „unbekanntes Feld".
+
+### Fixed
+- **`*_create` verwarf unbekannte Feldschlüssel stillschweigend** — bei
+  `theme_create`, `form_create`, `image_size_create`, `layout_create` und
+  `member_create`. Das jeweilige `*_update` meldete denselben Fall seit jeher als
+  `no_mappable_fields`; nur `create` antwortete „created: true" und schrieb
+  nichts. Für einen Agenten ist das der schlechteste Ausgang: Er hält den
+  Datensatz für konfiguriert und baut darauf auf.
+
+  Alle fünf melden jetzt denselben Fehler. Wo Pflichtfelder mit in die
+  Zuordnung wandern (`image_size_create`, `layout_create`) und der
+  `applied`-Zähler deshalb nie null werden kann, wird der Mapper selbst gefragt,
+  statt eine zweite Feldliste zu pflegen, die auseinanderdriftet.
+  `theme_create`/`theme_update` liefern zusätzlich `ignored_keys`, wenn nur ein
+  Teil der Schlüssel unbekannt war.
+
 ## [1.5.1] – 2026-08-19
 
 ### Fixed

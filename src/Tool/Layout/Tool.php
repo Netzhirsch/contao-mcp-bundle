@@ -184,6 +184,21 @@ final class Tool
         } catch (\InvalidArgumentException $e) {
             return ['error' => 'invalid_input', 'message' => $e->getMessage()];
         }
+        // `name` is merged in below, so `applied` can never hit zero — probe
+        // the extras against the mapper itself instead of maintaining a
+        // separate key list that would drift. Errors mean known key, rejected
+        // value: that is the real apply's business, not this check's.
+        if ($extras !== []) {
+            $probe = $this->mapper->apply(new LayoutModel(), $extras);
+            if ($probe['applied'] === 0 && $probe['errors'] === []) {
+                return [
+                    'error' => 'no_mappable_fields',
+                    'message' => 'No mappable fields were applied — every key in `fields` is either unknown or your FieldMapper rejected its value. Compare your keys against layout_get(id).',
+                    'submitted_keys' => array_keys($extras),
+                ];
+            }
+        }
+
         $payload = ['name' => $name] + $extras;
 
         $layout = new LayoutModel();

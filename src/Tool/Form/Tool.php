@@ -170,6 +170,16 @@ final class Tool
             if ($result['errors'] !== []) {
                 return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
             }
+            // Same check update has always done. Without it create reported
+            // success for fields it never wrote — the worst outcome for an
+            // agent, which then builds on a row that did not take the values.
+            if ($result['applied'] === 0) {
+                return [
+                    'error' => 'no_mappable_fields',
+                    'message' => 'No mappable fields were applied — every submitted key is unknown for tl_form. Check form_get(id) for valid keys.',
+                    'submitted_keys' => array_keys($input),
+                ];
+            }
         }
 
         $form->save();

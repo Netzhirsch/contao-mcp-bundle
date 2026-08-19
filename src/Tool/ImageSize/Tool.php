@@ -186,6 +186,23 @@ final class Tool
             return ['error' => 'invalid_input', 'message' => $e->getMessage()];
         }
 
+        // `name` is merged into the payload below, so `applied` can never hit
+        // zero and would hide unknown extras. Ask the mapper itself what it can
+        // place — using the mapper as the source of truth rather than a
+        // hand-maintained key list that would drift out of sync with it. Errors
+        // mean the key WAS known and its value rejected; that belongs to the
+        // real apply below, not here.
+        if ($extras !== []) {
+            $probe = $this->mapper->applyToSize(new ImageSizeModel(), $extras);
+            if ($probe['applied'] === 0 && $probe['errors'] === []) {
+                return [
+                    'error' => 'no_mappable_fields',
+                    'message' => 'No mappable fields were applied — every submitted key is unknown for tl_image_size. Check image_size_get(id) for valid keys.',
+                    'submitted_keys' => array_keys($extras),
+                ];
+            }
+        }
+
         $size = new ImageSizeModel();
         $size->pid = $theme_id;
         $size->tstamp = time();

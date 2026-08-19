@@ -185,6 +185,13 @@ final class Tool
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }
+        if ($result['applied'] === 0) {
+            return [
+                'error' => 'no_mappable_fields',
+                'message' => 'No mappable fields were applied — submitted keys were unknown or rejected.',
+                'submitted_keys' => array_keys($input),
+            ];
+        }
 
         try {
             $member->save();

@@ -14,6 +14,7 @@ use Contao\Versions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use Netzhirsch\ContaoMcpBundle\Service\UpdateDiff;
 use PhpMcp\Server\Attributes\McpTool;
@@ -40,6 +41,7 @@ final class Tool
         private readonly DbalRetry $dbalRetry,
         private readonly FieldMapper $mapper,
         private readonly QueryFilterResolver $filterResolver,
+        private readonly ProviderFields $providerFields,
     ) {
     }
 
@@ -112,7 +114,7 @@ final class Tool
      */
     #[McpTool(
         name: 'theme_get',
-        description: 'Returns a single theme by id including counts of its layouts, front-end modules and image-sizes — handy before delete to see what would cascade.',
+        description: 'Returns a single theme by id including counts of its layouts, front-end modules and image-sizes — handy before delete to see what would cascade. Also returns the columns installed extensions contribute for tl_theme, so a theme\'s full configuration is inspectable.',
     )]
     public function get(int $id): array
     {
@@ -123,7 +125,7 @@ final class Tool
             return ['error' => 'not_found', 'message' => sprintf('No theme with id %d', $id)];
         }
 
-        return Serializer::full($theme) + [
+        return $this->full($theme) + [
             'layout_count' => $this->countChildren('tl_layout', $id),
             'module_count' => $this->countChildren('tl_module', $id),
             'image_size_count' => $this->countChildren('tl_image_size', $id),
@@ -144,7 +146,12 @@ final class Tool
 
             Required: name, author.
             Optional via `fields`: templates (template-folder path), folders (list of
-            files/-relative paths the theme owns), screenshot (path to a file).
+            files/-relative paths the theme owns), screenshot (path to a file), plus any
+            columns installed extensions contribute (e.g. the Bootstrap bundle's compile
+            mode and SCSS overrides).
+
+            Unknown keys are NOT silently dropped: all-unknown fails the call, a partial
+            mismatch returns `ignored_keys` alongside the created theme.
 
             Returns the new id + summary.
         DESC,
@@ -165,6 +172,14 @@ final class Tool
         } catch (\InvalidArgumentException $e) {
             return ['error' => 'invalid_input', 'message' => $e->getMessage()];
         }
+        // Same key check update has always done. Without it create answered
+        // "created: true" for fields it never wrote, because name and author
+        // alone already made the applied counter non-zero.
+        [$ignored, $keyError] = $this->unknownKeys($extras);
+        if ($keyError !== null) {
+            return $keyError;
+        }
+
         $payload = ['name' => $name, 'author' => $author] + $extras;
 
         $theme = new ThemeModel();
@@ -177,7 +192,12 @@ final class Tool
 
         $this->log(sprintf('Created theme "%s" (id=%d)', $theme->name, (int) $theme->id), __METHOD__);
 
-        return ['created' => true, 'id' => (int) $theme->id] + Serializer::full($theme);
+        $result = ['created' => true, 'id' => (int) $theme->id] + $this->full($theme);
+        if ($ignored !== []) {
+            $result['ignored_keys'] = $ignored;
+        }
+
+        return $result;
     }
 
     // ──────────────────────────── update ────────────────────────────
@@ -191,8 +211,13 @@ final class Tool
         name: 'theme_update',
         description: <<<'DESC'
             Updates a tl_theme row. Pass id, then `fields` as a JSON OBJECT (not a list!).
-            Allowed keys: name, author, templates, folders (list of file paths), screenshot
+            Core keys: name, author, templates, folders (list of file paths), screenshot
             (single file path).
+
+            Installed extensions can contribute further columns (for example the Bootstrap
+            bundle's compile mode and SCSS overrides). They are writable here and readable
+            through theme_get; an unknown key is reported back rather than dropped, and a
+            key whose extension is missing says so by name.
 
             Example: {"fields": {"author": "Jan"}}.
         DESC,
@@ -218,6 +243,11 @@ final class Tool
             return ['error' => 'no_fields', 'message' => 'fields must be a non-empty JSON object {column: value}'];
         }
 
+        [$ignored, $keyError] = $this->unknownKeys($input);
+        if ($keyError !== null) {
+            return $keyError;
+        }
+
         // Snapshot the row BEFORE applyFields so we can diff for a real
         // change-detect — the FieldMapper's `applied` counter only tells us
         // how many input keys mapped to a column, not whether any value
@@ -228,27 +258,22 @@ final class Tool
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }
-        if ($result['applied'] === 0) {
-            // None of the submitted keys mapped to a known column — caller
-            // mistake, not a no-op. Surface it as a distinct error so the
-            // LLM doesn't retry the same garbage.
-            return [
-                'error' => 'no_mappable_fields',
-                'message' => 'No mappable fields were applied — every submitted key is unknown for tl_theme. Allowed keys: name, author, templates, folders, screenshot.',
-                'submitted_keys' => array_keys($input),
-            ];
-        }
 
         $changedFields = UpdateDiff::diff($theme, $before, [], array_keys($input));
         if ($changedFields === []) {
             // True no-op: every submitted value matched what's already stored.
             // Skip save + Versions snapshot, return idempotent success.
-            return [
+            $result = [
                 'updated' => false,
                 'id' => (int) $theme->id,
                 'changed_fields' => [],
                 'applied' => 0,
-            ] + Serializer::full($theme);
+            ] + $this->full($theme);
+            if ($ignored !== []) {
+                $result['ignored_keys'] = $ignored;
+            }
+
+            return $result;
         }
 
         $versions = $this->bootVersions((int) $theme->id);
@@ -258,12 +283,17 @@ final class Tool
 
         $this->log(sprintf('Updated theme "%s" (id=%d, fields=%s)', $theme->name, (int) $theme->id, implode(',', $changedFields)), __METHOD__);
 
-        return [
+        $result = [
             'updated' => true,
             'id' => (int) $theme->id,
             'changed_fields' => $changedFields,
             'applied' => \count($changedFields),
-        ] + Serializer::full($theme);
+        ] + $this->full($theme);
+        if ($ignored !== []) {
+            $result['ignored_keys'] = $ignored;
+        }
+
+        return $result;
     }
 
     // ──────────────────────────── delete ────────────────────────────
@@ -413,5 +443,48 @@ final class Tool
     private function log(string $message, string $caller): void
     {
         $this->logger->info($message, ['contao' => new ContaoContext($caller, ContaoContext::GENERAL, $this->authorResolver->getLogUsername(), null, null, $this->authorResolver->getLogSource())]);
+    }
+
+    /**
+     * Serializer output plus whatever extensions contribute for tl_theme.
+     * Without this, a field that can be written cannot be read back — and a
+     * caller has no way to check what a theme is actually configured to do.
+     *
+     * @return array<string, mixed>
+     */
+    private function full(ThemeModel $theme): array
+    {
+        return Serializer::full($theme) + $this->providerFields->serialize('tl_theme', $theme);
+    }
+
+    /**
+     * Reports submitted keys this mapper cannot place.
+     *
+     * Silently dropping them is the worst outcome for an agent: it reads
+     * "created: true", believes the theme is configured, and builds on top of
+     * a row that never received the values. All-unknown is an outright error;
+     * a partial mismatch still applies the rest and names what it skipped.
+     *
+     * @param array<string, mixed> $input
+     *
+     * @return array{0: list<string>, 1: ?array<string, mixed>} [ignored, error]
+     */
+    private function unknownKeys(array $input): array
+    {
+        $allowed = $this->mapper->allowedFields();
+        $ignored = array_values(array_diff(array_keys($input), $allowed));
+
+        if ($ignored === [] || $ignored !== array_keys($input)) {
+            return [$ignored, null];
+        }
+
+        return [$ignored, [
+            'error' => 'no_mappable_fields',
+            'message' => sprintf(
+                'No mappable fields were applied — every submitted key is unknown for tl_theme. Allowed keys: %s.',
+                implode(', ', $allowed),
+            ),
+            'submitted_keys' => array_keys($input),
+        ]];
     }
 }
