@@ -13,7 +13,9 @@ use Contao\Versions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\SubmittedKeys;
 use Netzhirsch\ContaoMcpBundle\Service\UpdateDiff;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -40,6 +42,7 @@ final class Tool
         private readonly AuthorResolver $authorResolver,
         private readonly FieldMapper $mapper,
         private readonly QueryFilterResolver $filterResolver,
+        private readonly ProviderFields $providerFields,
         private readonly McpPermissionGuard $guard,
     ) {
     }
@@ -132,7 +135,7 @@ final class Tool
             return ['error' => 'not_found', 'message' => sprintf('No layout with id %d', $id)];
         }
 
-        return Serializer::full($layout) + [
+        return $this->full($layout) + [
             'page_references' => $this->countPageReferences($id),
         ];
     }
@@ -184,21 +187,6 @@ final class Tool
         } catch (\InvalidArgumentException $e) {
             return ['error' => 'invalid_input', 'message' => $e->getMessage()];
         }
-        // `name` is merged in below, so `applied` can never hit zero — probe
-        // the extras against the mapper itself instead of maintaining a
-        // separate key list that would drift. Errors mean known key, rejected
-        // value: that is the real apply's business, not this check's.
-        if ($extras !== []) {
-            $probe = $this->mapper->apply(new LayoutModel(), $extras);
-            if ($probe['applied'] === 0 && $probe['errors'] === []) {
-                return [
-                    'error' => 'no_mappable_fields',
-                    'message' => 'No mappable fields were applied — every key in `fields` is either unknown or your FieldMapper rejected its value. Compare your keys against layout_get(id).',
-                    'submitted_keys' => array_keys($extras),
-                ];
-            }
-        }
-
         $payload = ['name' => $name] + $extras;
 
         $layout = new LayoutModel();
@@ -235,11 +223,21 @@ final class Tool
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }
+        // `name` is always applied, so the applied COUNT says nothing about the
+        // caller's own keys — ask which keys were placed instead.
+        $ignored = SubmittedKeys::ignored($extras, $result['applied_keys']);
+        if (SubmittedKeys::noneApplied($extras, $result['applied_keys'])) {
+            return [
+                'error' => 'no_mappable_fields',
+                'message' => 'No mappable fields were applied — every key in `fields` is either unknown or your FieldMapper rejected its value. Compare your keys against layout_get(id).',
+                'submitted_keys' => array_keys($extras),
+            ];
+        }
         $layout->save();
 
         $this->log(sprintf('Created layout "%s" (id=%d, theme=%d)', $layout->name, (int) $layout->id, $theme_id), __METHOD__);
 
-        return ['created' => true, 'id' => (int) $layout->id] + Serializer::full($layout);
+        return ['created' => true, 'id' => (int) $layout->id] + SubmittedKeys::report($ignored) + $this->full($layout);
     }
 
     // ──────────────────────────── update ────────────────────────────
@@ -289,7 +287,8 @@ final class Tool
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }
-        if ($result['applied'] === 0) {
+        $ignored = SubmittedKeys::ignored($input, $result['applied_keys']);
+        if (SubmittedKeys::noneApplied($input, $result['applied_keys'])) {
             return [
                 'error' => 'no_mappable_fields',
                 'message' => 'No mappable fields were applied — every key in `fields` is either unknown or your FieldMapper rejected its value. Compare your keys against layout_get(id).',
@@ -322,7 +321,7 @@ final class Tool
                 'id' => (int) $layout->id,
                 'changed_fields' => [],
                 'applied' => 0,
-            ] + Serializer::full($layout);
+            ] + $this->full($layout);
         }
 
         $versions = $this->bootVersions((int) $layout->id);
@@ -337,7 +336,7 @@ final class Tool
             'id' => (int) $layout->id,
             'changed_fields' => $changedFields,
             'applied' => \count($changedFields),
-        ] + Serializer::full($layout);
+        ] + $this->full($layout);
     }
 
     // ──────────────────────────── delete ────────────────────────────
@@ -467,5 +466,17 @@ final class Tool
     private function log(string $message, string $caller): void
     {
         $this->logger->info($message, ['contao' => new ContaoContext($caller, ContaoContext::GENERAL, $this->authorResolver->getLogUsername(), null, null, $this->authorResolver->getLogSource())]);
+    }
+
+    /**
+     * Serializer output plus the columns installed extensions contribute.
+     * A field that can be written but not read back leaves a caller unable to
+     * check what a layout is actually configured to do.
+     *
+     * @return array<string, mixed>
+     */
+    private function full(LayoutModel $layout): array
+    {
+        return Serializer::full($layout) + $this->providerFields->serialize('tl_layout', $layout);
     }
 }

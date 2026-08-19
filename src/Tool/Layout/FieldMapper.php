@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Layout;
 
 use Contao\FilesModel;
 use Contao\LayoutModel;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
 /**
  * Maps the MCP-facing parameter dict to LayoutModel column writes.
@@ -44,13 +45,30 @@ final class FieldMapper
     private const TYPE_VALUES = ['default', 'modern'];
     private const FRAMEWORK_VALUES = ['layout.css', 'responsive.css', 'grid.css', 'reset.css', 'form.css', 'icons.css'];
 
+    public function __construct(
+        private readonly ProviderFields $providerFields,
+    ) {
+    }
+
     /**
-     * @return array{errors: list<string>, applied: int}
+     * Columns installed extensions contribute for tl_layout. Reported so the
+     * Tool layer can tell "unknown key" from "key of a missing extension".
+     *
+     * @return list<string>
+     */
+    public function providerFields(): array
+    {
+        return $this->providerFields->declaredFor('tl_layout');
+    }
+
+    /**
+     * @return array{errors: list<string>, applied: int, applied_keys: list<string>}
      */
     public function apply(LayoutModel $l, array $input): array
     {
         $errors = [];
         $applied = 0;
+        $appliedKeys = [];
 
         if (\array_key_exists('name', $input)) {
             $value = trim((string) $input['name']);
@@ -59,6 +77,7 @@ final class FieldMapper
             } else {
                 $l->name = mb_substr($value, 0, 255);
                 ++$applied;
+                $appliedKeys[] = 'name';
             }
         }
 
@@ -69,6 +88,7 @@ final class FieldMapper
             } else {
                 $l->type = $value;
                 ++$applied;
+                $appliedKeys[] = 'type';
             }
         }
 
@@ -79,6 +99,7 @@ final class FieldMapper
             } else {
                 $l->rows = $value;
                 ++$applied;
+                $appliedKeys[] = 'rows';
             }
         }
 
@@ -89,6 +110,7 @@ final class FieldMapper
             } else {
                 $l->cols = $value;
                 ++$applied;
+                $appliedKeys[] = 'cols';
             }
         }
 
@@ -96,28 +118,34 @@ final class FieldMapper
             if (\array_key_exists($key, $input)) {
                 $l->{$column} = (string) ($input[$key] ?? '');
                 ++$applied;
+                $appliedKeys[] = $key;
             }
         }
 
         if (\array_key_exists('combine_scripts', $input)) {
             $l->combineScripts = $this->toBool($input['combine_scripts']);
             ++$applied;
+            $appliedKeys[] = 'combine_scripts';
         }
         if (\array_key_exists('minify_markup', $input)) {
             $l->minifyMarkup = $this->toBool($input['minify_markup']);
             ++$applied;
+            $appliedKeys[] = 'minify_markup';
         }
         if (\array_key_exists('add_jquery', $input)) {
             $l->addJQuery = $this->toBool($input['add_jquery']);
             ++$applied;
+            $appliedKeys[] = 'add_jquery';
         }
         if (\array_key_exists('add_mootools', $input)) {
             $l->addMooTools = $this->toBool($input['add_mootools']);
             ++$applied;
+            $appliedKeys[] = 'add_mootools';
         }
         if (\array_key_exists('static', $input)) {
             $l->static = $this->toBool($input['static']);
             ++$applied;
+            $appliedKeys[] = 'static';
         }
 
         if (\array_key_exists('framework', $input)) {
@@ -127,6 +155,7 @@ final class FieldMapper
             } else {
                 $l->framework = $blob;
                 ++$applied;
+                $appliedKeys[] = 'framework';
             }
         }
 
@@ -138,6 +167,7 @@ final class FieldMapper
                 } else {
                     $l->{$listKey} = $blob;
                     ++$applied;
+                    $appliedKeys[] = $listKey;
                 }
             }
         }
@@ -149,6 +179,7 @@ final class FieldMapper
             } else {
                 $l->modules = $blob;
                 ++$applied;
+                $appliedKeys[] = 'modules';
             }
         }
 
@@ -159,6 +190,7 @@ final class FieldMapper
             } else {
                 $l->sections = $blob;
                 ++$applied;
+                $appliedKeys[] = 'sections';
             }
         }
 
@@ -170,11 +202,20 @@ final class FieldMapper
                 } else {
                     $l->{$column} = $blob;
                     ++$applied;
+                    $appliedKeys[] = $key;
                 }
             }
         }
 
-        return ['errors' => $errors, 'applied' => $applied];
+        // Providers last, and their errors block the save — same contract as
+        // tl_theme, so an extension can reject a value instead of letting a
+        // broken one through.
+        $fromProviders = $this->providerFields->apply('tl_layout', $l, $input);
+        $applied += \count($fromProviders['applied']);
+        $appliedKeys = array_merge($appliedKeys, $fromProviders['applied']);
+        $errors = array_merge($errors, $fromProviders['errors']);
+
+        return ['errors' => $errors, 'applied' => $applied, 'applied_keys' => $appliedKeys];
     }
 
     private function toBool(mixed $v): int

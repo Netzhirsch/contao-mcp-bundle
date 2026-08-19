@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Content;
 
 use Contao\ContentModel;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Contao\StringUtil;
 
 /**
@@ -79,6 +80,11 @@ final class Serializer
     /**
      * @return array<string, mixed>
      */
+    public function __construct(
+        private readonly ProviderFields $providerFields,
+    ) {
+    }
+
     public function summary(ContentModel $c): array
     {
         /** @var array<string, mixed> $row */
@@ -142,7 +148,9 @@ final class Serializer
             $row['ptable'] = (string) $row['ptable'];
         }
 
-        return $row;
+        // Provider representation wins over the raw column: an extension
+        // may store serialised data a caller cannot use as-is.
+        return $this->providerFields->serialize('tl_content', $c) + $row;
     }
 
     /**

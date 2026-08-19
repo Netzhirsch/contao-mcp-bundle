@@ -40,12 +40,13 @@ final class FieldMapper
     }
 
     /**
-     * @return array{errors: list<string>, applied: int}
+     * @return array{errors: list<string>, applied: int, applied_keys: list<string>}
      */
     public function apply(MemberModel $m, array $input, bool $isCreate): array
     {
         $errors = [];
         $applied = 0;
+        $appliedKeys = [];
 
         foreach (array_keys($input) as $key) {
             if (\in_array($key, self::READ_ONLY_FIELDS, true)) {
@@ -53,7 +54,7 @@ final class FieldMapper
             }
         }
         if ($errors !== []) {
-            return ['errors' => $errors, 'applied' => 0];
+            return ['errors' => $errors, 'applied' => 0, 'applied_keys' => []];
         }
 
         if (\array_key_exists('username', $input)) {
@@ -68,6 +69,7 @@ final class FieldMapper
                 } else {
                     $m->username = mb_substr($value, 0, 64);
                     ++$applied;
+                    $appliedKeys[] = 'username';
                 }
             }
         } elseif ($isCreate) {
@@ -84,6 +86,7 @@ final class FieldMapper
                 } else {
                     $m->email = mb_substr($value, 0, 255);
                     ++$applied;
+                    $appliedKeys[] = 'email';
                 }
             }
         } elseif ($isCreate) {
@@ -98,6 +101,7 @@ final class FieldMapper
                 } else {
                     $m->{$required} = mb_substr($value, 0, 255);
                     ++$applied;
+                    $appliedKeys[] = $required;
                 }
             } elseif ($isCreate) {
                 $errors[] = "{$required} is required";
@@ -114,6 +118,7 @@ final class FieldMapper
             } else {
                 $m->password = (string) password_hash($value, \PASSWORD_DEFAULT);
                 ++$applied;
+                $appliedKeys[] = 'password';
             }
         } elseif ($isCreate) {
             $errors[] = 'password is required on create';
@@ -149,24 +154,29 @@ final class FieldMapper
             }
             $m->{$cfg['column']} = $value;
             ++$applied;
+            $appliedKeys[] = $key;
         }
 
         // Bool flags. `active` is the positive form of Contao's reverseToggle `disable`.
         if (\array_key_exists('login', $input)) {
             $m->login = (bool) $input['login'] ? 1 : 0;
             ++$applied;
+            $appliedKeys[] = 'login';
         }
         if (\array_key_exists('active', $input)) {
             $m->disable = (bool) $input['active'] ? 0 : 1;
             ++$applied;
+            $appliedKeys[] = 'active';
         } elseif (\array_key_exists('disable', $input)) {
             // Honour the raw Contao field name as escape hatch.
             $m->disable = (bool) $input['disable'] ? 1 : 0;
             ++$applied;
+            $appliedKeys[] = 'disable';
         }
         if (\array_key_exists('assign_dir', $input)) {
             $m->assignDir = (bool) $input['assign_dir'] ? 1 : 0;
             ++$applied;
+            $appliedKeys[] = 'assign_dir';
         }
 
         if (\array_key_exists('groups', $input)) {
@@ -188,6 +198,7 @@ final class FieldMapper
                 if (!$bad) {
                     $m->groups = $ids === [] ? '' : serialize($ids);
                     ++$applied;
+                    $appliedKeys[] = 'groups';
                 }
             }
         }
@@ -197,6 +208,7 @@ final class FieldMapper
             if ($value === null || $value === '') {
                 $m->homeDir = null;
                 ++$applied;
+                $appliedKeys[] = 'home_dir';
             } elseif (\is_string($value)) {
                 $file = FilesModel::findByPath($value);
                 if ($file === null) {
@@ -204,13 +216,14 @@ final class FieldMapper
                 } else {
                     $m->homeDir = (string) $file->uuid;
                     ++$applied;
+                    $appliedKeys[] = 'home_dir';
                 }
             } else {
                 $errors[] = 'home_dir must be a file path string';
             }
         }
 
-        return ['errors' => $errors, 'applied' => $applied];
+        return ['errors' => $errors, 'applied' => $applied, 'applied_keys' => $appliedKeys];
     }
 
     private function isDuplicateUsername(string $username, int $excludeId): bool

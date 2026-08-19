@@ -10,6 +10,7 @@ use Contao\MemberModel;
 use Contao\Versions;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\SubmittedKeys;
 use Netzhirsch\ContaoMcpBundle\Service\UpdateDiff;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -182,6 +183,7 @@ final class Tool
         $member->login = 0;
 
         $result = $this->mapper->apply($member, $input, isCreate: true);
+        $ignored = SubmittedKeys::ignored($input, $result['applied_keys']);
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }
@@ -202,7 +204,7 @@ final class Tool
         $this->bootVersions((int) $member->id)->create();
         $this->log(sprintf('Created member "%s" (id=%d)', $member->username, (int) $member->id), __METHOD__);
 
-        return ['created' => true, 'id' => (int) $member->id] + Serializer::full($member);
+        return ['created' => true, 'id' => (int) $member->id] + SubmittedKeys::report($ignored) + Serializer::full($member);
     }
 
     // ──────────────────────────── update ────────────────────────────

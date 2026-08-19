@@ -41,12 +41,13 @@ final class FieldMapper
     private const FORMAT_VALUES = ['raw', 'xml'];
 
     /**
-     * @return array{errors: list<string>, applied: int}
+     * @return array{errors: list<string>, applied: int, applied_keys: list<string>}
      */
     public function apply(FormModel $f, array $input, bool $isCreate): array
     {
         $errors = [];
         $applied = 0;
+        $appliedKeys = [];
 
         if (\array_key_exists('title', $input)) {
             $value = trim((string) $input['title']);
@@ -55,6 +56,7 @@ final class FieldMapper
             } else {
                 $f->title = mb_substr($value, 0, 255);
                 ++$applied;
+                $appliedKeys[] = 'title';
             }
         } elseif ($isCreate) {
             $errors[] = 'title is required';
@@ -67,6 +69,7 @@ final class FieldMapper
             if (\array_key_exists($key, $input)) {
                 $f->{$column} = (string) ($input[$key] ?? '');
                 ++$applied;
+                $appliedKeys[] = $key;
             }
         }
 
@@ -74,12 +77,14 @@ final class FieldMapper
             if (\array_key_exists($key, $input)) {
                 $f->{$column} = (bool) $input[$key] ? 1 : 0;
                 ++$applied;
+                $appliedKeys[] = $key;
             }
         }
 
         if (\array_key_exists('jump_to', $input)) {
             $f->jumpTo = (int) $input['jump_to'];
             ++$applied;
+            $appliedKeys[] = 'jump_to';
         }
 
         if (\array_key_exists('method', $input)) {
@@ -89,6 +94,7 @@ final class FieldMapper
             } else {
                 $f->method = $value;
                 ++$applied;
+                $appliedKeys[] = 'method';
             }
         }
 
@@ -99,6 +105,7 @@ final class FieldMapper
             } else {
                 $f->format = $value;
                 ++$applied;
+                $appliedKeys[] = 'format';
             }
         }
 
@@ -107,6 +114,7 @@ final class FieldMapper
             if ($value === null || $value === '') {
                 $f->attributes = '';
                 ++$applied;
+                $appliedKeys[] = 'attributes';
             } elseif (!\is_array($value) || !array_is_list($value)) {
                 $errors[] = 'attributes must be a list of strings';
             } else {
@@ -123,10 +131,11 @@ final class FieldMapper
                 if (!$bad) {
                     $f->attributes = $clean === [] ? '' : serialize($clean);
                     ++$applied;
+                    $appliedKeys[] = 'attributes';
                 }
             }
         }
 
-        return ['errors' => $errors, 'applied' => $applied];
+        return ['errors' => $errors, 'applied' => $applied, 'applied_keys' => $appliedKeys];
     }
 }

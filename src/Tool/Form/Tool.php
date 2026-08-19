@@ -14,6 +14,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\SubmittedKeys;
 use Netzhirsch\ContaoMcpBundle\Service\UpdateDiff;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -165,8 +166,10 @@ final class Tool
         $form->format = 'raw';
 
         $input = self::normaliseFields($fields);
+        $ignored = [];
         if ($input !== []) {
             $result = $this->mapper->apply($form, $input, isCreate: false);
+        $ignored = SubmittedKeys::ignored($input, $result['applied_keys']);
             if ($result['errors'] !== []) {
                 return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
             }
@@ -185,7 +188,7 @@ final class Tool
         $form->save();
         $this->log(sprintf('Created form "%s" (id=%d)', $form->title, (int) $form->id), __METHOD__);
 
-        return ['created' => true, 'id' => (int) $form->id] + Serializer::full($form);
+        return ['created' => true, 'id' => (int) $form->id] + SubmittedKeys::report($ignored) + Serializer::full($form);
     }
 
     /**
@@ -219,6 +222,7 @@ final class Tool
         $before = UpdateDiff::snapshot($form);
 
         $result = $this->mapper->apply($form, $input, isCreate: false);
+        $ignored = SubmittedKeys::ignored($input, $result['applied_keys']);
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }

@@ -15,6 +15,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Aufbau einer Instanz bricht nicht mehr an der Stelle ab, an der die
   Design-Tokens ins Theme müssen.
 
+  **`tl_layout` und `tl_content` gleich mit.** Content war der Sonderfall: Der
+  Mapper leitet seine Feldliste aus der DCA-Palette ab und *wirft* bei
+  unbekannten Feldern — Erweiterungsspalten stehen aber in keiner Palette und
+  wurden deshalb abgewiesen, bevor ihr Provider überhaupt gefragt wurde. Sie
+  gelten jetzt als erlaubt. `content_get` und `layout_get` geben die Felder
+  zurück, bei Content schlägt die Provider-Darstellung den Rohwert der Spalte.
+
   Die Mechanik liegt als `Service\ProviderFields` an **einer** Stelle statt pro
   Tabelle: `declaredFor()`, `serialize()`, `apply()`. `tl_layout` und
   `tl_content` können sie mit zwei Aufrufen übernehmen, ohne dass wieder eine
@@ -36,8 +43,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Zuordnung wandern (`image_size_create`, `layout_create`) und der
   `applied`-Zähler deshalb nie null werden kann, wird der Mapper selbst gefragt,
   statt eine zweite Feldliste zu pflegen, die auseinanderdriftet.
-  `theme_create`/`theme_update` liefern zusätzlich `ignored_keys`, wenn nur ein
-  Teil der Schlüssel unbekannt war.
+  **`ignored_keys` liefern jetzt alle fünf**, nicht nur `theme_*`. Möglich wurde
+  das, weil die Mapper melden, welche Schlüssel sie tatsächlich verarbeitet
+  haben (`applied_keys`) — der Mapper bleibt damit die einzige Wahrheit. Eine
+  zweite, handgepflegte Feldliste hätte beim ersten neuen Feld auseinander-
+  gedriftet und dann entweder Gültiges abgewiesen oder Unbekanntes
+  durchgewinkt. `Service\SubmittedKeys` zieht die Differenz an einer Stelle.
 
 ## [1.5.1] – 2026-08-19
 

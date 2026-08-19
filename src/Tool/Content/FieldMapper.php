@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Content;
 use Contao\Controller;
 use Contao\ContentModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
 /**
  * Field mapper for tl_content. Because tl_content's column set is extended by every
@@ -110,8 +111,10 @@ final class FieldMapper
      */
     private const DATETIME_FIELDS = ['start', 'stop'];
 
-    public function __construct(private readonly ContaoFramework $framework)
-    {
+    public function __construct(
+        private readonly ContaoFramework $framework,
+        private readonly ProviderFields $providerFields,
+    ) {
     }
 
     /**
@@ -167,6 +170,17 @@ final class FieldMapper
             }
         }
 
+        // Providers last. Unlike the theme mapper this one signals failure by
+        // throwing, so a rejected value keeps that contract — the Tool layer
+        // catches it and nothing is saved.
+        $fromProviders = $this->providerFields->apply('tl_content', $content, $input, $detectChanges);
+        if ($fromProviders['errors'] !== []) {
+            throw new \InvalidArgumentException(implode(' ', $fromProviders['errors']));
+        }
+        foreach ($fromProviders['applied'] as $field) {
+            $touch($field);
+        }
+
         return $changed;
     }
 
@@ -196,7 +210,14 @@ final class FieldMapper
             }
         }
 
-        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+        return array_values(array_unique(array_merge(
+            self::COMMON_FIELDS,
+            $fields,
+            // Extension-owned columns are not in the DCA palette, so without
+            // this the validation above rejects them before their provider is
+            // ever asked.
+            $this->providerFields->declaredFor('tl_content'),
+        )));
     }
 
     /**

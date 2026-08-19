@@ -26,12 +26,13 @@ final class FieldMapper
     private const PRESERVE_METADATA = ['default', 'overwrite', 'delete'];
 
     /**
-     * @return array{errors: list<string>, applied: int}
+     * @return array{errors: list<string>, applied: int, applied_keys: list<string>}
      */
     public function applyToSize(ImageSizeModel $s, array $input): array
     {
         $errors = [];
         $applied = 0;
+        $appliedKeys = [];
 
         if (\array_key_exists('name', $input)) {
             $value = trim((string) $input['name']);
@@ -40,6 +41,7 @@ final class FieldMapper
             } else {
                 $s->name = mb_substr($value, 0, 64);
                 ++$applied;
+                $appliedKeys[] = 'name';
             }
         }
 
@@ -48,6 +50,7 @@ final class FieldMapper
                 $v = $input[$intKey];
                 $s->{$intKey} = ($v === null || $v === '') ? null : (int) $v;
                 ++$applied;
+                $appliedKeys[] = $intKey;
             }
         }
 
@@ -58,6 +61,7 @@ final class FieldMapper
             } else {
                 $s->resizeMode = $value;
                 ++$applied;
+                $appliedKeys[] = 'resize_mode';
             }
         }
 
@@ -75,20 +79,24 @@ final class FieldMapper
                     $s->{$column} = $int;
                 }
                 ++$applied;
+                $appliedKeys[] = $key;
             }
         }
 
         if (\array_key_exists('css_class', $input)) {
             $s->cssClass = (string) $input['css_class'];
             ++$applied;
+            $appliedKeys[] = 'css_class';
         }
         if (\array_key_exists('densities', $input)) {
             $s->densities = (string) $input['densities'];
             ++$applied;
+            $appliedKeys[] = 'densities';
         }
         if (\array_key_exists('sizes', $input)) {
             $s->sizes = (string) $input['sizes'];
             ++$applied;
+            $appliedKeys[] = 'sizes';
         }
 
         if (\array_key_exists('formats', $input)) {
@@ -96,6 +104,7 @@ final class FieldMapper
             if ($value === null || $value === '') {
                 $s->formats = '';
                 ++$applied;
+                $appliedKeys[] = 'formats';
             } elseif (!\is_array($value) || !array_is_list($value)) {
                 $errors[] = 'formats must be a list of strings like "jpg:webp,jpg"';
             } else {
@@ -112,6 +121,7 @@ final class FieldMapper
                 if (!$bad) {
                     $s->formats = $clean === [] ? '' : serialize($clean);
                     ++$applied;
+                    $appliedKeys[] = 'formats';
                 }
             }
         }
@@ -123,6 +133,7 @@ final class FieldMapper
             } else {
                 $s->preserveMetadata = $value;
                 ++$applied;
+                $appliedKeys[] = 'preserve_metadata';
             }
         }
 
@@ -133,37 +144,43 @@ final class FieldMapper
             $value = $input['preserve_metadata_fields'];
             $s->preserveMetadataFields = \is_string($value) ? $value : serialize($value);
             ++$applied;
+            $appliedKeys[] = 'preserve_metadata_fields';
         }
 
         if (\array_key_exists('skip_if_dimensions_match', $input)) {
             $s->skipIfDimensionsMatch = (bool) $input['skip_if_dimensions_match'] ? 1 : 0;
             ++$applied;
+            $appliedKeys[] = 'skip_if_dimensions_match';
         }
         if (\array_key_exists('lazy_loading', $input)) {
             $s->lazyLoading = (bool) $input['lazy_loading'] ? 1 : 0;
             ++$applied;
+            $appliedKeys[] = 'lazy_loading';
         }
 
-        return ['errors' => $errors, 'applied' => $applied];
+        return ['errors' => $errors, 'applied' => $applied, 'applied_keys' => $appliedKeys];
     }
 
     /**
-     * @return array{errors: list<string>, applied: int}
+     * @return array{errors: list<string>, applied: int, applied_keys: list<string>}
      */
     public function applyToItem(ImageSizeItemModel $i, array $input): array
     {
         $errors = [];
         $applied = 0;
+        $appliedKeys = [];
 
         if (\array_key_exists('media', $input)) {
             $i->media = (string) $input['media'];
             ++$applied;
+            $appliedKeys[] = 'media';
         }
         foreach (['width', 'height'] as $intKey) {
             if (\array_key_exists($intKey, $input)) {
                 $v = $input[$intKey];
                 $i->{$intKey} = ($v === null || $v === '') ? null : (int) $v;
                 ++$applied;
+                $appliedKeys[] = $intKey;
             }
         }
         if (\array_key_exists('resize_mode', $input)) {
@@ -173,6 +190,7 @@ final class FieldMapper
             } else {
                 $i->resizeMode = $value;
                 ++$applied;
+                $appliedKeys[] = 'resize_mode';
             }
         }
         if (\array_key_exists('zoom', $input)) {
@@ -188,25 +206,30 @@ final class FieldMapper
                 }
             }
             ++$applied;
+            $appliedKeys[] = 'zoom';
         }
         if (\array_key_exists('densities', $input)) {
             $i->densities = (string) $input['densities'];
             ++$applied;
+            $appliedKeys[] = 'densities';
         }
         if (\array_key_exists('sizes', $input)) {
             $i->sizes = (string) $input['sizes'];
             ++$applied;
+            $appliedKeys[] = 'sizes';
         }
         if (\array_key_exists('active', $input)) {
             // DCA stores `invisible` (reverseToggle) — we expose positive `active`.
             $i->invisible = (bool) $input['active'] ? 0 : 1;
             ++$applied;
+            $appliedKeys[] = 'active';
         }
         if (\array_key_exists('sorting', $input)) {
             $i->sorting = (int) $input['sorting'];
             ++$applied;
+            $appliedKeys[] = 'sorting';
         }
 
-        return ['errors' => $errors, 'applied' => $applied];
+        return ['errors' => $errors, 'applied' => $applied, 'applied_keys' => $appliedKeys];
     }
 }

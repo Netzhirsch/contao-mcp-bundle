@@ -15,6 +15,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\SubmittedKeys;
 use Netzhirsch\ContaoMcpBundle\Service\UpdateDiff;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -210,6 +211,7 @@ final class Tool
         $size->preserveMetadata = 'default';
 
         $result = $this->mapper->applyToSize($size, ['name' => $name] + $extras);
+        $ignored = SubmittedKeys::ignored($extras, $result['applied_keys']);
         if ($result['errors'] !== []) {
             return ['error' => 'invalid_input', 'message' => 'field validation failed', 'errors' => $result['errors']];
         }
@@ -217,7 +219,7 @@ final class Tool
 
         $this->log(sprintf('Created image_size "%s" (id=%d, theme=%d)', $size->name, (int) $size->id, $theme_id), __METHOD__);
 
-        return ['created' => true, 'id' => (int) $size->id] + Serializer::full($size);
+        return ['created' => true, 'id' => (int) $size->id] + SubmittedKeys::report($ignored) + Serializer::full($size);
     }
 
     // ─────────────────────── image_size_update ──────────────────────
