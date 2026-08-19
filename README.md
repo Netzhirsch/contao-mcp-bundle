@@ -4,7 +4,7 @@
 
 *🇬🇧 [English version](README.en.md) — diese deutsche Fassung ist die Referenz.*
 
-**Status:** Stable — `v1.5.0`
+**Status:** Stable — `v1.5.1`
 **Lizenz:** proprietär, kommerziell lizenziert — 30 Tage kostenlos testen,
 danach 49 €/Monat je Contao-Instanz (siehe [Lizenz & Testphase](#lizenz--testphase)
 und [LICENSE](LICENSE))
@@ -283,7 +283,7 @@ Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
 
 ## Bekannte Einschränkungen
 
-Stand `v1.5.0`:
+Stand `v1.5.1`:
 
 - **PHPUnit-Coverage** deckt OAuth-Crypto, die Permission-Map und den
   Usage-Scanner ab. Der Tool-Layer wird stattdessen end-to-end vom Smoke-Test

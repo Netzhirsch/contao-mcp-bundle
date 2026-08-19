@@ -6,6 +6,8 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.5.1] – 2026-08-19
+
 ### Fixed
 - **`page_preview` scheiterte an HTTP-Basic-Auth** (Briefing aus dem
   Bootstrap-Projekt, gegen den echten Code verifiziert). Das Tool holt die Seite
