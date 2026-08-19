@@ -6,6 +6,15 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.6.0] – 2026-08-19
+
+> Abgenommen auf `lau.netzhirsch.de` gegen `netzhirsch/contao-bootstrap-bundle`
+> v0.20.0: Theme mit Bootstrap-Feldern angelegt und ausgelesen, partielles
+> Update lässt den Modus stehen, fehlerhaftes SCSS wird mit Compiler-Meldung
+> (Zeile/Spalte) abgelehnt **ohne zu schreiben**, ungültiger Modus nennt die
+> erlaubten Werte, unbekannter Schlüssel fällt nicht mehr stillschweigend
+> heraus. Testdatensatz wieder entfernt.
+
 ### Added
 - **`tl_theme` nimmt Erweiterungsfelder an** (Briefing aus AL-01, Projekt Autohaus
   Lau; alle drei Befunde gegen den Code nachgeprüft). `theme_create`,

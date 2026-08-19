@@ -5,7 +5,7 @@
 *🇩🇪 [Deutsche Fassung](README.md) — the German README is the reference version and
 carries additional development notes.*
 
-**Status:** Stable — `v1.5.1`
+**Status:** Stable — `v1.6.0`
 **License:** proprietary, commercially licensed — 30-day free trial, then
 €49/month per Contao installation (see [License & trial](#license--trial) and
 [LICENSE](LICENSE))
@@ -305,7 +305,7 @@ license renewal depends on it.
 
 ## Known limitations
 
-As of `v1.5.1`:
+As of `v1.6.0`:
 
 - **PHPUnit coverage** focuses on OAuth crypto, the permission map and the usage
   scanner. The tool layer is exercised end-to-end by the smoke test instead.
