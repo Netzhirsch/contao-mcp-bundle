@@ -2282,16 +2282,17 @@ final class McpSmokeTestCommand extends Command
         // every verification by reading back.
         $output->writeln("\n<comment>System-Settings gegen die echte Contao-Version</comment>");
 
-        $deadKey = $this->systemTool->systemSettingsUpdate(['jpgQuality' => 80]);
-        $expect('a key this Contao lacks is skipped, not applied', $deadKey,
-            static fn ($r) => ($r['updated'] ?? ['x']) === [] && ($r['skipped'][0]['key'] ?? null) === 'jpgQuality');
-        $expect('and the reason is named', $deadKey,
-            static fn ($r) => ($r['skipped'][0]['reason'] ?? '') === 'unknown_for_this_contao_version');
-        $expect('a skip is not success', $deadKey, static fn ($r) => ($r['success'] ?? true) === false);
+        // gdMaxImgWidth existiert in Contao 5 nicht mehr und steht deshalb
+        // nicht mehr auf der Liste: Ablehnung statt bestätigtem Nichtstun.
+        $deadKey = $this->systemTool->systemSettingsUpdate(['gdMaxImgWidth' => 3840]);
+        $expect('a setting Contao 5 dropped is refused', $deadKey,
+            static fn ($r) => ($r['error'] ?? '') === 'unknown_settings');
+        $expect('and it is named back to the caller', $deadKey,
+            static fn ($r) => \in_array('gdMaxImgWidth', $r['unknown'] ?? [], true));
 
         $realKey = $this->systemTool->systemSettingsUpdate(['imageWidth' => 3841]);
         $expect('a key it does have still applies', $realKey,
-            static fn ($r) => ($r['updated'] ?? []) === ['imageWidth'] && ($r['skipped'] ?? ['x']) === []);
+            static fn ($r) => ($r['updated'] ?? []) === ['imageWidth']);
         $expect('and reading it back shows the value',
             $this->systemTool->systemSettings()['uploads']['imageWidth'] ?? null,
             static fn ($v) => (int) $v === 3841);

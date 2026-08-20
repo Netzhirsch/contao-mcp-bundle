@@ -6,8 +6,6 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\System;
 
 use Composer\InstalledVersions;
 use Contao\Config;
-use Contao\Controller;
-use Contao\CoreBundle\ContaoCoreBundle;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\StringUtil;
@@ -543,32 +541,30 @@ final class Tool
         'versionPeriod', 'websiteTitle',
     ];
 
-    /**
-     * Whether this Contao knows a setting at all.
+    /*
+     * Why the list above is curated and not derived at runtime.
      *
-     * The lists above are POLICY — which keys we are willing to write. They say
-     * nothing about whether a key still exists, and the bundle supports Contao
-     * 5.3 through 5.7, where that differs. Measured on 5.7.11: 14 of the keys
-     * this list used to carry were gone, `gdMaxImgWidth` and friends among them
-     * — Contao-3 leftovers. Config::persist() writes them to localconfig
-     * regardless and nothing ever reads them, so the tool reported success for
-     * a change that could not take effect.
+     * The obvious fix for "the tool confirms keys that no longer exist" is to
+     * ask the installation instead of maintaining a list. It does not work:
+     * Contao 5 has no complete machine-readable catalogue of settings.
      *
-     * Truth comes from the running installation: TL_CONFIG (defaults plus
-     * localconfig) union the tl_settings DCA — the DCA still describes the
-     * settings surface in Contao 5 even though there is no tl_settings table.
+     *   - the tl_settings DCA covers only the 20 fields of the backend form
+     *   - contao/config/default.php holds defaults for a subset, and
+     *     `websiteTitle` — a perfectly valid setting — is in neither
+     *   - $GLOBALS['TL_CONFIG'] is defaults PLUS whatever was ever persisted,
+     *     so a bogus key becomes "known" the moment someone writes it once,
+     *     while a valid-but-unset key looks unknown
      *
-     * @return list<string>
+     * Both directions were tried and both were wrong: deriving from the DCA
+     * union TL_CONFIG passed locally and then rejected `websiteTitle` on a
+     * fresh instance in CI, because nothing had persisted it there yet.
+     *
+     * So the list stays curated, and it was pruned against Contao 5.7.11 —
+     * gdMaxImgWidth, useFTP, characterSet and the rest of the Contao-3
+     * leftovers are gone, which is what made the tool confirm writes that
+     * could never take effect. Keys removed somewhere between 5.3 and 5.7 can
+     * still slip through; the description says so and points at reading back.
      */
-    private function knownSettingKeys(): array
-    {
-        $this->framework->getAdapter(Controller::class)->loadDataContainer('tl_settings');
-
-        return array_values(array_unique(array_merge(
-            array_keys($GLOBALS['TL_CONFIG'] ?? []),
-            array_keys($GLOBALS['TL_DCA']['tl_settings']['fields'] ?? []),
-        )));
-    }
 
     /**
      * Settings whose values are sensitive — writes require confirm_dangerous=true.
@@ -599,14 +595,16 @@ final class Tool
             session + cookie), rootPasswordHash (admin password override), allowedAttributes,
             defaultChmod.
 
-            Two separate gates: a key outside the lists above is REJECTED outright. A key that is
-            listed but does not exist in this Contao version is SKIPPED — writing it would land in
-            the local config where nothing reads it. Which keys exist differs between Contao 5.3
-            and 5.7, so this is checked against the running installation rather than a list here.
+            A key outside the two lists is rejected outright. The lists were checked against
+            Contao 5.7 — the Contao-3 leftovers they used to carry (gdMaxImgWidth and friends)
+            are gone, because writing those landed in the local config where nothing reads them
+            and the call still reported success.
 
-            Call system_settings (without arguments) to see what this instance actually holds.
-            Returns {updated: list<string>, skipped: list<{key, reason, message}>,
-            errors: list<string>, success: bool} — success is false when anything was skipped.
+            Contao offers no complete catalogue of valid settings, so a key that disappeared
+            between 5.3 and 5.7 can still be accepted here without taking effect. Read back with
+            system_settings when it matters.
+
+            Returns {updated: list<string>, errors: list<string>, success: bool}.
         DESC,
     )]
     /**
@@ -644,27 +642,6 @@ final class Tool
             ];
         }
 
-        // Policy said yes; now ask the installation. A key it does not know
-        // cannot take effect, and reporting it as updated is the one answer an
-        // agent cannot recover from — it reads back, sees nothing, and has no
-        // reason to suspect the write.
-        $known = $this->knownSettingKeys();
-        $skipped = [];
-        foreach (array_keys($input) as $key) {
-            if (!\in_array((string) $key, $known, true)) {
-                $skipped[] = [
-                    'key' => (string) $key,
-                    'reason' => 'unknown_for_this_contao_version',
-                    'message' => sprintf(
-                        '"%s" does not exist in Contao %s — it would be written to the local config and never read.',
-                        $key,
-                        ContaoCoreBundle::getVersion(),
-                    ),
-                ];
-                unset($input[$key]);
-            }
-        }
-
         $updated = [];
         $errors = [];
         foreach ($input as $key => $value) {
@@ -689,11 +666,8 @@ final class Tool
 
         return [
             'updated' => $updated,
-            'skipped' => $skipped,
             'errors' => $errors,
-            // Skipped keys are not an error — the caller asked for something
-            // this Contao has no place for — but they are not success either.
-            'success' => $errors === [] && $skipped === [],
+            'success' => $errors === [],
         ];
     }
 

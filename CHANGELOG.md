@@ -50,23 +50,27 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 ### Fixed
 - **`system_settings_update` bestätigte Schlüssel, die es in dieser
   Contao-Version nicht gibt.** `gdMaxImgWidth` und Konsorten stammen aus der
-  GD-Ära; `Config::persist()` schreibt sie klaglos in die lokale Konfiguration,
-  wo sie nie jemand liest. Das Tool meldete `updated` — dasselbe falsche
-  Erfolgssignal wie bei `theme_create` in AL-01.
+  GD-Ära; `Config::persist()` schreibt sie klaglos in die lokale
+  Konfiguration, wo sie nie jemand liest. Das Tool meldete `updated` —
+  dasselbe falsche Erfolgssignal wie bei `theme_create` in AL-01.
 
   Nachgemessen an Contao 5.7.11: **14 der 33 gepflegten Schlüssel existieren
   dort nicht**, darunter beide „gefährlichen" (`encryptionKey`,
   `rootPasswordHash`), deren Bestätigungsdialog also Felder schützte, die es
-  nicht mehr gibt. Die Liste wurde bereinigt, und zusätzlich prüft das Tool zur
-  Laufzeit gegen die laufende Installation (`TL_CONFIG` vereinigt mit der
-  `tl_settings`-DCA — die beschreibt die Einstellungsfläche in Contao 5 weiter,
-  auch ohne Tabelle). Unbekannte Schlüssel kommen als `skipped` mit Grund
-  zurück, `success` ist dann `false`.
+  nicht mehr gibt. Die Liste ist bereinigt — solche Schlüssel werden jetzt
+  **abgelehnt** statt bestätigt.
 
-  Damit gibt es zwei getrennte Tore: außerhalb der Policy-Liste → Ablehnung,
-  gelistet aber in dieser Contao-Version nicht vorhanden → übersprungen. Das
-  ist bewusst unterschieden, weil es zwei verschiedene Fehler des Aufrufers
-  sind.
+  Der naheliegende Weg, die Liste zur Laufzeit aus Contao abzuleiten, geht
+  nicht: Es gibt in Contao 5 keinen vollständigen maschinenlesbaren Katalog.
+  Die `tl_settings`-DCA deckt nur die 20 Felder der Backend-Maske ab,
+  `default.php` nur eine Teilmenge — `websiteTitle` steht in keinem von
+  beiden und ist trotzdem gültig. Und `TL_CONFIG` ist Defaults **plus alles je
+  Persistierte**, ein Unsinns-Schlüssel wird darin also „bekannt", sobald ihn
+  einmal jemand geschrieben hat. Beide Richtungen falsch. Der Versuch fiel in
+  der CI auf: lokal grün, auf einer frischen Instanz wurde `websiteTitle`
+  abgelehnt. Die Liste bleibt daher gepflegt, und die Toolbeschreibung sagt
+  offen, dass ein zwischen 5.3 und 5.7 entfernter Schlüssel durchrutschen
+  kann — mit dem Hinweis, im Zweifel zurückzulesen.
 
 - **Ein Tool mit Schreibverb in der Mitte des Namens wurde als Lesezugriff
   geprüft.** `ToolPermissionMap::inferOperation()` sah nur die Endung, also
