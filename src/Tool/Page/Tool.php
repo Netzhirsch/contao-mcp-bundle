@@ -11,6 +11,7 @@ use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\CoreBundle\Slug\Slug;
 use Contao\PageModel;
 use Contao\Versions;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
@@ -647,7 +648,7 @@ final class Tool
         if (!$confirm_destructive) {
             return [
                 'error' => 'destructive_confirmation_required',
-                'message' => 'page_delete is irreversible. Pass confirm_destructive=true to proceed. Use cascade=true to also drop children.',
+                'message' => 'page_delete is irreversible. Pass confirm_destructive=true to proceed. cascade=true covers articles and jumpTo referrers, NOT sub-pages — use pages_delete_tree for a whole branch.',
             ];
         }
 
@@ -1353,6 +1354,178 @@ final class Tool
         }
 
         return $n;
+    }
+
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'pages_delete_tree',
+        description: <<<'DESC'
+            Deletes a page and everything below it, deepest first. The counterpart to
+            pages_create_tree: page_delete refuses to cascade through the tree on purpose,
+            so undoing a 25-page structure meant 25 confirmed calls in the right order.
+
+            Two locks, because this can remove a whole site section:
+              1. confirm_destructive=true, as with every destructive tool.
+              2. expect_pages must match the number of pages actually below (and
+                 including) `id`. Call without it — or with dry_run=true — and the tool
+                 answers with the count and the list it WOULD delete, deleting nothing.
+                 The second call then carries that number. A structure that grew since
+                 you looked no longer matches, and the call fails instead of taking more
+                 than you meant.
+
+            `cascade` is handed to each page: with it, articles and their content are
+            removed and jumpTo references pointing at those pages are reset. Without it a
+            page holding articles or referrers stops the run — its ancestors then stay too,
+            since Contao will not delete a page that still has children.
+
+            Every page keeps its own version snapshot and undo entry: there is no bulk
+            undo, but nothing is lost silently either. Capped at 200 pages per call.
+        DESC,
+    )]
+    public function deleteTree(
+        int $id,
+        bool $confirm_destructive = false,
+        int $expect_pages = 0,
+        bool $cascade = false,
+        bool $dry_run = false,
+    ): array {
+        $this->framework->initialize();
+
+        $root = PageModel::findByPk($id);
+        if ($root === null) {
+            return ['error' => 'not_found', 'message' => sprintf('No page with id %d', $id)];
+        }
+
+        // Deepest first: Contao refuses to delete a page that still has
+        // children, so the order is not a preference but a requirement.
+        $ordered = $this->collectSubtreeDeepestFirst($id);
+        $count = \count($ordered);
+
+        if ($count > self::MAX_TREE_NODES) {
+            return [
+                'error' => 'too_many_pages',
+                'message' => sprintf('%d pages exceed the limit of %d per call — delete sub-sections first.', $count, self::MAX_TREE_NODES),
+            ];
+        }
+
+        $preview = array_map(
+            static fn (array $p): array => ['id' => $p['id'], 'title' => $p['title'], 'depth' => $p['depth']],
+            $ordered,
+        );
+
+        if ($dry_run || $expect_pages === 0) {
+            return [
+                'dry_run' => true,
+                'pages' => $count,
+                'expect_pages' => $count,
+                'would_delete' => $preview,
+                'message' => sprintf(
+                    'Nothing was deleted. Re-call with expect_pages=%d and confirm_destructive=true to proceed.',
+                    $count,
+                ),
+            ];
+        }
+
+        if ($expect_pages !== $count) {
+            // The tree changed between looking and acting, or the caller
+            // guessed. Either way it now means something different than it did.
+            return [
+                'error' => 'count_mismatch',
+                'message' => sprintf(
+                    'expect_pages=%d, but %d pages are below and including id %d. Re-check with dry_run=true.',
+                    $expect_pages,
+                    $count,
+                    $id,
+                ),
+                'pages' => $count,
+            ];
+        }
+
+        if (!$confirm_destructive) {
+            return [
+                'error' => 'destructive_confirmation_required',
+                'message' => sprintf('This would delete %d pages irreversibly. Pass confirm_destructive=true to proceed.', $count),
+                'pages' => $count,
+            ];
+        }
+
+        $result = ['deleted' => 0, 'failed' => 0, 'pages' => []];
+
+        foreach ($ordered as $page) {
+            $single = $this->delete((int) $page['id'], confirm_destructive: true, cascade: $cascade);
+
+            if (($single['deleted'] ?? false) === true) {
+                ++$result['deleted'];
+                $result['pages'][] = ['id' => $page['id'], 'title' => $page['title'], 'deleted' => true];
+                continue;
+            }
+
+            ++$result['failed'];
+            $result['pages'][] = [
+                'id' => $page['id'],
+                'title' => $page['title'],
+                'error' => $single['error'] ?? 'unknown',
+                'message' => $single['message'] ?? '',
+            ];
+        }
+
+        // A parent surviving because a child refused is the expected shape of a
+        // partial run, not a second failure — say so rather than leaving the
+        // caller to work it out from the list.
+        if ($result['failed'] > 0) {
+            $result['note'] = 'Pages above a failed one were kept: Contao does not delete a page that still has children. Resolve the reported errors and repeat.';
+        }
+
+        $this->logGeneral(sprintf('Deleted page tree below id=%d (%d pages, %d failed)', $id, $result['deleted'], $result['failed']), __METHOD__);
+
+        return $result;
+    }
+
+    /**
+     * Every page below and including $id, children before their parents.
+     *
+     * Walks level by level rather than with a recursive CTE: MySQL 5.7 has no
+     * CTEs and the bundle supports what Contao supports.
+     *
+     * @return list<array{id: int, title: string, depth: int}>
+     */
+    private function collectSubtreeDeepestFirst(int $id): array
+    {
+        $levels = [];
+        $currentIds = [$id];
+        $depth = 0;
+
+        while ($currentIds !== [] && $depth <= 50) {
+            $rows = $this->connection->fetchAllAssociative(
+                sprintf('SELECT id, title FROM tl_page WHERE %s ORDER BY sorting', 0 === $depth ? 'id = ?' : 'pid IN (?)'),
+                0 === $depth ? [$id] : [$currentIds],
+                0 === $depth ? [] : [ArrayParameterType::INTEGER],
+            );
+
+            if ($rows === []) {
+                break;
+            }
+
+            $levels[$depth] = array_map(
+                static fn (array $r): array => ['id' => (int) $r['id'], 'title' => (string) $r['title']],
+                $rows,
+            );
+
+            $currentIds = array_map(static fn (array $r): int => $r['id'], $levels[$depth]);
+            ++$depth;
+        }
+
+        $ordered = [];
+        foreach (array_reverse($levels, true) as $level => $rows) {
+            foreach ($rows as $row) {
+                $ordered[] = $row + ['depth' => $level];
+            }
+        }
+
+        return $ordered;
     }
 
 }

@@ -324,6 +324,162 @@ jobs:
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────────
+  # Upgrade from the newest published release to this commit.
+  #
+  # The smoke job proves a FRESH install works. That is not what customers
+  # do — they run a released version and then update, and an update can
+  # break in ways a fresh install never shows: a migration that only makes
+  # sense against existing rows, a container that will not rebuild, a
+  # dependency the resolver cannot move. With test phases running at
+  # customers, that path needs a guard of its own.
+  #
+  # The job installs the latest stable from Packagist, migrates, then
+  # switches to this checkout, updates and migrates again. It asserts that
+  # the second migration finds NOTHING to do — a pending schema change
+  # after an update means the release needs an explicit migration step, and
+  # this is where we want to learn that, not from a customer.
+  # ─────────────────────────────────────────────────────────────────────
+  upgrade-from-release:
+    name: Upgrade from the latest release
+    runs-on: ubuntu-22.04
+    needs: [lint, phpstan, phpunit]
+
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: contao_upgrade
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout bundle
+        uses: actions/checkout@v6
+        with:
+          path: bundle
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: openssl, posix, pdo_mysql, mbstring, intl, gd, exif, fileinfo, dom, xml, curl, sodium, zip
+          ini-values: opcache.enable_cli=0, memory_limit=512M, date.timezone=UTC
+          coverage: none
+          tools: composer:v2
+
+      - name: Install the latest published release
+        run: |
+          set -euo pipefail
+
+          composer create-project --no-install --no-scripts --remove-vcs \
+              "contao/managed-edition:^5.7" app
+
+          cd app
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config allow-plugins.contao/manager-plugin true
+          composer config allow-plugins.contao/core-bundle true
+          composer config allow-plugins.contao-components/installer true
+          composer config allow-plugins.php-http/discovery true
+          composer config allow-plugins.symfony/runtime true
+          composer config allow-plugins.symfony/flex true
+
+          # From Packagist, exactly as a customer has it.
+          composer require netzhirsch/contao-mcp-bundle --no-update
+          composer install --no-interaction --prefer-dist --no-progress
+
+          echo "BASELINE=$(composer show netzhirsch/contao-mcp-bundle | awk '/^versions/ {print $NF}')" >> "$GITHUB_ENV"
+
+      - name: Configure environment
+        working-directory: app
+        run: |
+          cat > .env.local <<EOF
+          APP_ENV=prod
+          APP_SECRET=ci-secret-never-used-anywhere
+          DATABASE_URL=mysql://root:root@127.0.0.1:3306/contao_upgrade?serverVersion=mariadb-10.11.0
+          MAILER_DSN=null://null
+          EOF
+
+      - name: Wait for MariaDB
+        run: |
+          for i in {1..30}; do
+              if mysqladmin ping -h127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+                  echo "MariaDB ready after ${i}s"
+                  exit 0
+              fi
+              sleep 1
+          done
+          echo "MariaDB did not become ready in 30s" >&2
+          exit 1
+
+      # The state a customer is actually in before they update: schema
+      # migrated, OAuth tables present, config written.
+      - name: Migrate on the released version
+        working-directory: app
+        run: |
+          set -euo pipefail
+          vendor/bin/contao-console cache:warmup --env=prod
+          vendor/bin/contao-console contao:migrate --env=prod --no-interaction
+          echo "Baseline installed: $BASELINE"
+
+      - name: Update to this commit
+        working-directory: app
+        run: |
+          set -euo pipefail
+          composer config repositories.bundle '{"type":"path","url":"../bundle","options":{"symlink":false}}'
+          composer require "netzhirsch/contao-mcp-bundle:@dev" --no-interaction --prefer-dist --no-progress
+
+      # A stale container is the classic update failure: services changed,
+      # the cached one did not, and nothing notices until a tool is called.
+      - name: Rebuild the container
+        working-directory: app
+        run: |
+          set -euo pipefail
+          vendor/bin/contao-console cache:clear --env=prod
+          vendor/bin/contao-console cache:warmup --env=prod
+
+      - name: The update must not leave migrations pending
+        working-directory: app
+        run: |
+          set -euo pipefail
+          vendor/bin/contao-console contao:migrate --env=prod --no-interaction
+
+          # Second pass: whatever the first one did, nothing may remain. A
+          # non-empty dry-run here means the release carries a schema change
+          # that the update did not apply on its own.
+          OUT=$(vendor/bin/contao-console contao:migrate --env=prod --no-interaction --dry-run)
+          echo "$OUT"
+
+          if echo "$OUT" | grep -qE '^\s*\*\s'; then
+              echo "::error::Schema changes are still pending after the update — the release needs an explicit migration step."
+              exit 1
+          fi
+
+      # Same suite the fresh-install job runs, now on an upgraded instance.
+      # This is the assertion that matters: an instance that came from the
+      # previous release behaves like one built from scratch.
+      - name: Smoke test on the upgraded instance
+        working-directory: app
+        run: vendor/bin/contao-console contao:mcp:smoke-test --env=prod
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-upgrade
+          path: |
+            app/var/logs/
+            app/var/mcp/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────
   # Legacy root config — every installation up to 1.4.0 was told to put an
   # `extra.patches` block into its own composer.json pointing at
   # vendor/netzhirsch/contao-mcp-bundle/patches/*.patch. That block lives

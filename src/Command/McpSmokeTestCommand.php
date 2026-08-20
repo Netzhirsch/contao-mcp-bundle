@@ -2353,6 +2353,47 @@ final class McpSmokeTestCommand extends Command
             'SELECT COUNT(*) FROM tl_page WHERE title = ?', [$treeStamp.'_orphan']),
             static fn (int $n) => $n === 0);
 
+        // Removing a tree again. page_delete refuses to cascade through the
+        // tree on purpose, so without this a 25-page structure took 25
+        // confirmed calls in exactly the right order.
+        $delStamp = $stamp.'_del';
+        $toDelete = $this->pageTool->createTree(0, [[
+            'title' => $delStamp.'_root',
+            'type' => 'root',
+            'children' => [
+                ['title' => $delStamp.'_a', 'type' => 'regular', 'children' => [
+                    ['title' => $delStamp.'_a1', 'type' => 'regular'],
+                ]],
+                ['title' => $delStamp.'_b', 'type' => 'regular'],
+            ],
+        ]]);
+        $delRoot = (int) ($toDelete['pages'][0]['id'] ?? 0);
+        $expect('a tree to delete was created', $toDelete, static fn ($r) => ($r['created'] ?? 0) === 4);
+
+        // No count given: answer with the plan, touch nothing. The number in
+        // that answer is what the real call has to carry.
+        $preview = $this->pageTool->deleteTree($delRoot);
+        $expect('without expect_pages it only previews', $preview,
+            static fn ($r) => ($r['dry_run'] ?? false) === true && ($r['pages'] ?? 0) === 4);
+        $expect('the preview deletes nothing', (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM tl_page WHERE title LIKE ?', [$delStamp.'%']),
+            static fn (int $n) => $n === 4);
+        // Deepest first is a requirement, not a preference: Contao will not
+        // delete a page that still has children.
+        $expect('the plan starts at the deepest level', $preview,
+            static fn ($r) => ($r['would_delete'][0]['depth'] ?? -1) === 2);
+
+        $expect('a wrong count refuses', $this->pageTool->deleteTree($delRoot, confirm_destructive: true, expect_pages: 3),
+            static fn ($r) => ($r['error'] ?? '') === 'count_mismatch');
+        $expect('the right count still needs confirmation', $this->pageTool->deleteTree($delRoot, expect_pages: 4),
+            static fn ($r) => ($r['error'] ?? '') === 'destructive_confirmation_required');
+
+        $expect('and then it removes the branch', $this->pageTool->deleteTree($delRoot, confirm_destructive: true, expect_pages: 4),
+            static fn ($r) => ($r['deleted'] ?? 0) === 4 && ($r['failed'] ?? 1) === 0);
+        $expect('nothing of it is left', (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM tl_page WHERE title LIKE ?', [$delStamp.'%']),
+            static fn (int $n) => $n === 0);
+
         foreach (array_reverse($treeResult['pages'] ?? []) as $p) {
             if (isset($p['id'])) {
                 $this->connection->delete('tl_page', ['id' => (int) $p['id']]);
