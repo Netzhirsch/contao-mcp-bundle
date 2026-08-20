@@ -2228,6 +2228,67 @@ final class McpSmokeTestCommand extends Command
         $this->connection->delete('tl_module', ['id' => $usageModuleId]);
         $this->connection->delete('tl_page', ['id' => $usagePageId]);
 
+        // ═══════════════════════ Page tree ═════════════════════════
+        // One call that writes many rows needs its failure modes pinned, not
+        // just its happy path: a half-built tree is the expensive mistake.
+        $output->writeln("\n<comment>Page-Tree (Batch)</comment>");
+
+        $treeStamp = $stamp.'_tree';
+
+        // A shape error anywhere must stop the whole tree before the first write.
+        $rejected = $this->pageTool->createTree(0, [[
+            'title' => $treeStamp.'_never',
+            'type' => 'regular',
+            'children' => [['title' => $treeStamp.'_child', 'gibtsnicht' => 1]],
+        ]]);
+        $expect('a malformed node rejects the whole tree', $rejected,
+            static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && !empty($r['problems']));
+        $expect('and nothing was written', (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM tl_page WHERE title LIKE ?', [$treeStamp.'%']),
+            static fn (int $n) => $n === 0);
+
+        $treeResult = $this->pageTool->createTree(0, [[
+            'title' => $treeStamp.'_root',
+            'type' => 'root',
+            'children' => [
+                ['title' => $treeStamp.'_a', 'type' => 'regular', 'children' => [
+                    ['title' => $treeStamp.'_a1', 'type' => 'regular'],
+                ]],
+                // Passes the shape check, fails when Contao validates the type.
+                ['title' => $treeStamp.'_broken', 'type' => 'gibtsnicht', 'children' => [
+                    ['title' => $treeStamp.'_orphan', 'type' => 'regular'],
+                ]],
+                ['title' => $treeStamp.'_b', 'type' => 'regular'],
+            ],
+        ]]);
+
+        $expect('tree creates the nodes it can', $treeResult, static fn ($r) => ($r['created'] ?? 0) === 4);
+        $expect('a failing node is reported, not swallowed', $treeResult, static fn ($r) => ($r['failed'] ?? 0) === 1);
+        $expect('its children are skipped', $treeResult, static fn ($r) => ($r['skipped'] ?? 0) === 1);
+
+        $byPath = [];
+        foreach ($treeResult['pages'] ?? [] as $p) {
+            $byPath[$p['path']] = $p;
+        }
+
+        // The whole point of the tree shape: the child's pid comes from the
+        // parent that was created moments earlier, without the caller ever
+        // handling an id.
+        $expect('nesting resolves parent ids', $byPath,
+            static fn (array $b) => isset($b['1.1']['id'], $b['1.1.1']['pid'])
+                && $b['1.1.1']['pid'] === $b['1.1']['id']);
+        $expect('siblings after the failure still run', $byPath,
+            static fn (array $b) => isset($b['1.3']['id']));
+        $expect('the skipped subtree left no orphans', (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM tl_page WHERE title = ?', [$treeStamp.'_orphan']),
+            static fn (int $n) => $n === 0);
+
+        foreach (array_reverse($treeResult['pages'] ?? []) as $p) {
+            if (isset($p['id'])) {
+                $this->connection->delete('tl_page', ['id' => (int) $p['id']]);
+            }
+        }
+
         // ═══════════════════════ OAuth-Discovery + Pairing ═════════
         // The two things a connector trips over before it ever sends a tool
         // call: finding out WHERE to authenticate, and being allowed to

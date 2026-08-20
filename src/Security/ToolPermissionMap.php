@@ -129,6 +129,9 @@ final class ToolPermissionMap
         // Page-tree helpers (tl_page reads/writes).
         'pages_list' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'pages_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
+        // Ends in "_tree" but WRITES — the suffix heuristic below would
+        // have read it as a lookup and let a read-only user build a page tree.
+        'pages_create_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'create'],
         'page_translations_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'page_url' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'page_preview' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
@@ -287,6 +290,16 @@ final class ToolPermissionMap
         if (str_ends_with($tool, '_delete')) {
             return 'delete';
         }
+        // A write verb anywhere in the name beats the read default. The
+        // suffix checks above miss names like "pages_create_tree", and
+        // guessing "read" for something that writes is the one direction
+        // this must never fail in.
+        foreach (['create', 'update', 'delete'] as $verb) {
+            if (str_contains($tool, '_'.$verb)) {
+                return $verb;
+            }
+        }
+
         // Everything else in an entity group is a read (list/get/tree/types/palette/options/…).
         return 'read';
     }

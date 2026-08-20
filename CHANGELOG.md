@@ -6,6 +6,37 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **`pages_create_tree` legt einen ganzen Seitenbaum in einem Aufruf an.** Der
+  Grund ist gemessen, nicht geschätzt: Jeder einzelne Tool-Call kostet ~160 ms
+  Framework-Boot bei ~30 ms echter Arbeit je Seite — 9 von 10 Teilen der
+  Serverzeit sind Hochfahren. Ein 25-Seiten-Baum braucht gebündelt 914 ms
+  statt 4 800 ms (Faktor 5,3), und aus 25 Modell-Runden wird eine.
+
+  Verschachtelung steckt in der **Struktur**, nicht in einer Referenzsprache:
+  Ein Knoten hat `children`, die Eltern-ID ergibt sich aus der Position. Kein
+  `$ref`, keine Workflow-Engine im MCP-Server. `sorting` vergibt das Tool je
+  Ebene in 128er-Schritten — eine ganze Fehlerklasse weniger für den Aufrufer.
+
+  Fehlerverhalten, weil ein halb gebauter Baum der teure Fall ist: Formfehler
+  (fehlender Titel/Typ, unbekanntes Feld) werden für den **ganzen** Baum vor
+  dem ersten Schreibvorgang gemeldet — dann entsteht nichts. Scheitert ein
+  Knoten zur Laufzeit, wird sein Teilbaum übersprungen und die Geschwister
+  laufen weiter; das Ergebnis nennt Pfad, Fehler und Zahl der übersprungenen
+  Kinder. Es gibt keine Transaktion und kein Sammel-Undo. Obergrenze 200
+  Seiten je Aufruf, weil dieser Transport keine Fortschrittsmeldungen kennt.
+
+### Fixed
+- **Ein Tool mit Schreibverb in der Mitte des Namens wurde als Lesezugriff
+  geprüft.** `ToolPermissionMap::inferOperation()` sah nur die Endung, also
+  hätte `pages_create_tree` (endet auf `_tree`) einem Nur-Lese-Benutzer
+  erlaubt, 200 Seiten anzulegen. Aufgefallen beim Bau des Tools, nicht im
+  Betrieb: Von den bestehenden Namen trifft es nur `file_update_meta`, und das
+  ist explizit erfasst. Neben dem expliziten Eintrag prüft die Heuristik jetzt
+  auf ein Schreibverb an beliebiger Stelle — in dieser Richtung darf sie nicht
+  irren.
+
+
 ## [1.6.0] – 2026-08-19
 
 > Abgenommen auf `lau.netzhirsch.de` gegen `netzhirsch/contao-bootstrap-bundle`

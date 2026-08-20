@@ -1114,4 +1114,245 @@ final class Tool
 
         return $nodes;
     }
+
+    /**
+     * Hard cap on one tree. Sized against the measured ~30 ms per page: 200
+     * pages is roughly 6 s of work, which still returns inside a caller's
+     * patience. There are no progress notifications on this transport (POST
+     * only, no SSE channel), so a long call is a black box until it answers —
+     * the cap is what keeps that window short.
+     */
+    private const MAX_TREE_NODES = 200;
+
+    /**
+     * @param array<int, mixed> $pages
+     *
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'pages_create_tree',
+        description: <<<'DESC'
+            Creates a whole page tree in ONE call. Pass `pid` (0 for a new root) and
+            `pages` as a LIST of nodes; a node may carry `children` with the same shape.
+
+            Every field page_create accepts works per node (type, alias, language, dns,
+            robots, …) — except `pid`, which comes from the node's position in the tree.
+            `sorting` is filled in automatically per level in Contao's 128 increments;
+            pass it explicitly only to override.
+
+            Example:
+              {"pid": 0, "pages": [
+                {"title": "Leistungen", "type": "regular", "children": [
+                  {"title": "Beratung", "type": "regular"}
+                ]},
+                {"title": "Kontakt", "type": "regular"}
+              ]}
+
+            Why: every separate tool call costs a full framework boot (~160 ms) on top of
+            ~30 ms of actual work, plus a round-trip. A 25-page tree takes about a fifth
+            of the server time this way.
+
+            Shape errors (missing title/type, unknown field) are reported for the WHOLE
+            tree before anything is written — nothing is created in that case. Runtime
+            failures (alias collision, invalid value) can still happen mid-run: that node
+            is reported with its error and its children are skipped, siblings continue.
+            There is no transaction and no bulk undo — every page carries its own version
+            entry, so a partial tree stays as it is. The per-node result lists what was
+            created, so a retry can pick up instead of duplicating.
+
+            Use `dry_run=true` to get the plan (paths, titles, computed sorting) without
+            writing anything.
+        DESC,
+    )]
+    public function createTree(int $pid, #[Schema(type: 'array')] mixed $pages, bool $dry_run = false): array
+    {
+        $this->framework->initialize();
+
+        if (!\is_array($pages) || !array_is_list($pages) || $pages === []) {
+            return ['error' => 'invalid_input', 'message' => '`pages` must be a non-empty JSON list of node objects.'];
+        }
+
+        // The create() signature IS the list of valid keys — deriving them from
+        // it means the two cannot drift apart when a field is added there.
+        $allowed = [];
+
+        foreach ((new \ReflectionMethod($this, 'create'))->getParameters() as $p) {
+            $allowed[] = $p->getName();
+        }
+        $allowed = array_values(array_diff($allowed, ['pid']));
+
+        $problems = [];
+        $count = 0;
+        self::validateNodes($pages, '', $allowed, $problems, $count);
+
+        if ($count > self::MAX_TREE_NODES) {
+            return [
+                'error' => 'too_many_pages',
+                'message' => sprintf('%d pages exceed the limit of %d per call — split the tree.', $count, self::MAX_TREE_NODES),
+            ];
+        }
+
+        if ($problems !== []) {
+            // Reported before the first write: a typo in one node must not leave
+            // half a tree behind.
+            return [
+                'error' => 'invalid_input',
+                'message' => 'The tree was rejected before anything was created.',
+                'problems' => $problems,
+                'allowed_fields' => $allowed,
+            ];
+        }
+
+        if ($dry_run) {
+            $plan = [];
+            self::planNodes($pages, '', $plan);
+
+            return ['dry_run' => true, 'pages' => $count, 'plan' => $plan];
+        }
+
+        $result = ['created' => 0, 'failed' => 0, 'skipped' => 0, 'pages' => []];
+        $this->createNodes($pages, $pid, '', $result);
+
+        return $result;
+    }
+
+    /**
+     * @param array<int, mixed>          $nodes
+     * @param list<string>               $allowed
+     * @param list<array<string, mixed>> $problems
+     */
+    private static function validateNodes(array $nodes, string $path, array $allowed, array &$problems, int &$count): void
+    {
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            ++$count;
+
+            if (!\is_array($node)) {
+                $problems[] = ['path' => $here, 'error' => 'node must be an object'];
+                continue;
+            }
+
+            foreach (['title', 'type'] as $required) {
+                if (!isset($node[$required]) || !\is_string($node[$required]) || trim($node[$required]) === '') {
+                    $problems[] = ['path' => $here, 'error' => sprintf('%s is required and must be a non-empty string', $required)];
+                }
+            }
+
+            foreach (array_keys($node) as $key) {
+                if ($key === 'children' || \in_array($key, $allowed, true)) {
+                    continue;
+                }
+                $problems[] = ['path' => $here, 'error' => sprintf('unknown field "%s"', $key)];
+            }
+
+            $children = $node['children'] ?? [];
+            if ($children !== [] && (!\is_array($children) || !array_is_list($children))) {
+                $problems[] = ['path' => $here, 'error' => 'children must be a list of node objects'];
+                continue;
+            }
+            if (\is_array($children) && $children !== []) {
+                self::validateNodes($children, $here, $allowed, $problems, $count);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed>          $nodes
+     * @param list<array<string, mixed>> $plan
+     */
+    private static function planNodes(array $nodes, string $path, array &$plan): void
+    {
+        $sorting = 128;
+
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            $plan[] = [
+                'path' => $here,
+                'title' => (string) $node['title'],
+                'type' => (string) $node['type'],
+                'sorting' => $node['sorting'] ?? $sorting,
+            ];
+            $sorting += 128;
+
+            if (!empty($node['children'])) {
+                self::planNodes($node['children'], $here, $plan);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed>    $nodes
+     * @param array<string, mixed> $result
+     */
+    private function createNodes(array $nodes, int $parentId, string $path, array &$result): void
+    {
+        $sorting = 128;
+
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            $children = $node['children'] ?? [];
+            unset($node['children']);
+
+            $args = $node + ['pid' => $parentId, 'sorting' => $sorting];
+            $sorting += 128;
+
+            try {
+                /** @var array<string, mixed> $created */
+                $created = $this->create(...$args);
+            } catch (\Throwable $e) {
+                $created = ['error' => 'exception', 'message' => $e->getMessage()];
+            }
+
+            if (!isset($created['id'])) {
+                ++$result['failed'];
+                $skipped = self::countNodes($children);
+                $result['skipped'] += $skipped;
+                $result['pages'][] = [
+                    'path' => $here,
+                    'title' => (string) $node['title'],
+                    'error' => $created['error'] ?? 'unknown',
+                    'message' => $created['message'] ?? '',
+                    // Children are skipped rather than reparented: a page whose
+                    // parent does not exist would silently land somewhere else.
+                    'skipped_children' => $skipped,
+                ];
+                continue;
+            }
+
+            ++$result['created'];
+            $id = (int) $created['id'];
+            $result['pages'][] = [
+                'path' => $here,
+                'id' => $id,
+                'title' => (string) $created['title'],
+                'pid' => $parentId,
+                'alias' => $created['alias'] ?? null,
+            ];
+
+            if (\is_array($children) && $children !== []) {
+                $this->createNodes($children, $id, $here, $result);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed>|mixed $nodes
+     */
+    private static function countNodes(mixed $nodes): int
+    {
+        if (!\is_array($nodes)) {
+            return 0;
+        }
+
+        $n = 0;
+        foreach ($nodes as $node) {
+            ++$n;
+            if (\is_array($node) && !empty($node['children'])) {
+                $n += self::countNodes($node['children']);
+            }
+        }
+
+        return $n;
+    }
+
 }
