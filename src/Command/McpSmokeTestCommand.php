@@ -2228,6 +2228,75 @@ final class McpSmokeTestCommand extends Command
         $this->connection->delete('tl_module', ['id' => $usageModuleId]);
         $this->connection->delete('tl_page', ['id' => $usagePageId]);
 
+        // ═══════════════════════ Public folders ════════════════════
+        // Everything served straight from the web root — webfonts, own JS,
+        // favicons — depends on this marker. Without the tool the last step of
+        // a build run was a click in the file manager.
+        $output->writeln("\n<comment>Öffentliche Ordner</comment>");
+
+        $publicDirName = $stamp.'_public';
+        $publicFolder = $this->fileTool->folderCreate('', $publicDirName);
+        $expect('folder for the public test created', $publicFolder, static fn ($r) => ($r['created'] ?? false) === true);
+
+        $marker = $this->projectDir.\DIRECTORY_SEPARATOR.'files'.\DIRECTORY_SEPARATOR.$publicDirName.\DIRECTORY_SEPARATOR.'.public';
+
+        $madePublic = $this->fileTool->folderSetPublic($publicDirName);
+        $expect('folder_set_public reports public', $madePublic, static fn ($r) => ($r['public'] ?? false) === true);
+        // The marker is the durable part and works everywhere. The symlink does
+        // not: Windows refuses symlink() without the privilege, so asserting it
+        // would make this test pass or fail by operating system rather than by
+        // behaviour. The tool reports that case in `warnings` instead.
+        $expect('the marker is on disk', is_file($marker), static fn (bool $ok) => $ok);
+        $expect('a failed symlink is reported, not swallowed', $madePublic,
+            static fn ($r) => ($r['symlink_created'] ?? null) === true || ($r['warnings'] ?? []) !== []);
+
+        $listed = $this->fileTool->list('');
+        $listedFolder = null;
+        foreach ($listed['items'] ?? [] as $item) {
+            if (($item['name'] ?? '') === $publicDirName) {
+                $listedFolder = $item;
+            }
+        }
+        // Without this the state is invisible over MCP and a build run cannot
+        // be repeated idempotently — there is nothing to compare against.
+        $expect('files_list exposes the public state', $listedFolder, static fn ($f) => ($f['public'] ?? null) === true);
+
+        $expect('and takes it back', $this->fileTool->folderSetPublic($publicDirName, false),
+            static fn ($r) => ($r['public'] ?? true) === false);
+        $expect('the marker is gone again', is_file($marker), static fn (bool $ok) => !$ok);
+
+        $expect('path traversal is refused', $this->fileTool->folderSetPublic('../../etc'),
+            static fn ($r) => ($r['error'] ?? '') === 'invalid_path');
+        // Contao links sub-folders only; a marker in the upload root would be
+        // found by nothing and quietly do nothing.
+        $expect('the upload root is refused', $this->fileTool->folderSetPublic(''),
+            static fn ($r) => ($r['error'] ?? '') === 'refuse_root');
+        // The tool exists so nobody has to weaken this.
+        $expect('uploading a dotfile stays rejected', $this->fileTool->upload($publicDirName, '.public', 'Cg=='),
+            static fn ($r) => ($r['error'] ?? '') === 'invalid_filename');
+
+        $this->fileTool->folderDelete($publicDirName, confirm_destructive: true, cascade: true);
+
+        // ═══════════════════════ Settings reality ══════════════════
+        // A write tool that reports success without doing anything undermines
+        // every verification by reading back.
+        $output->writeln("\n<comment>System-Settings gegen die echte Contao-Version</comment>");
+
+        $deadKey = $this->systemTool->systemSettingsUpdate(['jpgQuality' => 80]);
+        $expect('a key this Contao lacks is skipped, not applied', $deadKey,
+            static fn ($r) => ($r['updated'] ?? ['x']) === [] && ($r['skipped'][0]['key'] ?? null) === 'jpgQuality');
+        $expect('and the reason is named', $deadKey,
+            static fn ($r) => ($r['skipped'][0]['reason'] ?? '') === 'unknown_for_this_contao_version');
+        $expect('a skip is not success', $deadKey, static fn ($r) => ($r['success'] ?? true) === false);
+
+        $realKey = $this->systemTool->systemSettingsUpdate(['imageWidth' => 3841]);
+        $expect('a key it does have still applies', $realKey,
+            static fn ($r) => ($r['updated'] ?? []) === ['imageWidth'] && ($r['skipped'] ?? ['x']) === []);
+        $expect('and reading it back shows the value',
+            $this->systemTool->systemSettings()['uploads']['imageWidth'] ?? null,
+            static fn ($v) => (int) $v === 3841);
+        $this->systemTool->systemSettingsUpdate(['imageWidth' => 0]);
+
         // ═══════════════════════ Page tree ═════════════════════════
         // One call that writes many rows needs its failure modes pinned, not
         // just its happy path: a half-built tree is the expensive mistake.

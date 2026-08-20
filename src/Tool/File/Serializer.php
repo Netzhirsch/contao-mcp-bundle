@@ -33,6 +33,14 @@ final class Serializer
             'uuid' => self::uuidToString($f->uuid),
             'pid_uuid' => $f->pid ? self::uuidToString($f->pid) : null,
             'type' => (string) $f->type,
+            // Folders only: whether Contao serves this one straight from the
+            // web root. Without it the state is invisible over MCP, so an
+            // agent cannot tell a finished setup from one still missing its
+            // font and favicon delivery — and cannot repeat a build run
+            // idempotently.
+            'public' => $f->type === 'folder'
+                ? is_file($absolute.\DIRECTORY_SEPARATOR.'.public')
+                : null,
             'name' => (string) $f->name,
             'extension' => (string) $f->extension,
             'path' => $this->paths->fromDbafsPath((string) $f->path),

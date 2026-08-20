@@ -6,6 +6,8 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\System;
 
 use Composer\InstalledVersions;
 use Contao\Config;
+use Contao\Controller;
+use Contao\CoreBundle\ContaoCoreBundle;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\StringUtil;
@@ -534,14 +536,39 @@ final class Tool
      * @var list<string>
      */
     private const SAFE_SETTINGS = [
-        'adminEmail', 'characterSet', 'dateFormat', 'datimFormat', 'debugMode',
-        'displayErrors', 'enableSearch', 'fileSyncExclude', 'gdMaxImgHeight',
-        'gdMaxImgWidth', 'imageHeight', 'imageWidth', 'jpgQuality', 'logoutLength',
-        'maxFileSize', 'maxImageWidth', 'maxResizeWidth', 'minPasswordLength',
-        'sessionTimeout', 'showHelp', 'timeFormat', 'timeZone', 'undoPeriod',
-        'uploadPath', 'uploadTypes', 'urlSuffix', 'useFTP', 'undoPeriod',
+        'adminEmail', 'dateFormat', 'datimFormat', 'imageHeight', 'imageWidth',
+        'jpgQuality', 'logoutLength', 'maxFileSize', 'maxImageWidth',
+        'minPasswordLength', 'sessionTimeout', 'showHelp', 'timeFormat',
+        'timeZone', 'undoPeriod', 'uploadPath', 'uploadTypes', 'urlSuffix',
         'versionPeriod', 'websiteTitle',
     ];
+
+    /**
+     * Whether this Contao knows a setting at all.
+     *
+     * The lists above are POLICY — which keys we are willing to write. They say
+     * nothing about whether a key still exists, and the bundle supports Contao
+     * 5.3 through 5.7, where that differs. Measured on 5.7.11: 14 of the keys
+     * this list used to carry were gone, `gdMaxImgWidth` and friends among them
+     * — Contao-3 leftovers. Config::persist() writes them to localconfig
+     * regardless and nothing ever reads them, so the tool reported success for
+     * a change that could not take effect.
+     *
+     * Truth comes from the running installation: TL_CONFIG (defaults plus
+     * localconfig) union the tl_settings DCA — the DCA still describes the
+     * settings surface in Contao 5 even though there is no tl_settings table.
+     *
+     * @return list<string>
+     */
+    private function knownSettingKeys(): array
+    {
+        $this->framework->getAdapter(Controller::class)->loadDataContainer('tl_settings');
+
+        return array_values(array_unique(array_merge(
+            array_keys($GLOBALS['TL_CONFIG'] ?? []),
+            array_keys($GLOBALS['TL_DCA']['tl_settings']['fields'] ?? []),
+        )));
+    }
 
     /**
      * Settings whose values are sensitive — writes require confirm_dangerous=true.
@@ -560,21 +587,26 @@ final class Tool
     #[McpTool(
         name: 'system_settings_update',
         description: <<<'DESC'
-            Persists changes to Contao's global system settings (tl_settings → "/contao?do=settings").
+            Persists changes to Contao's global system settings ("/contao?do=settings").
             Pass `settings` as a JSON object mapping setting-key → new-value.
 
-            Safe keys (set without ceremony): adminEmail, characterSet, dateFormat, datimFormat,
-            timeFormat, timeZone, websiteTitle, showHelp, undoPeriod, versionPeriod, sessionTimeout,
+            Safe keys (set without ceremony): adminEmail, dateFormat, datimFormat, timeFormat,
+            timeZone, websiteTitle, showHelp, undoPeriod, versionPeriod, sessionTimeout,
             logoutLength, minPasswordLength, maxFileSize, uploadTypes, uploadPath, urlSuffix,
-            imageWidth, imageHeight, jpgQuality, gdMaxImgWidth, gdMaxImgHeight, debugMode,
-            displayErrors, enableSearch, fileSyncExclude, useFTP, maxImageWidth, maxResizeWidth.
+            imageWidth, imageHeight, jpgQuality, maxImageWidth.
 
             Dangerous keys (require confirm_dangerous=true): encryptionKey (would invalidate every
             session + cookie), rootPasswordHash (admin password override), allowedAttributes,
             defaultChmod.
 
-            Unknown keys are rejected — call system_settings (without arguments) first to see
-            the catalogue. Returns {updated: list<string>, skipped: list<string>, errors: list<string>}.
+            Two separate gates: a key outside the lists above is REJECTED outright. A key that is
+            listed but does not exist in this Contao version is SKIPPED — writing it would land in
+            the local config where nothing reads it. Which keys exist differs between Contao 5.3
+            and 5.7, so this is checked against the running installation rather than a list here.
+
+            Call system_settings (without arguments) to see what this instance actually holds.
+            Returns {updated: list<string>, skipped: list<{key, reason, message}>,
+            errors: list<string>, success: bool} — success is false when anything was skipped.
         DESC,
     )]
     /**
@@ -612,6 +644,27 @@ final class Tool
             ];
         }
 
+        // Policy said yes; now ask the installation. A key it does not know
+        // cannot take effect, and reporting it as updated is the one answer an
+        // agent cannot recover from — it reads back, sees nothing, and has no
+        // reason to suspect the write.
+        $known = $this->knownSettingKeys();
+        $skipped = [];
+        foreach (array_keys($input) as $key) {
+            if (!\in_array((string) $key, $known, true)) {
+                $skipped[] = [
+                    'key' => (string) $key,
+                    'reason' => 'unknown_for_this_contao_version',
+                    'message' => sprintf(
+                        '"%s" does not exist in Contao %s — it would be written to the local config and never read.',
+                        $key,
+                        ContaoCoreBundle::getVersion(),
+                    ),
+                ];
+                unset($input[$key]);
+            }
+        }
+
         $updated = [];
         $errors = [];
         foreach ($input as $key => $value) {
@@ -636,8 +689,11 @@ final class Tool
 
         return [
             'updated' => $updated,
+            'skipped' => $skipped,
             'errors' => $errors,
-            'success' => $errors === [],
+            // Skipped keys are not an error — the caller asked for something
+            // this Contao has no place for — but they are not success either.
+            'success' => $errors === [] && $skipped === [],
         ];
     }
 

@@ -7,6 +7,27 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 ## [Unreleased]
 
 ### Added
+- **`folder_set_public` — Ordner per MCP öffentlich machen** (Briefing aus AL-02,
+  Projekt Autohaus Lau). Schreibt Contaos `.public`-Marker und legt den Symlink
+  `public/files/<ordner>` an, also genau das, was der Dateimanager unter
+  „Öffentlich machen" tut. Ohne das liefert der Webserver nichts direkt aus —
+  Webfonts aus dem kompilierten CSS, eigenes JavaScript, Favicons und
+  `site.webmanifest`, unbearbeitete SVGs. Der Aufbau einer Instanz endete
+  bisher genau hier mit einem Klick im Backend.
+
+  Der Umweg über `file_upload(name: ".public")` bleibt gesperrt: Dotfiles haben
+  auf einem Upload-Kanal nichts verloren, und die Sperre war nie das Problem —
+  nur der falsche Weg zum Ziel.
+
+  Schlägt das Anlegen des Symlinks fehl (fehlende Rechte, Windows ohne
+  Privileg), wird der Marker trotzdem geschrieben und `symlink_created: false`
+  samt Grund in `warnings` zurückgegeben. Ein `contao:symlinks`-Lauf oder das
+  nächste Deployment vollendet es dann — ein Abbruch würde den Aufrufer glauben
+  lassen, es sei gar nichts passiert.
+
+- **`files_list` und `file_get` melden `public` pro Ordner.** Vorher war der
+  Zustand über MCP nicht feststellbar, es gab also weder Soll-Ist-Abgleich noch
+  einen wiederholbaren Aufbaulauf.
 - **`pages_create_tree` legt einen ganzen Seitenbaum in einem Aufruf an.** Der
   Grund ist gemessen, nicht geschätzt: Jeder einzelne Tool-Call kostet ~160 ms
   Framework-Boot bei ~30 ms echter Arbeit je Seite — 9 von 10 Teilen der
@@ -27,6 +48,26 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Seiten je Aufruf, weil dieser Transport keine Fortschrittsmeldungen kennt.
 
 ### Fixed
+- **`system_settings_update` bestätigte Schlüssel, die es in dieser
+  Contao-Version nicht gibt.** `gdMaxImgWidth` und Konsorten stammen aus der
+  GD-Ära; `Config::persist()` schreibt sie klaglos in die lokale Konfiguration,
+  wo sie nie jemand liest. Das Tool meldete `updated` — dasselbe falsche
+  Erfolgssignal wie bei `theme_create` in AL-01.
+
+  Nachgemessen an Contao 5.7.11: **14 der 33 gepflegten Schlüssel existieren
+  dort nicht**, darunter beide „gefährlichen" (`encryptionKey`,
+  `rootPasswordHash`), deren Bestätigungsdialog also Felder schützte, die es
+  nicht mehr gibt. Die Liste wurde bereinigt, und zusätzlich prüft das Tool zur
+  Laufzeit gegen die laufende Installation (`TL_CONFIG` vereinigt mit der
+  `tl_settings`-DCA — die beschreibt die Einstellungsfläche in Contao 5 weiter,
+  auch ohne Tabelle). Unbekannte Schlüssel kommen als `skipped` mit Grund
+  zurück, `success` ist dann `false`.
+
+  Damit gibt es zwei getrennte Tore: außerhalb der Policy-Liste → Ablehnung,
+  gelistet aber in dieser Contao-Version nicht vorhanden → übersprungen. Das
+  ist bewusst unterschieden, weil es zwei verschiedene Fehler des Aufrufers
+  sind.
+
 - **Ein Tool mit Schreibverb in der Mitte des Namens wurde als Lesezugriff
   geprüft.** `ToolPermissionMap::inferOperation()` sah nur die Endung, also
   hätte `pages_create_tree` (endet auf `_tree`) einem Nur-Lese-Benutzer

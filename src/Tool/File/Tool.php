@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\File;
 
 use Contao\Config;
 use Contao\CoreBundle\Framework\ContaoFramework;
+use Contao\CoreBundle\Util\SymlinkUtil;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\Dbafs;
 use Contao\File as ContaoFile;
@@ -995,4 +996,150 @@ final class Tool
     {
         $this->logger->info($message, ['contao' => new ContaoContext($caller, ContaoContext::FILES, $this->authorResolver->getLogUsername(), null, null, $this->authorResolver->getLogSource())]);
     }
+
+    /**
+     * Contao's marker for "serve this folder directly from the web root".
+     * `SymlinksCommand` finds these and links `<web>/files/<folder>` at them.
+     */
+    private const PUBLIC_MARKER = '.public';
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'folder_set_public',
+        description: <<<'DESC'
+            Makes a folder public, the same thing the file manager's "make public" does:
+            it writes Contao's `.public` marker into the folder and creates the symlink
+            `public/files/<folder>` so the webserver can serve those files directly.
+
+            Needed for everything delivered as-is instead of going through the image
+            pipeline — webfonts loaded via url() from compiled CSS, your own JavaScript,
+            favicons and site.webmanifest, plain SVGs. Without it those paths 404 no
+            matter what the folder contains.
+
+            `public: false` removes the marker and the symlink again.
+
+            Only folders inside the upload directory, and not the upload root itself —
+            Contao only links sub-folders. Uploading a file named ".public" stays
+            rejected; dot-files have no business arriving over an upload channel.
+
+            Returns {path, public, symlink, symlink_created, warnings}. If the symlink
+            could not be created (missing permission, Windows without the privilege), the
+            marker is still written and `symlink_created` is false with the reason in
+            `warnings` — a `contao:symlinks` run or the next deployment finishes it.
+        DESC,
+    )]
+    public function folderSetPublic(string $path, bool $public = true): array
+    {
+        $this->framework->initialize();
+
+        try {
+            $absolute = $this->paths->resolveAbsolute($path);
+        } catch (\InvalidArgumentException $e) {
+            return ['error' => 'invalid_path', 'message' => $e->getMessage()];
+        }
+
+        if (!is_dir($absolute)) {
+            return ['error' => 'not_a_directory', 'message' => sprintf('Not a folder: %s', $path)];
+        }
+
+        $relative = trim($path, '/');
+
+        if ($relative === '') {
+            // SymlinksCommand searches with depth('> 0'), so a marker in the
+            // upload root would be found by nothing and silently do nothing.
+            return [
+                'error' => 'refuse_root',
+                'message' => 'The upload root cannot be made public — Contao only links sub-folders.',
+            ];
+        }
+
+        $marker = $absolute.\DIRECTORY_SEPARATOR.self::PUBLIC_MARKER;
+
+        // Both paths go to SymlinkUtil relative to the project dir, exactly as
+        // SymlinksCommand builds them: files/<folder> ← public/files/<folder>.
+        $target = $this->paths->uploadPath().'/'.$relative;
+        $linkRelative = $this->publicDirName().'/'.$target;
+        $linkAbsolute = $this->projectDir.\DIRECTORY_SEPARATOR.str_replace('/', \DIRECTORY_SEPARATOR, $linkRelative);
+        $warnings = [];
+
+        if (!$public) {
+            if (is_file($marker) && !@unlink($marker)) {
+                return [
+                    'error' => 'write_failed',
+                    'message' => sprintf('Could not remove %s/%s', $target, self::PUBLIC_MARKER),
+                ];
+            }
+
+            if (is_link($linkAbsolute) && !@unlink($linkAbsolute)) {
+                $warnings[] = sprintf(
+                    'Marker removed, but the symlink %s could not be deleted — remove it manually or run contao:symlinks.',
+                    $linkRelative,
+                );
+            }
+
+            $this->log(sprintf('Removed public marker from %s via MCP', $target), __METHOD__);
+
+            return [
+                'path' => $relative,
+                'public' => false,
+                'symlink' => $linkRelative,
+                'symlink_created' => false,
+                'warnings' => $warnings,
+            ];
+        }
+
+        if (!is_file($marker) && false === @file_put_contents($marker, '')) {
+            return [
+                'error' => 'write_failed',
+                'message' => sprintf('Could not write %s/%s — check the folder permissions.', $target, self::PUBLIC_MARKER),
+            ];
+        }
+
+        $symlinkCreated = true;
+
+        if (is_link($linkAbsolute)) {
+            // Already linked — SymlinkUtil would refuse an existing path.
+            $symlinkCreated = false;
+            $warnings[] = 'The symlink already existed and was left untouched.';
+        } else {
+            try {
+                SymlinkUtil::symlink($target, $linkRelative, $this->projectDir);
+            } catch (\Throwable $e) {
+                // The marker is the durable part; the symlink is what the next
+                // deployment recreates anyway. Failing the whole call here would
+                // leave the caller believing nothing happened at all.
+                $symlinkCreated = false;
+                $warnings[] = sprintf(
+                    'Marker written, but the symlink could not be created (%s). Run "vendor/bin/contao-console contao:symlinks" or deploy to finish it.',
+                    $e->getMessage(),
+                );
+            }
+        }
+
+        $this->log(sprintf('Made %s public via MCP', $target), __METHOD__);
+
+        return [
+            'path' => $relative,
+            'public' => true,
+            'symlink' => $linkRelative,
+            'symlink_created' => $symlinkCreated,
+            'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Name of the web root directory, relative to the project dir. Contao 5
+     * fixes it at "public"; "web" is only honoured for installations carrying
+     * the pre-4.6 layout.
+     */
+    private function publicDirName(): string
+    {
+        return is_dir($this->projectDir.\DIRECTORY_SEPARATOR.'web')
+            && !is_dir($this->projectDir.\DIRECTORY_SEPARATOR.'public')
+            ? 'web'
+            : 'public';
+    }
+
 }
