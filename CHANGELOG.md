@@ -6,6 +6,22 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.7.0] – 2026-08-20
+
+> **Verhaltensänderung, die eine Automatisierung merken kann:**
+> `system_settings_update` **lehnt** acht Schlüssel jetzt **ab**, die es vorher
+> mit `success: true` quittiert hat — `gdMaxImgWidth`, `gdMaxImgHeight`,
+> `characterSet`, `debugMode`, `displayErrors`, `enableSearch`,
+> `fileSyncExclude`, `useFTP`, `maxResizeWidth`. Keiner davon existiert in
+> Contao 5; geschrieben haben sie nie etwas. Wer einen davon setzt, bekommt
+> statt einer Bestätigung `unknown_settings` mit Nennung des Schlüssels. Das
+> ist Absicht: Ein Fehler ist reparierbar, ein stilles Nichtstun nicht.
+>
+> **Sonst nichts zu tun.** Das Update ist schemafrei — keine Migration, keine
+> DCA-Änderung, kein neuer Container-Dienst. In der CI von `v1.6.0`
+> hochgezogen und gegengemessen: die aktualisierte Instanz liefert exakt
+> dieselben 305 Smoke-Asserts wie eine frisch installierte.
+
 ### Added
 - **`folder_set_public` — Ordner per MCP öffentlich machen** (Briefing aus AL-02,
   Projekt Autohaus Lau). Schreibt Contaos `.public`-Marker und legt den Symlink
