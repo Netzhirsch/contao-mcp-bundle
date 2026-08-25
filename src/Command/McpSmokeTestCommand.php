@@ -2756,10 +2756,27 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => ($r['count'] ?? 0) > 0);
 
         // The AL-07 dead end: the template exists, the guessed name does not.
-        $missTemplate = $this->templateTool->templateLookup('frontend_module/netzhirsch_pagination');
-        $expect('a wrong identifier suggests the right one from the same group', $missTemplate,
-            static fn ($r) => ($r['error'] ?? '') === 'not_found'
-                && ($r['suggestions'][0] ?? null) === 'frontend_module/pagination');
+        // Which grouped templates a Contao version ships differs (5.3 has no
+        // frontend_module/pagination), so the case is built from one this
+        // instance actually has — otherwise the test asserts the catalogue
+        // rather than the behaviour.
+        $realGrouped = null;
+        foreach ($allTemplates['items']['content_element'] ?? [] as $candidate) {
+            if (!str_starts_with(basename((string) $candidate), '_')) {
+                $realGrouped = (string) $candidate;
+                break;
+            }
+        }
+
+        if ($realGrouped !== null) {
+            $guess = \dirname($realGrouped).'/netzhirsch_'.basename($realGrouped);
+            $expect(sprintf('a wrong identifier suggests the right one from the same group (%s)', $guess),
+                $this->templateTool->templateLookup($guess),
+                static fn ($r) => ($r['error'] ?? '') === 'not_found'
+                    && ($r['suggestions'][0] ?? null) === $realGrouped);
+        } else {
+            $output->writeln('  <comment>~ Vorschlags-Test übersprungen — keine gruppierten Templates vorhanden</comment>');
+        }
         $expect('while a name nothing resembles suggests nothing',
             $this->templateTool->templateLookup('vollkommen_erfunden_xyz'),
             static fn ($r) => ($r['suggestions'] ?? ['x']) === []);
