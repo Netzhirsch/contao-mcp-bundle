@@ -18,6 +18,7 @@ use Netzhirsch\ContaoMcpBundle\Tool\Article\Tool as ArticleTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Content\Tool as ContentTool;
 use Netzhirsch\ContaoMcpBundle\Tool\ExternalId\Tool as ExternalIdTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Extension\Comments\Tool as CommentsTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\DeepL\Tool as DeepLTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Faq\Tool as FaqTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Extension\Newsletter\Tool as NewsletterTool;
 use Netzhirsch\ContaoMcpBundle\Tool\File\Tool as FileTool;
@@ -99,6 +100,7 @@ final class McpSmokeTestCommand extends Command
         private readonly UserTool $userTool,
         private readonly ArticleTool $articleTool,
         private readonly FaqTool $faqTool,
+        private readonly DeepLTool $deepLTool,
         private readonly Connection $connection,
         private readonly RequestStack $requestStack,
         private readonly KeyManager $keyManager,
@@ -2552,6 +2554,153 @@ final class McpSmokeTestCommand extends Command
         $expect('an unknown tool still raises', $threw, static fn ($t) => $t === true);
         $expect('post-call hook ran even though the call threw',
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
+
+
+        // ═══════════════════ DeepL-Übersetzung ═══════════════════
+        //
+        // Three environments, three shapes of answer, and the point of this
+        // section is that all three are correct:
+        //   - numero2/contao-deepl absent  → extension_not_available (CI)
+        //   - installed without an API key → deepl_not_configured
+        //   - installed and configured     → a real round trip
+        // Only the last one spends money, and it spends a few dozen characters.
+        $output->writeln("\n<comment>DeepL-Übersetzung</comment>");
+
+        // Discovery first, and independent of the host extension: the tools have
+        // to be found by the same attribute scanner every other tool goes
+        // through, and their schema has to tell a client what is mandatory.
+        // A tool that only fails at call time because nothing declared
+        // `table` required is a tool an LLM will keep calling wrong.
+        foreach (['deepl_status', 'deepl_translate', 'deepl_translate_records', 'deepl_translate_page_tree'] as $deeplName) {
+            $expect(sprintf('%s is registered with an input schema', $deeplName),
+                $this->registryAccessor->get()->getTool($deeplName),
+                static fn ($t) => $t !== null && \is_array($t->schema->inputSchema ?? null));
+        }
+
+        $expect('the record tool declares its essential arguments as required',
+            $this->registryAccessor->get()->getTool('deepl_translate_records'),
+            static fn ($t) => array_diff(['table', 'ids', 'target_lang'], $t->schema->inputSchema['required'] ?? []) === []);
+
+        $expect('deepl_status answers through the dispatcher, not just in-process',
+            $dispatcher->handleToolCall(new CallToolRequest(41, 'deepl_status', [])),
+            static fn ($r) => $r instanceof CallToolResult && !$r->isError);
+
+        $deeplStatus = $this->deepLTool->status();
+        $deeplGate = (string) ($deeplStatus['error'] ?? '');
+
+        if ($deeplGate === 'extension_not_available' || $deeplGate === 'deepl_not_configured') {
+            $expect('deepl_status reports why translation is unusable', $deeplStatus,
+                static fn ($r) => ($r['available'] ?? null) === false
+                    && ($r['required_extension'] ?? '') === 'numero2/contao-deepl');
+
+            // The gate has to hold on the tools that would otherwise write.
+            $expect('the record tool refuses with the same reason',
+                $this->deepLTool->translateRecords(table: 'tl_page', ids: [1], target_lang: 'EN-GB', save: true),
+                static fn ($r) => ($r['error'] ?? '') === $deeplGate);
+            $expect('the page-tree tool refuses with the same reason',
+                $this->deepLTool->translatePageTree(id: 1, target_lang: 'EN-GB', save: true),
+                static fn ($r) => ($r['error'] ?? '') === $deeplGate);
+
+            $output->writeln(sprintf('  ⊝ DeepL nicht verfügbar (%s) — Live-Teil übersprungen', $deeplGate));
+        } else {
+            $expect('deepl_status lists target languages', $deeplStatus,
+                static fn ($r) => ($r['available'] ?? null) === true
+                    && \in_array('EN-GB', $r['target_languages'] ?? [], true)
+                    && \in_array('tl_content', $r['translatable_tables'] ?? [], true));
+
+            // Raw text: the same string twice must be paid for once.
+            $raw = $this->deepLTool->translate(
+                texts: ['Guten Tag', 'Guten Tag', '', 'Bis bald'],
+                target_lang: 'EN-GB',
+            );
+            $expect('deepl_translate keeps order and passes empties through', $raw,
+                static fn ($r) => \count($r['translations'] ?? []) === 4
+                    && ($r['translations'][2] ?? null) === ''
+                    && trim((string) ($r['translations'][0] ?? '')) !== '');
+            $expect('a repeated string is not billed twice', $raw,
+                static fn ($r) => ($r['usage']['characters_reused'] ?? 0) >= 9);
+
+            // Markup has to survive — this is the reason we do not simply call
+            // the host bundle's single-string translate().
+            $expect('html tag handling keeps the markup intact',
+                $this->deepLTool->translate(texts: ['<p>Ein <strong>kurzer</strong> Satz.</p>'], target_lang: 'EN-GB', html: true),
+                static fn ($r) => str_contains((string) ($r['translations'][0] ?? ''), '<strong>')
+                    && str_starts_with((string) ($r['translations'][0] ?? ''), '<p>'));
+
+            // A page with one article and one content element.
+            $deeplTree = $this->pageTool->createTree(0, [[
+                'title' => 'Startseite '.$stamp,
+                'type' => 'root',
+                'language' => 'de',
+                'dns' => $stamp.'-dl.test',
+                'children' => [['title' => 'Leistungen '.$stamp, 'type' => 'regular']],
+            ]]);
+            $dlRootId = (int) ($deeplTree['pages'][0]['id'] ?? 0);
+            $dlPageId = (int) $this->connection->fetchOne('SELECT id FROM tl_page WHERE title = ?', ['Leistungen '.$stamp]);
+            $dlArticle = $this->articleTool->create(page_id: $dlPageId, title: 'Hauptartikel '.$stamp, sorting: 128, inColumn: 'main');
+            $dlArticleId = (int) ($dlArticle['id'] ?? 0);
+            $dlContent = $this->contentTool->create(ptable: 'tl_article', pid: $dlArticleId, type: 'text', sorting: 128, fields: [
+                'headline' => ['value' => 'Guten Tag', 'unit' => 'h3'],
+                'text' => '<p>Ein <strong>kurzer</strong> Satz.</p>',
+            ]);
+            $dlContentId = (int) ($dlContent['id'] ?? 0);
+
+            $expect('a page tree with an article and a content element exists',
+                [$dlRootId, $dlPageId, $dlArticleId, $dlContentId],
+                static fn (array $ids) => min($ids) > 0);
+
+            // Planning is free: no API call, no writes, and it says what the
+            // real run would cost.
+            $dlPlan = $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', dry_run: true);
+            $expect('dry_run plans the whole tree without spending anything', $dlPlan,
+                static fn ($r) => ($r['dry_run'] ?? false) === true
+                    && ($r['characters_planned'] ?? 0) > 0
+                    && !isset($r['usage']));
+            $expect('the plan reaches page, article and content element', $dlPlan,
+                static fn ($r) => \count(array_unique(array_column($r['records'] ?? [], 'table'))) === 3);
+
+            // The budget is checked BEFORE the first API call.
+            $expect('a character budget below the plan refuses up front',
+                $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', save: true, max_characters: 1),
+                static fn ($r) => ($r['error'] ?? '') === 'character_budget_exceeded');
+
+            $expect('an unregistered table is refused',
+                $this->deepLTool->translateRecords(table: 'tl_user', ids: [1], target_lang: 'EN-GB'),
+                static fn ($r) => ($r['error'] ?? '') === 'table_not_translatable');
+            $expect('an unknown field is reported, not fatal',
+                $this->deepLTool->translateRecords(table: 'tl_page', ids: [$dlPageId], target_lang: 'EN-GB', fields: ['title', 'no_such_column']),
+                static fn ($r) => ($r['ignored_fields'] ?? []) === ['no_such_column']
+                    && !isset($r['error']));
+
+            $dlSave = $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', save: true);
+            $expect('saving the tree writes every record', $dlSave,
+                static fn ($r) => ($r['totals']['failed'] ?? 1) === 0
+                    && ($r['totals']['saved'] ?? 0) >= 3
+                    && ($r['saved_to_database'] ?? false) === true);
+
+            $dlRow = $this->connection->fetchAssociative('SELECT headline, text FROM tl_content WHERE id = ?', [$dlContentId]);
+            $dlHeadline = StringUtil::deserialize((string) ($dlRow['headline'] ?? ''), true);
+            $expect('the content element really changed in the database', $dlRow,
+                static fn ($r) => \is_array($r) && str_contains((string) $r['text'], '<strong>')
+                    && !str_contains((string) $r['text'], 'kurzer'));
+            $expect('the headline keeps its unit and only the text changed', $dlHeadline,
+                static fn (array $h) => ($h['unit'] ?? '') === 'h3'
+                    && ($h['value'] ?? '') !== 'Guten Tag'
+                    && trim((string) ($h['value'] ?? '')) !== '');
+
+            // Running it again finds nothing to change — the update tools
+            // compare values, so a re-run is a no-op rather than a new version.
+            $expect('translating the same tree again changes nothing',
+                $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', save: true),
+                static fn ($r) => ($r['totals']['saved'] ?? 1) === 0
+                    && ($r['totals']['unchanged'] ?? 0) >= 3);
+
+            // Fixtures out: content and article first, Contao refuses to drop a
+            // page that still has articles.
+            $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $dlArticleId]);
+            $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$dlArticleId]);
+            $this->connection->executeStatement('DELETE FROM tl_page WHERE id = ? OR pid = ?', [$dlRootId, $dlRootId]);
+        }
 
         // ═══════════════════════ Cleanup ═══════════════════════════
         if (!$keep) {

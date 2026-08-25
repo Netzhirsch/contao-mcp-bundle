@@ -118,6 +118,22 @@ final class ToolPermissionMap
         'leads_list' => ['kind' => 'module', 'module' => 'lead'],
         'lead_get' => ['kind' => 'module', 'module' => 'lead'],
 
+        // DeepL (numero2/contao-deepl). None of these names contains a write
+        // verb, so the suffix heuristic below would read every one of them as a
+        // lookup — including the two that overwrite records.
+        //
+        // deepl_status and deepl_translate touch no Contao record: text in,
+        // translation out. That mirrors the host extension, whose button sits
+        // in every edit mask a user can already open.
+        'deepl_status' => ['kind' => 'none'],
+        'deepl_translate' => ['kind' => 'none'],
+        // Table comes from the call, so the gate is resolved per call. The tool
+        // additionally checks EVERY record it touches (read for a preview,
+        // update for a save) — a page tree writes tl_article and tl_content
+        // too, and a gate on the argument table alone would not cover those.
+        'deepl_translate_records' => ['kind' => 'dc_arg', 'op' => 'update'],
+        'deepl_translate_page_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'update'],
+
         // External-id + move + language-link operate on a table given in args.
         'external_id_set' => ['kind' => 'dc_arg', 'op' => 'update'],
         'external_id_unset' => ['kind' => 'dc_arg', 'op' => 'update'],

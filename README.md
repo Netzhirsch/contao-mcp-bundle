@@ -18,7 +18,7 @@ Statt jeder KI-Aufgabe einen eigenen API-Endpunkt nachzuziehen, bekommt die
 KI-Session strukturierten Zugriff auf den gesamten DCA-Stack: Redakteure können
 per natürlichsprachlichem Auftrag Inhalte anlegen, Pipelines können Seiten
 vollautomatisch aus Drittsystemen befüllen, Entwickler können Strukturmigrationen
-skripten — alles über dieselben 175 Tools, abgesichert mit denselben
+skripten — alles über dieselben 182 Tools, abgesichert mit denselben
 Backend-Benutzerrechten wie beim manuellen Bearbeiten.
 
 **Unterstützte Entitäten:** News, Seiten, Artikel, Kalender, FAQ, Mitglieder,
@@ -28,13 +28,14 @@ System-Einstellungen.
 
 ## Was drin ist
 
-- **175 Tools** über Contao-Kernentitäten + populäre Extensions.
+- **182 Tools** über Contao-Kernentitäten + populäre Extensions.
 - **Lazy-Mode-Discovery**: drei Meta-Tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) verstecken die übrigen vor
   `tools/list` — spart bei Claude Desktop ~12 KB System-Prompt-Overhead pro
   Turn.
-- **OAuth 2.1** mit PKCE + Dynamic Client Registration (RFC 7591) inkl.
-  Initial-Access-Token-Gate für `restricted` mode.
+- **OAuth 2.1** mit PKCE, Dynamic Client Registration (RFC 7591) und
+  Protected-Resource-Metadata (RFC 9728). Im Default-Modus `restricted`
+  registriert sich ein Client ausschließlich im 15-Minuten-Pairing-Fenster.
 - **Volltextsuche über die Website**: `search_query` durchsucht Contaos
   Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
   oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.
@@ -47,8 +48,9 @@ System-Einstellungen.
   `maintenance_run`, `dbafs_sync` (Reconcile `tl_files` ↔ Disk).
 - **Optionale Extension-Tools**: erscheinen automatisch, sobald das jeweilige
   Bundle installiert ist (sonst sauberer `extension_not_available`-Fehler):
-  Newsletter, Kommentare, `url_rewrite_*` (terminal42) und **lesend**
-  `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`).
+  Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
+  `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`)
+  und **Übersetzen mit DeepL** (`numero2/contao-deepl`, siehe unten).
 - **Author-Pass-Through**: Writes laufen unter dem echten OAuth-User in
   `tl_log` + `tl_version`.
 - **Löschungen sind rückholbar**: Was die KI löscht, landet inklusive
@@ -134,9 +136,7 @@ läuft normal weiter. Im Backend unter **MCP-Server → Status** oben auf
 (Client anbinden, online + lokal) und [docs/dokumentation.md](docs/dokumentation.md)
 (vollständige Funktionsreferenz). Im Backend selbst gibt es keinen Doku-Tab mehr.
 
-> **Client verbinden bei `oauth_registration_mode: restricted` (Default):** Claude,
-> `mcp-remote` & Co. können bei der Registrierung **keinen** Initial Access Token
-> mitschicken — der IAT-Button verbindet sie also nicht, der ist für Skripte. Der
+> **Client verbinden bei `oauth_registration_mode: restricted` (Default):** Der
 > Weg ist **MCP-Server → Status → „Registrierung für 15 Minuten öffnen"**. Das
 > Fenster bleibt die vollen 15 Minuten offen, egal wie viele Versuche das kostet
 > (bis 1.4.0 schloss es nach der ersten erfolgreichen Registrierung — daher
@@ -280,6 +280,93 @@ MCP_PREVIEW_BASIC_AUTH="user:pass"
 
 Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
 `.env.local`, nie in der Antwort oder im Log.
+
+## Übersetzen mit DeepL
+
+Braucht [`numero2/contao-deepl`](https://github.com/numero2/contao-deepl) und
+einen DeepL-API-Schlüssel. Beides konfiguriert man **einmal**, und zwar dort, wo
+es das Bundle ohnehin erwartet:
+
+```bash
+composer require numero2/contao-deepl
+```
+
+```dotenv
+DEEPL_API_KEY="…"
+```
+
+> Der Schlüssel ist Pflicht, sobald das Bundle installiert ist: `numero2` setzt
+> `%env(DEEPL_API_KEY)%` ohne Fallback, ein fehlender Wert lässt schon
+> `cache:clear` mit *„Environment variable not found"* abbrechen.
+
+Danach erscheinen vier Tools. Fehlt eines von beidem, antworten sie mit
+`extension_not_available` bzw. `deepl_not_configured` und sagen, was fehlt —
+`deepl_status` beantwortet das direkt, inklusive der Liste der Zielsprachen.
+
+| Tool | Wofür |
+|---|---|
+| `deepl_status` | Verfügbarkeit, Zielsprachen, optional der Kontostand |
+| `deepl_translate` | Freitext rein, Übersetzung raus — rührt keinen Datensatz an |
+| `deepl_translate_records` | Ein oder mehrere Datensätze **einer** Tabelle |
+| `deepl_translate_page_tree` | Seite + Meta + Artikel + Inhalte + alle Unterseiten |
+
+**Übersetzbar** sind `tl_page`, `tl_article`, `tl_content`, `tl_news`,
+`tl_news_archive`, `tl_calendar_events`, `tl_calendar`, `tl_faq`,
+`tl_faq_category`, `tl_form`, `tl_form_field` und `tl_module` — jeweils nur die
+Spalten, die wirklich Fließtext enthalten. Contaos Strukturwerte bleiben intakt:
+Eine Überschrift behält ihr `h2`, ein Listen-Element seine Reihenfolge, ein
+Tabellen-Element seinen Zeilenschnitt, und Rich-Text geht mit DeepLs
+`tag_handling=html` raus, damit Markup und Attribute überleben.
+
+### Drei Modi, zwei Schalter
+
+Weil „übersetzen", „Geld ausgeben" und „Inhalt überschreiben" drei verschiedene
+Entscheidungen sind:
+
+- **`dry_run: true`** — nur planen. Kein API-Aufruf, kein Schreibzugriff, keine
+  Kosten. Antwortet mit den betroffenen Datensätzen, den Feldern und der
+  Zeichenzahl, die der echte Lauf einreichen würde.
+- **beides `false`** (Default) — übersetzen und **zurückgeben**. Nichts wird
+  geschrieben. Auf 50 Datensätze begrenzt, weil hier jede Quelle und jede
+  Übersetzung mitkommt.
+- **`save: true`** — übersetzen und über das `*_update`-Tool der Tabelle
+  schreiben: Versions-Snapshot, `tl_log`-Eintrag, `changed_fields` und die
+  Rechteprüfung pro Datensatz, genau wie bei einem direkten Update.
+
+Zusätzlich bremst `max_characters` (Default 100 000) **vor** dem ersten
+API-Aufruf, wenn der Plan teurer wäre als erlaubt.
+
+### Was ein Aufruf kostet
+
+Jede Antwort führt mit, was sie verbraucht hat:
+
+```json
+"usage": { "characters_submitted": 482, "characters_reused": 16, "api_requests": 2 }
+```
+
+`characters_submitted` ist die Zahl, auf die DeepL abrechnet — tatsächlich
+gesendete Quellzeichen. Übersetzungen werden 30 Tage zwischengespeichert
+(eigener Cache, nach Zielsprache, Quellsprache **und** Tag-Handling
+geschlüsselt), deshalb kostet die empfohlene Reihenfolge *planen → ansehen →
+speichern* nur einmal. Der Kontozähler aus `deepl_status` ist eine
+Abrechnungsperioden-Summe und läuft der Realität hinterher — er ist **nicht** der
+Preis des letzten Aufrufs.
+
+### Der übliche Weg zu einem zweiten Sprachbaum
+
+Übersetzt wird **an Ort und Stelle**: Der Datensatz, den man nennt, ist der
+Datensatz, der sich ändert. Für eine zweite Sprache also erst kopieren, dann die
+Kopie übersetzen:
+
+1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <Ziel-Root>, with_children: true)`
+2. `deepl_translate_page_tree(id: <die Kopie>, target_lang: "EN-GB", dry_run: true)` — was kostet das?
+3. dasselbe mit `save: true`
+4. `entity_language_link(...)` für die Verknüpfung mit changelanguage
+
+**Aliase werden bewusst nicht übersetzt.** DeepL liefert Fließtext, kein Slug;
+„Unsere Leistungen" gehört nicht in eine URL. Für übersetzte URLs erst den Titel
+übersetzen und danach einen **leeren** Alias an `page_update` schicken — Contao
+erzeugt ihn dann über den Slug-Service aus dem neuen Titel neu.
 
 ## Bekannte Einschränkungen
 

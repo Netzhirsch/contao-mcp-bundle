@@ -18,7 +18,7 @@ no REST endpoints of your own, no middleware and no extra port.
 Instead of building a bespoke API endpoint for every AI task, the AI session gets
 structured access to the whole DCA stack: editors can create content by
 describing it, pipelines can populate pages from third-party systems, developers
-can script structural migrations — all through the same **175 tools**, and all
+can script structural migrations — all through the same **182 tools**, and all
 constrained by exactly the same backend permissions that apply when a person
 clicks through the backend.
 
@@ -28,12 +28,13 @@ URL rewrites, form leads, maintenance and system settings.
 
 ## What you get
 
-- **175 tools** across Contao core entities plus popular extensions.
+- **182 tools** across Contao core entities plus popular extensions.
 - **Lazy-mode discovery**: three meta tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) hide the rest from `tools/list` — worth
   roughly 12 KB of system-prompt overhead per turn in Claude Desktop.
-- **OAuth 2.1** with PKCE and Dynamic Client Registration (RFC 7591), including
-  an Initial-Access-Token gate for `restricted` mode.
+- **OAuth 2.1** with PKCE, Dynamic Client Registration (RFC 7591) and Protected
+  Resource Metadata (RFC 9728). In the default `restricted` mode a client can
+  only register while the 15-minute pairing window is open.
 - **Permission parity**: every backend user's rights apply to the AI 1:1 —
   enforced through Contao's own voters, not reimplemented. Writing a DCA field
   marked `excluded` additionally requires the `alexf` right for that field.
@@ -50,8 +51,9 @@ URL rewrites, form leads, maintenance and system settings.
   the same record instead of creating duplicates.
 - **Optional extension tools** appear automatically once the matching bundle is
   installed (and report a clean `extension_not_available` error otherwise):
-  newsletter, comments, `url_rewrite_*` (terminal42) and — read-only —
-  `leads_list` + `lead_get` for form submissions (`terminal42/contao-leads`).
+  newsletter, comments, `url_rewrite_*` (terminal42), — read-only —
+  `leads_list` + `lead_get` for form submissions (`terminal42/contao-leads`),
+  and **DeepL translation** (`numero2/contao-deepl`, see below).
 - **Author pass-through**: writes are recorded under the real OAuth user in
   `tl_log` and `tl_version`, with a distinct log source so AI actions can be told
   apart from manual ones.
@@ -131,10 +133,8 @@ Guides in this repository: [docs/installation.md](docs/installation.md)
 Both are written in German.
 
 > **Connecting a client with `oauth_registration_mode: restricted` (the default):**
-> Claude, `mcp-remote` and friends cannot send an Initial Access Token during
-> registration, so the IAT button will not pair them — it is for scripts. Click
-> **MCP-Server → Status → "Open registration for 15 minutes"** in the backend
-> instead. The window stays open for the full 15 minutes, however many attempts
+> Click **MCP-Server → Status → "Open registration for 15 minutes"** in the
+> backend. The window stays open for the full 15 minutes, however many attempts
 > that takes (up to 1.4.0 it closed after the first successful registration,
 > which is why retries and second clients failed). Refused attempts are listed
 > with reason and IP under **MCP-Server → Aktivität**.
@@ -302,6 +302,90 @@ check there that `handleToolList()` and `handleToolCall()` still line up.
 
 The Contao cron must be running (`contao:cron` or the web cron) — automatic
 license renewal depends on it.
+
+## Translating with DeepL
+
+Needs [`numero2/contao-deepl`](https://github.com/numero2/contao-deepl) and a
+DeepL API key. Both are configured **once**, where that bundle already expects
+them:
+
+```bash
+composer require numero2/contao-deepl
+```
+
+```dotenv
+DEEPL_API_KEY="…"
+```
+
+> The key is mandatory as soon as the bundle is installed: `numero2` sets
+> `%env(DEEPL_API_KEY)%` with no fallback, so a missing value already breaks
+> `cache:clear` with *"Environment variable not found"*.
+
+Four tools then appear. With either piece missing they answer
+`extension_not_available` or `deepl_not_configured` and name what is missing —
+`deepl_status` answers that directly, along with the list of target languages.
+
+| Tool | What it does |
+|---|---|
+| `deepl_status` | availability, target languages, optionally the account counter |
+| `deepl_translate` | free text in, translation out — touches no record |
+| `deepl_translate_records` | one or more records of a **single** table |
+| `deepl_translate_page_tree` | a page plus meta, articles, content and every page below it |
+
+**Translatable tables** are `tl_page`, `tl_article`, `tl_content`, `tl_news`,
+`tl_news_archive`, `tl_calendar_events`, `tl_calendar`, `tl_faq`,
+`tl_faq_category`, `tl_form`, `tl_form_field` and `tl_module` — in each case only
+the columns that actually hold prose. Contao's structural values survive: a
+headline keeps its `h2`, a list element its order, a table element its row
+layout, and rich text goes out with DeepL's `tag_handling=html` so markup and
+attributes stay intact.
+
+### Three modes, two switches
+
+Because "translate", "spend money" and "overwrite content" are three different
+decisions:
+
+- **`dry_run: true`** — plan only. No API call, no write, no cost. Answers with
+  the records in scope, the fields, and the exact number of characters the real
+  run would submit.
+- **both `false`** (default) — translate and **return** the values. Nothing is
+  written. Capped at 50 records, because every source and translation comes back.
+- **`save: true`** — translate and write through the table's own `*_update`
+  tool: Versions snapshot, `tl_log` entry, `changed_fields`, and a permission
+  check per record, exactly as a direct update would.
+
+On top of that, `max_characters` (default 100,000) refuses **before** the first
+API call if the plan would cost more than allowed.
+
+### What a call costs
+
+Every answer carries what it spent:
+
+```json
+"usage": { "characters_submitted": 482, "characters_reused": 16, "api_requests": 2 }
+```
+
+`characters_submitted` is the number DeepL bills on — source characters actually
+sent. Translations are cached for 30 days (our own cache, keyed on target
+language, source language **and** tag handling), so the recommended sequence
+*plan → look → save* is paid for once. The account counter from `deepl_status` is
+a billing-period total that lags behind reality; it is **not** the price of your
+last call.
+
+### The usual route to a second-language tree
+
+Translation happens **in place**: the record you name is the record that changes.
+For a second language, copy first and translate the copy:
+
+1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <target root>, with_children: true)`
+2. `deepl_translate_page_tree(id: <the copy>, target_lang: "EN-GB", dry_run: true)` — what will this cost?
+3. the same call with `save: true`
+4. `entity_language_link(...)` to wire it up with changelanguage
+
+**Aliases are deliberately not translated.** DeepL returns prose, not a slug, and
+"Our Services" does not belong in a URL. For translated URLs, translate the title
+first and then send an **empty** alias to `page_update` — Contao regenerates it
+from the new title through the Slug service.
 
 ## Known limitations
 

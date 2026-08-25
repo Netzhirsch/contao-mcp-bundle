@@ -117,7 +117,7 @@ Responsive-Image-Definitionen für Contaos Picreator. Eine Bildgröße kann mehr
 
 **Typischer Workflow für ein komplettes Theme**: `theme_create` → `image_size_create` (mehrfach) → `module_create` (Navigation, Header, Footer-Module) → `layout_create` mit verweisen auf die Module-IDs → `page_update(layout=<new id>)` auf der Root-Seite.
 
-## 4a. Mitglieder, Formulare, Newsletter, Kommentare, Leads
+## 4a. Mitglieder, Formulare, Newsletter, Kommentare, Leads, DeepL
 
 Weitere Tool-Familien für nutzerbezogene und marketing-nahe Inhalte:
 
@@ -176,6 +176,88 @@ Tools sind immer in der Liste; bei fehlendem Bundle returnen sie
 
 Rechte: gated über das Backend-Modul `lead` (BE_MOD-Gruppe „leads") — wer die
 Leads im Backend sehen darf, darf sie auch per MCP lesen (Admins immer).
+
+### Übersetzen mit DeepL (optional, `numero2/contao-deepl`)
+
+Vier Tools, immer in der Liste. Fehlt das Bundle, kommt
+`extension_not_available`; fehlt der API-Schlüssel, `deepl_not_configured` —
+die Antwort nennt jeweils, welches von beidem es ist.
+
+Voraussetzung: `composer require numero2/contao-deepl` **und**
+`DEEPL_API_KEY="…"` in der `.env.local`. Der Schlüssel ist Pflicht, sobald das
+Bundle installiert ist: numero2 deklariert `%env(DEEPL_API_KEY)%` ohne Fallback,
+ein fehlender Wert lässt schon `cache:clear` mit „Environment variable not
+found" abbrechen.
+
+Genutzt wird vom Host-Bundle nur die **Konfiguration** (der Parameter
+`contao.deepl.api_key` und die DeepL-Bibliothek). Der Backend-Button ist nicht
+wiederverwendbar — sein Listener hängt an einem Backend-Request mit `do=` und
+`act=edit`, seine Sprachauflöser an einem `DataContainer`. Rich Text geht hier
+mit `tag_handling=html` raus, was der Service des Host-Bundles nicht macht.
+
+- `deepl_status(include_account_usage?)` — verfügbar ja/nein, Liste der
+  Zielsprachen, Liste der übersetzbaren Tabellen. Der optionale Kontozähler ist
+  eine **Abrechnungsperioden-Summe** und läuft der Realität hinterher; er ist
+  nicht der Preis des letzten Aufrufs.
+- `deepl_translate(texts[], target_lang, source_lang?, html?)` — Freitext rein,
+  Übersetzung raus, kein Datensatz betroffen. Leere Einträge kommen unverändert
+  zurück und kosten nichts, identische Strings werden einmal übersetzt.
+  `html: true` für Markup.
+- `deepl_translate_records(table, ids[], target_lang, source_lang?, fields?, dry_run?, save?, max_characters?)`
+  — ein oder mehrere Datensätze **einer** Tabelle. Ein einzelner ist `ids: [42]`.
+- `deepl_translate_page_tree(id, target_lang, source_lang?, include_children?, include_articles?, include_content?, fields?, dry_run?, save?, max_characters?, max_records?)`
+  — Seite + SEO-Meta + Artikel + Inhaltselemente (verschachtelte eingeschlossen)
+  + standardmäßig alle Unterseiten. Der ganze Baum geht in gebündelten Requests
+  zu DeepL, nicht Feld für Feld.
+
+**Übersetzbare Tabellen:** `tl_page`, `tl_article`, `tl_content`, `tl_news`,
+`tl_news_archive`, `tl_calendar_events`, `tl_calendar`, `tl_faq`,
+`tl_faq_category`, `tl_form`, `tl_form_field`, `tl_module`. Welche Spalte
+Fließtext enthält, steht in einer von Hand gepflegten Liste — die DCA
+unterscheidet einen Satz nicht von einem Maschinenwert wie `alias` oder `cssID`.
+Unbekannte Feldnamen in `fields` landen in `ignored_fields` und brechen den
+Aufruf nicht ab.
+
+Strukturwerte bleiben erhalten: Eine Überschrift behält ihr `h2` (übersetzt wird
+nur `value`), ein Listen-Element seine Reihenfolge, ein Tabellen-Element seinen
+Zeilenschnitt.
+
+**Drei Modi, zwei Schalter:**
+
+| | API-Aufruf | Schreibzugriff | Antwort |
+|---|---|---|---|
+| `dry_run: true` | nein | nein | Plan + exakte Zeichenzahl des echten Laufs |
+| beides `false` | ja | nein | Quelle + Übersetzung je Feld (max. 50 Datensätze) |
+| `save: true` | ja | ja | `changed_fields` je Datensatz |
+
+`max_characters` (Default 100 000, `0` = aus) bricht **vor** dem ersten
+API-Aufruf ab, wenn der Plan teurer wäre.
+
+**Kosten:** Jede Antwort trägt `usage.characters_submitted` — die tatsächlich
+gesendeten Quellzeichen, also die Zahl, auf die DeepL abrechnet — und
+`characters_reused`, was Wiederholungen und der Cache gespart haben.
+Übersetzungen liegen 30 Tage in einem eigenen Cache (Schlüssel über
+Zielsprache, Quellsprache und Tag-Handling), deshalb kostet *planen → ansehen →
+speichern* nur einmal.
+
+**Übersetzt wird an Ort und Stelle.** Für einen zweiten Sprachbaum:
+
+1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <Ziel-Root>, with_children: true)`
+2. `deepl_translate_page_tree(id: <Kopie>, target_lang: "EN-GB", dry_run: true)`
+3. dasselbe mit `save: true`
+4. `entity_language_link(...)` für changelanguage
+
+`alias` ist bewusst **nicht** übersetzbar: DeepL liefert Fließtext, kein Slug,
+und die Update-Tools schreiben einen nicht-leeren Alias unverändert. Für
+übersetzte URLs erst den Titel übersetzen, dann einen **leeren** Alias an
+`page_update` schicken — Contao erzeugt ihn über den Slug-Service neu.
+
+Rechte: `deepl_status` und `deepl_translate` rühren keinen Datensatz an und
+brauchen keine Tabellenrechte. Die beiden anderen werden als Schreibzugriff
+geprüft, und zusätzlich prüft das Tool **jeden** Datensatz einzeln (lesen bei
+Vorschau, schreiben beim Speichern) — ein Seitenbaum schreibt schließlich auch
+`tl_article` und `tl_content`. Geschrieben wird immer über das `*_update`-Tool
+der jeweiligen Tabelle, also mit Versions-Snapshot und `tl_log`-Eintrag.
 
 ## 4b. Wartung (entspricht `/contao?do=maintenance`)
 

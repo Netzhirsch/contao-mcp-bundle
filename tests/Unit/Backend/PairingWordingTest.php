@@ -61,6 +61,16 @@ final class PairingWordingTest extends TestCase
             'IAT-Pflicht',
             '(IAT required)',
             'müssen beim Registrieren ein gültiges Initial Access Token',
+            // The button itself is gone (1.6.x). Documentation that still
+            // points at it sends operators looking for a control that does not
+            // exist — the same failure mode as the claims above, one step
+            // removed.
+            'IAT-Button',
+            'IAT button',
+            // "Gate" reads as "restricted means you need an IAT". Restricted
+            // means the pairing window; the token path is for scripts.
+            'Initial-Access-Token-Gate',
+            'Initial-Access-Token gate',
         ];
     }
 

@@ -53,6 +53,7 @@
         "contao/news-bundle": "^5.3",
         "contao/newsletter-bundle": "^5.3",
         "friendsofsymfony/http-cache-bundle": "^3.0",
+        "numero2/contao-deepl": "^1.0",
         "terminal42/contao-leads": "^3.3",
         "terminal42/contao-url-rewrite": "^1.8"
     },
@@ -62,6 +63,7 @@
         "contao/faq-bundle": "Required for faq_* tools.",
         "contao/news-bundle": "Required for news_* tools.",
         "contao/newsletter-bundle": "Required for newsletter_* tools.",
+        "numero2/contao-deepl": "Required for deepl_* tools (translation). Also supplies the DEEPL_API_KEY configuration both it and this bundle read.",
         "terminal42/contao-leads": "Required for leads_list + lead_get (read-only access to form submissions).",
         "terminal42/contao-url-rewrite": "Required for url_rewrite_* tools."
     },

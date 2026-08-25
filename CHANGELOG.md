@@ -6,6 +6,99 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **Übersetzen über DeepL** — vier Tools auf Basis von
+  [`numero2/contao-deepl`](https://github.com/numero2/contao-deepl):
+  `deepl_status`, `deepl_translate`, `deepl_translate_records` und
+  `deepl_translate_page_tree`. Ohne das Bundle bzw. ohne API-Schlüssel
+  antworten sie mit `extension_not_available` oder `deepl_not_configured` und
+  sagen, welches von beidem fehlt.
+
+  **Warum nicht einfach der Service des Host-Bundles?** Dessen
+  `numero2_deepl.api` übersetzt genau einen String pro Aufruf und **ohne**
+  `tag_handling`. Contaos Fließtext ist HTML — Teaser, `tl_content.text`,
+  FAQ-Antworten —, und DeepL zerlegt Attribute, wenn HTML als Klartext
+  ankommt. Außerdem gibt der Service nichts über die Kosten zurück. Übernommen
+  wird deshalb seine **Konfiguration**: Der Schlüssel kommt aus
+  `contao.deepl.api_key`, dem Parameter, den numero2 aus `DEEPL_API_KEY` setzt.
+  Einmal konfigurieren, Backend-Button und MCP nutzen dasselbe.
+
+  Der Button des Host-Bundles war nicht wiederverwendbar: Sein Listener hängt
+  sich nur in einen Backend-Request mit `do=` und `act=edit`, und seine
+  Sprachauflöser erwarten einen `DataContainer`. Beides existiert über MCP nicht.
+
+  **Zwölf Tabellen** sind übersetzbar: `tl_page`, `tl_article`, `tl_content`,
+  `tl_news`, `tl_news_archive`, `tl_calendar_events`, `tl_calendar`, `tl_faq`,
+  `tl_faq_category`, `tl_form`, `tl_form_field`, `tl_module`. Welche Spalte
+  Fließtext ist, steht in einer **von Hand gepflegten** Liste und wird nicht aus
+  der DCA abgeleitet: Ein `inputType: text` sagt nicht, ob dahinter ein Satz
+  steht oder ein Maschinenwert wie `alias`, `cssID` oder `customTpl`. Ein
+  vergessenes Feld übersetzt man selbst, ein fälschlich aufgenommenes zerlegt
+  still die Website.
+
+  Contaos Strukturwerte bleiben erhalten: Eine Überschrift behält ihr `h2`
+  (übersetzt wird nur `value`), ein Listen-Element seine Reihenfolge, ein
+  Tabellen-Element seinen Zeilenschnitt.
+
+- **Drei Modi über zwei Schalter**, weil „übersetzen", „Geld ausgeben" und
+  „Inhalt überschreiben" drei verschiedene Entscheidungen sind:
+  `dry_run: true` plant nur — kein API-Aufruf, kein Schreibzugriff, dafür die
+  exakte Zeichenzahl des echten Laufs. Beides `false` übersetzt und **gibt
+  zurück** (auf 50 Datensätze begrenzt, weil jede Quelle mitkommt).
+  `save: true` schreibt über das `*_update`-Tool der jeweiligen Tabelle — mit
+  Versions-Snapshot, `tl_log`-Eintrag, `changed_fields` und einer Rechteprüfung
+  **pro Datensatz**. Ein Seitenbaum schreibt `tl_page`, `tl_article` und
+  `tl_content`; eine Prüfung nur auf `tl_page` hätte die anderen beiden
+  mitgenommen.
+
+  `max_characters` (Default 100 000) bricht **vor** dem ersten API-Aufruf ab,
+  wenn der Plan teurer wäre.
+
+- **Kosten stehen in jeder Antwort**: `characters_submitted` sind die
+  tatsächlich gesendeten Quellzeichen — die Zahl, auf die DeepL abrechnet.
+  `characters_reused` ist, was Wiederholungen und der Cache gespart haben.
+  Der Kontozähler aus `deepl_status` bleibt bewusst getrennt und ist als
+  Perioden-Summe ausgewiesen: Gemessen hat sich der Zähler nach einem
+  92-Zeichen-Batch **nicht** bewegt und erst später aufgeholt — als
+  Preisschild für den letzten Aufruf ist er unbrauchbar.
+
+- **Eigener Übersetzungs-Cache, 30 Tage.** Nicht der des Host-Bundles: dessen
+  Schlüssel ist `md5(text).zielsprache` ohne Tag-Handling, seine Einträge
+  verfallen nie — eine HTML-bewusste Übersetzung käme dort später als Antwort
+  auf denselben String als Klartext zurück. Unserer schlüsselt über
+  Zielsprache, Quellsprache **und** Tag-Handling. Damit kostet die empfohlene
+  Reihenfolge *planen → ansehen → speichern* nur einmal Geld, obwohl es drei
+  getrennte HTTP-Requests und damit drei PHP-Prozesse sind.
+
+- Ein Seitenbaum geht in **gebündelten** Requests zu DeepL (bis zu 50 Texte
+  pro Aufruf), nicht Feld für Feld.
+
+### Fixed
+- Beide READMEs beschrieben noch den **IAT-Button**, den es seit 1.6 nicht mehr
+  gibt, und nannten `restricted` ein „Initial-Access-Token-Gate" — der Modus
+  meint das Pairing-Fenster, der Token-Pfad ist für Skripte. `PairingWordingTest`
+  fängt jetzt auch diese beiden Formulierungen ab.
+- Die Tool-Zahl in beiden READMEs stand seit mehreren Releases auf 175; es sind
+  182.
+
+### Notes
+- Übersetzt wird **an Ort und Stelle**. Für einen zweiten Sprachbaum erst
+  `entity_duplicate(..., with_children: true)`, dann die Kopie übersetzen.
+- **`alias` ist absichtlich nicht übersetzbar.** DeepL liefert Fließtext, kein
+  Slug, und die Update-Tools schreiben einen nicht-leeren Alias unverändert —
+  „Unsere Leistungen" landete so in einer URL. Der saubere Weg existiert schon:
+  Titel übersetzen, danach einen **leeren** Alias an `page_update` schicken,
+  Contao erzeugt ihn über den Slug-Service neu.
+- Wer `numero2/contao-deepl` installiert, **muss** `DEEPL_API_KEY` setzen: Das
+  Bundle deklariert `%env(DEEPL_API_KEY)%` ohne Fallback, ein fehlender Wert
+  lässt schon `cache:clear` mit „Environment variable not found" abbrechen.
+  Das ist Verhalten des Host-Bundles, hier nur dokumentiert.
+- Smoke-Test: 339 Asserts (vorher 319), davon 20 für DeepL. Sechs davon prüfen
+  Registrierung und Schema und laufen auch ohne das Host-Bundle — dort, wo es
+  fehlt, wird stattdessen `extension_not_available` auf allen drei Tools
+  nachgewiesen. PHPUnit: 290 Tests.
+
+
 ## [1.7.0] – 2026-08-20
 
 > **Verhaltensänderung, die eine Automatisierung merken kann:**
