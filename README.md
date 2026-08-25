@@ -519,25 +519,35 @@ rm -rf vendor/netzhirsch/contao-mcp-bundle
 composer install --no-dev --optimize-autoloader
 ```
 
-**Reparatur im Contao Manager** (ohne Shell): das Paket in der Paket-Ansicht
-**entfernen**, Änderungen anwenden, danach wieder **hinzufügen**. Das ist kein
-Umweg, sondern derselbe Vorgang: Composers `VcsDownloader::remove()` löscht
-schlicht das Verzeichnis und sieht sich das Git-Repo dabei **nicht** an —
-geprüft wird nur beim *Update* (`cleanChanges()` → `getUnpushedChanges()`), und
-genau dort bricht es ab. Zwischen den beiden Schritten ist der MCP-Endpunkt
-kurz weg; Datenbank (`tl_mcp_oauth_*`), Lizenz und `var/mcp/` bleiben
-unangetastet, der Konnektor verbindet sich danach unverändert.
+**Über den Contao Manager allein geht es nicht.** Weder Aktualisieren noch
+Entfernen des Pakets hilft, weil Composer den Checkout prüft, *bevor* es
+irgendetwas mit ihm tut — in `VcsDownloader::prepare()`, und zwar für **beide**
+Fälle:
 
-**Kleinste Variante, wenn nur Datei-Zugriff da ist** (FTP/SFTP, Hoster-Dateimanager):
-nur den Ordner `vendor/netzhirsch/contao-mcp-bundle/.git` löschen — versteckte
-Dateien im Client einblenden. Composer erkennt einen Git-Checkout ausschließlich
-an `is_dir($path.'/.git')`; ohne dieses Verzeichnis steigt die Prüfung sofort
-aus und das nächste Update läuft durch.
+```php
+if ($type === 'update')         { $this->cleanChanges($prevPackage, $path, true); }
+elseif ($type === 'uninstall')  { $this->cleanChanges($package, $path, false); }
+```
 
-**Den Composer-Cache zu leeren reicht in der Regel nicht.** „no merge base"
-heißt, dass beide Refs aufgelöst werden konnten und keine gemeinsame Historie
-haben — das Problem sitzt im Vendor-Klon, den ein Cache-Leeren gar nicht
-anfasst.
+`prepare()` läuft vor jeder Paket-Ausgabe, deshalb bricht auch ein
+`composer remove` ab, ohne eine einzige `- Removing …`-Zeile zu drucken. Es
+braucht also **Datei-Zugriff**: FTP/SFTP, den Dateimanager des Hosters oder SSH.
+
+**Kleinster Eingriff** (FTP/SFTP, Hoster-Dateimanager): nur den Ordner
+`vendor/netzhirsch/contao-mcp-bundle/.git` löschen — versteckte Dateien im
+Client einblenden. Composer erkennt einen Git-Checkout ausschließlich an
+`is_dir($path.'/.git')`; ohne dieses Verzeichnis steigt die Prüfung sofort aus,
+und der nächste Vorgang im Manager läuft durch. Der Code bleibt liegen, die
+Instanz läuft in der Zwischenzeit normal weiter.
+
+Alternativ das ganze Verzeichnis `vendor/netzhirsch/contao-mcp-bundle` löschen
+und im Manager das Paket neu hinzufügen. Datenbank (`tl_mcp_oauth_*`), Lizenz
+und `var/mcp/` bleiben dabei unangetastet, der Konnektor verbindet sich danach
+unverändert.
+
+**Den Composer-Cache zu leeren reicht nicht.** „no merge base" heißt, dass beide
+Refs aufgelöst werden konnten und keine gemeinsame Historie haben — das Problem
+sitzt im Vendor-Klon, den ein Cache-Leeren gar nicht anfasst.
 
 Damit es gar nicht erst auftritt: das Bundle als Archiv statt als Git-Checkout
 installieren. Dann ist der `GitDownloader` nicht beteiligt.

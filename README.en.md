@@ -342,24 +342,33 @@ rm -rf vendor/netzhirsch/contao-mcp-bundle
 composer install --no-dev --optimize-autoloader
 ```
 
-**In the Contao Manager** (no shell): remove the package in the packages view,
-apply, then add it again. That is not a workaround but the same operation:
-Composer's `VcsDownloader::remove()` simply deletes the directory and does NOT
-inspect the git repository — the inspection only happens on *update*
-(`cleanChanges()` → `getUnpushedChanges()`), which is exactly where it aborts.
-The MCP endpoint is gone between the two steps; the database
-(`tl_mcp_oauth_*`), the license and `var/mcp/` are untouched, and the connector
-reconnects unchanged afterwards.
+**The Contao Manager alone cannot do it.** Neither updating nor removing the
+package helps, because Composer inspects the checkout BEFORE doing anything to
+it — in `VcsDownloader::prepare()`, for both cases:
 
-**Smallest variant when only file access is available** (FTP/SFTP, hosting file
-manager): delete just the `vendor/netzhirsch/contao-mcp-bundle/.git` folder —
-enable "show hidden files" in the client. Composer recognises a git checkout
-solely by `is_dir($path.'/.git')`; without it the check returns early and the
-next update goes through.
+```php
+if ($type === 'update')         { $this->cleanChanges($prevPackage, $path, true); }
+elseif ($type === 'uninstall')  { $this->cleanChanges($package, $path, false); }
+```
 
-**Clearing the Composer cache is usually not enough.** "no merge base" means
-both refs resolved and share no history — the problem sits in the vendor clone,
-which clearing the cache does not touch.
+`prepare()` runs before any per-package output, which is why `composer remove`
+aborts without printing a single `- Removing …` line. So this needs FILE
+ACCESS: FTP/SFTP, the hosting file manager, or SSH.
+
+**Smallest intervention** (FTP/SFTP, hosting file manager): delete just the
+`vendor/netzhirsch/contao-mcp-bundle/.git` folder — enable "show hidden files"
+in the client. Composer recognises a git checkout solely by
+`is_dir($path.'/.git')`; without it the check returns early and the next
+operation in the Manager goes through. The code stays in place and the instance
+keeps running meanwhile.
+
+Alternatively delete the whole `vendor/netzhirsch/contao-mcp-bundle` directory
+and add the package again in the Manager. The database (`tl_mcp_oauth_*`), the
+license and `var/mcp/` are untouched, and the connector reconnects unchanged.
+
+**Clearing the Composer cache does not help.** "no merge base" means both refs
+resolved and share no history — the problem sits in the vendor clone, which
+clearing the cache does not touch.
 
 To avoid it altogether, install the bundle as an archive instead of a git
 checkout — then `GitDownloader` is not involved at all:
