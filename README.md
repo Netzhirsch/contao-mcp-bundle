@@ -502,20 +502,32 @@ Composer schreibt diesen Fehler unter das Paket, das gerade an der Reihe war —
 im beobachteten Fall `php-mcp/server`. Der Branch im Kommando verrät den
 Verursacher: `php-mcp/server` liegt auf `main`, `master` ist **dieses** Bundle.
 
-Reparatur — den kaputten Checkout wegwerfen, Composer holt ihn neu:
+**Reparatur mit Shell** — den kaputten Checkout wegwerfen, Composer holt ihn neu:
 
 ```bash
 rm -rf vendor/netzhirsch/contao-mcp-bundle
 composer install --no-dev --optimize-autoloader
 ```
 
-Hilft das nicht, ist die Cache-Seite betroffen:
+**Reparatur im Contao Manager** (ohne Shell): das Paket in der Paket-Ansicht
+**entfernen**, Änderungen anwenden, danach wieder **hinzufügen**. Das ist kein
+Umweg, sondern derselbe Vorgang: Composers `VcsDownloader::remove()` löscht
+schlicht das Verzeichnis und sieht sich das Git-Repo dabei **nicht** an —
+geprüft wird nur beim *Update* (`cleanChanges()` → `getUnpushedChanges()`), und
+genau dort bricht es ab. Zwischen den beiden Schritten ist der MCP-Endpunkt
+kurz weg; Datenbank (`tl_mcp_oauth_*`), Lizenz und `var/mcp/` bleiben
+unangetastet, der Konnektor verbindet sich danach unverändert.
 
-```bash
-composer clear-cache
-rm -rf vendor/netzhirsch/contao-mcp-bundle
-composer install --no-dev --optimize-autoloader
-```
+**Kleinste Variante, wenn nur Datei-Zugriff da ist** (FTP/SFTP, Hoster-Dateimanager):
+nur den Ordner `vendor/netzhirsch/contao-mcp-bundle/.git` löschen — versteckte
+Dateien im Client einblenden. Composer erkennt einen Git-Checkout ausschließlich
+an `is_dir($path.'/.git')`; ohne dieses Verzeichnis steigt die Prüfung sofort
+aus und das nächste Update läuft durch.
+
+**Den Composer-Cache zu leeren reicht in der Regel nicht.** „no merge base"
+heißt, dass beide Refs aufgelöst werden konnten und keine gemeinsame Historie
+haben — das Problem sitzt im Vendor-Klon, den ein Cache-Leeren gar nicht
+anfasst.
 
 Damit es gar nicht erst auftritt: das Bundle als Archiv statt als Git-Checkout
 installieren. Dann ist der `GitDownloader` nicht beteiligt.

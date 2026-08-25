@@ -323,20 +323,31 @@ Composer files this error under whichever package was being processed at the
 time — observed as `php-mcp/server`. The branch in the command names the real
 culprit: `php-mcp/server` lives on `main`, `master` is THIS bundle.
 
-Recovery — throw the broken checkout away and let Composer fetch it again:
+**With a shell** — throw the broken checkout away and let Composer fetch it again:
 
 ```bash
 rm -rf vendor/netzhirsch/contao-mcp-bundle
 composer install --no-dev --optimize-autoloader
 ```
 
-If that is not enough, the cache side is affected too:
+**In the Contao Manager** (no shell): remove the package in the packages view,
+apply, then add it again. That is not a workaround but the same operation:
+Composer's `VcsDownloader::remove()` simply deletes the directory and does NOT
+inspect the git repository — the inspection only happens on *update*
+(`cleanChanges()` → `getUnpushedChanges()`), which is exactly where it aborts.
+The MCP endpoint is gone between the two steps; the database
+(`tl_mcp_oauth_*`), the license and `var/mcp/` are untouched, and the connector
+reconnects unchanged afterwards.
 
-```bash
-composer clear-cache
-rm -rf vendor/netzhirsch/contao-mcp-bundle
-composer install --no-dev --optimize-autoloader
-```
+**Smallest variant when only file access is available** (FTP/SFTP, hosting file
+manager): delete just the `vendor/netzhirsch/contao-mcp-bundle/.git` folder —
+enable "show hidden files" in the client. Composer recognises a git checkout
+solely by `is_dir($path.'/.git')`; without it the check returns early and the
+next update goes through.
+
+**Clearing the Composer cache is usually not enough.** "no merge base" means
+both refs resolved and share no history — the problem sits in the vendor clone,
+which clearing the cache does not touch.
 
 To avoid it altogether, install the bundle as an archive instead of a git
 checkout — then `GitDownloader` is not involved at all:
