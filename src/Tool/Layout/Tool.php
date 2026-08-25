@@ -158,6 +158,9 @@ final class Tool
               - header_height, footer_height, width_left, width_right (string with unit, e.g. "200px")
               - template (template name, e.g. "fe_page")
               - sections: list<{id, title, position?, template?, cssID?}>
+                (`template` defaults to "block_section" when omitted or empty — an empty
+                 one is written verbatim by Contao and makes every page carrying a module
+                 in that section answer HTTP 500)
               - modules:  list<{mod: <module-id, or 0 for the article/content placeholder>, col: "main"|"header"|..., enable?: bool}>
                 (Contao's article-content placeholder is the pseudo-id 0 — e.g. {mod:0, col:"main"}; without it the column renders empty)
               - framework: list<string> from {layout.css, responsive.css, grid.css, reset.css, form.css, icons.css}

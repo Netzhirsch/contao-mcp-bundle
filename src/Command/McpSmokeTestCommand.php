@@ -701,6 +701,37 @@ final class McpSmokeTestCommand extends Command
                     }
                     return true;
                 });
+
+                // A custom section with no template is the one shape that must
+                // not reach the database. FrontendTemplateTrait falls back to
+                // block_section only when the key is ABSENT ($template === null
+                // / !isset), so '' slips past the guard into getTemplate('')
+                // and every page carrying a module in that section answers
+                // HTTP 500. The backend's sectionWizard always writes a chosen
+                // template, so only the MCP path can produce it — and it stays
+                // invisible until the section is actually filled.
+                $this->layoutTool->update((int) $layoutRes['id'], [
+                    'sections' => [
+                        ['id' => 'smoke_no_tpl', 'title' => 'No template given'],
+                        ['id' => 'smoke_empty_tpl', 'title' => 'Empty template', 'template' => ''],
+                        ['id' => 'smoke_own_tpl', 'title' => 'Own template', 'template' => 'block_section_custom'],
+                    ],
+                ]);
+
+                $sections = StringUtil::deserialize(
+                    (string) $this->connection->fetchOne('SELECT sections FROM tl_layout WHERE id = ?', [(int) $layoutRes['id']]),
+                    true,
+                );
+
+                $expect('a section without a template gets block_section, not ""', $sections,
+                    static function (array $rows): bool {
+                        $byId = array_column($rows, null, 'id');
+
+                        return ($byId['smoke_no_tpl']['template'] ?? null) === 'block_section'
+                            && ($byId['smoke_empty_tpl']['template'] ?? null) === 'block_section';
+                    });
+                $expect('while an explicit template is left alone', $sections,
+                    static fn (array $rows) => (array_column($rows, null, 'id')['smoke_own_tpl']['template'] ?? null) === 'block_section_custom');
             }
         }
 

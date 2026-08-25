@@ -308,11 +308,21 @@ final class FieldMapper
             if ($id === '' || $title === '') {
                 return [null, sprintf('sections[%d] requires id + title', $i)];
             }
+            // An EMPTY template is the one value that must never be stored.
+            // FrontendTemplateTrait falls back to `block_section` only when the
+            // key is absent (`$template === null` / `!isset(...)`), and '' is
+            // neither — so it reaches `getTemplate('')` and every page carrying
+            // a module in that section answers HTTP 500. The backend's
+            // sectionWizard always writes a chosen template, so this only
+            // happens on the MCP path, and it stays invisible until the section
+            // is actually filled.
+            $template = trim((string) ($entry['template'] ?? ''));
+
             $clean[] = [
                 'id' => $id,
                 'title' => $title,
                 'position' => (string) ($entry['position'] ?? 'manual'),
-                'template' => (string) ($entry['template'] ?? ''),
+                'template' => $template !== '' ? $template : 'block_section',
                 'cssID' => (string) ($entry['cssID'] ?? ''),
             ];
         }
