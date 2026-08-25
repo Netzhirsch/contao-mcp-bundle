@@ -2594,6 +2594,47 @@ final class McpSmokeTestCommand extends Command
 
 
 
+        // ═══════════════════ Template-Auffindbarkeit ═══════════════════
+        //
+        // Modern Contao 5 templates are identified by group + name
+        // ("frontend_module/navigation"). templates_list used to report only
+        // the fourteen legacy prefixes, so every modern template was invisible
+        // in every listing — which is why AL-07 reverse-engineered a footer's
+        // structure with five throwaway modules and a preview.
+        $output->writeln("
+<comment>Template-Auffindbarkeit</comment>");
+
+        $allTemplates = $this->templateTool->templatesList();
+
+        $expect('every template lands in exactly one group, none dropped', $allTemplates,
+            static fn ($r) => ($r['count'] ?? 0) > 0
+                && ($r['count'] ?? 0) === array_sum(array_map('count', $r['items'] ?? [])));
+        $expect('the modern groups are listed, not only the legacy prefixes', $allTemplates,
+            static fn ($r) => isset($r['items']['frontend_module'], $r['items']['content_element'])
+                && $r['items']['frontend_module'] !== []);
+        $expect('and the legacy prefixes still are', $allTemplates,
+            static fn ($r) => ($r['items']['mod_'] ?? []) !== [] && ($r['items']['ce_'] ?? []) !== []);
+
+        $expect('a modern identifier carries its group', $this->templateTool->templatesList('frontend_module/'),
+            static fn ($r) => ($r['count'] ?? 0) > 0
+                && array_filter($r['items']['frontend_module/'] ?? [], static fn ($n) => !str_starts_with((string) $n, 'frontend_module/')) === []);
+        $expect('a legacy prefix still filters', $this->templateTool->templatesList('mod_'),
+            static fn ($r) => ($r['count'] ?? 0) > 0);
+
+        // The AL-07 dead end: the template exists, the guessed name does not.
+        $missTemplate = $this->templateTool->templateLookup('frontend_module/netzhirsch_pagination');
+        $expect('a wrong identifier suggests the right one from the same group', $missTemplate,
+            static fn ($r) => ($r['error'] ?? '') === 'not_found'
+                && ($r['suggestions'][0] ?? null) === 'frontend_module/pagination');
+        $expect('while a name nothing resembles suggests nothing',
+            $this->templateTool->templateLookup('vollkommen_erfunden_xyz'),
+            static fn ($r) => ($r['suggestions'] ?? ['x']) === []);
+
+        $expect('a correct identifier still resolves to its layers',
+            $this->templateTool->templateLookup('content_element/text'),
+            static fn ($r) => ($r['count'] ?? 0) >= 1
+                && str_starts_with((string) ($r['entries'][0]['layer'] ?? ''), 'bundle:'));
+
         // ═══════════════════ Feldweiser Patch ═══════════════════
         //
         // The *_update tools take whole field values, which is right for a

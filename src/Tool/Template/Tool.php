@@ -53,30 +53,75 @@ final class Tool
      */
     #[McpTool(
         name: 'templates_list',
-        description: 'Lists every Contao frontend template available in this project (Bundle originals + project overrides, deduplicated). Without arguments returns each common prefix group (ce_, mod_, fe_, mail_, form_, block_, member_, news_, faq_, calendar_, event_, password_, error_, j_) as a separate list. With prefix, returns just that group as a flat list. Source: bundle-shipped contao/templates/ + project templates/. Returns Twig (.html.twig) and legacy (.html5) entries without the extension — pass the bare name as customTpl / template.',
+        description: <<<'DESC'
+            Lists every Contao template available in this project — bundle originals and
+            project overrides, deduplicated, without their extension.
+
+            Two naming worlds, and BOTH are listed. Legacy templates are flat names with a
+            prefix (`mod_article`, `ce_text`, `news_full`). Modern Contao 5 templates carry
+            their group as a path (`frontend_module/navigation`, `content_element/text`) —
+            those come from Contao's own Twig inheritance chain, which is what actually
+            renders. A module type does NOT necessarily share its template's name.
+
+            Without arguments every template lands in exactly one group: its directory for
+            modern ones, its prefix for legacy ones, and `other` for everything else, so
+            nothing is invisible. With `prefix` you get one flat list — the prefix matches
+            the start of the identifier, so "frontend_module/" and "mod_" both work.
+
+            Use template_lookup to see which layer of an identifier actually wins.
+            DESC,
     )]
     public function templatesList(?string $prefix = null): array
     {
-        $prefixes = $prefix !== null && $prefix !== '' ? [$prefix] : self::COMMON_PREFIXES;
-
         $all = $this->scanAllTemplates();
+        sort($all);
 
+        if ($prefix !== null && $prefix !== '') {
+            $matching = array_values(array_filter($all, static fn (string $name): bool => str_starts_with($name, $prefix)));
+
+            return [
+                'prefix' => $prefix,
+                'items' => [$prefix => $matching],
+                'count' => \count($matching),
+            ];
+        }
+
+        // Every template lands in exactly one group. The old version reported
+        // only the fourteen legacy prefixes, which made every modern template
+        // (frontend_module/…, content_element/…) invisible in every listing —
+        // the reason AL-07 resorted to five throwaway modules and a preview to
+        // find out what a footer renders.
         $groups = [];
-        $total = 0;
-        foreach ($prefixes as $p) {
-            $matching = array_values(array_filter($all, static fn (string $name): bool => str_starts_with($name, $p)));
-            sort($matching);
-            if ($matching !== [] || $prefix !== null) {
-                $groups[$p] = $matching;
-                $total += \count($matching);
+        foreach ($all as $name) {
+            $groups[self::groupOf($name)][] = $name;
+        }
+
+        ksort($groups);
+
+        return [
+            'prefix' => null,
+            'items' => $groups,
+            'count' => \count($all),
+        ];
+    }
+
+    /**
+     * The one group a template identifier belongs to: its directory for modern
+     * Contao 5 templates, its prefix for legacy ones, `other` for the rest.
+     */
+    private static function groupOf(string $name): string
+    {
+        if (str_contains($name, '/')) {
+            return explode('/', $name)[0];
+        }
+
+        foreach (self::COMMON_PREFIXES as $prefix) {
+            if (str_starts_with($name, $prefix)) {
+                return $prefix;
             }
         }
 
-        return [
-            'prefix' => $prefix,
-            'items' => $groups,
-            'count' => $total,
-        ];
+        return 'other';
     }
 
     /**
@@ -410,10 +455,20 @@ final class Tool
             $chain = $chains[$shortName] ?? null;
         }
         if ($chain === null) {
+            // A bare "not found" is where AL-07 stalled: the template existed,
+            // it was called frontend_module/megamenu, and the guess was
+            // frontend_module/netzhirsch_megamenu — a module type is not
+            // necessarily its template name. Suggestions turn the dead end into
+            // a pointer.
+            $suggestions = self::suggestIdentifiers($identifier, array_keys($chains));
+
             return [
                 'error' => 'not_found',
                 'message' => sprintf('No template with identifier "%s" found in the inheritance chain.', $identifier),
-                'hint' => 'Pass the identifier as it appears in templates_list, e.g. "content_element/text" or "news_full" (without extension).',
+                'suggestions' => $suggestions,
+                'hint' => $suggestions === []
+                    ? 'Pass the identifier as it appears in templates_list, e.g. "content_element/text" or "news_full" (without extension).'
+                    : 'A module or element TYPE is not necessarily its template name — check the suggestions, or run templates_list("frontend_module/").',
             ];
         }
 
@@ -557,6 +612,58 @@ final class Tool
      * Tags an absolute template path as "bundle:<name>", "theme:<slug>", or
      * "project" so the LLM can reason about the layer without parsing paths.
      */
+    /**
+     * Identifiers that plausibly meant the same thing as the one asked for:
+     * the same basename in another group, one containing the other, or a close
+     * spelling. Ordered best-first and capped, because a long list of
+     * near-misses is as useless as none.
+     *
+     * @param list<string> $known
+     *
+     * @return list<string>
+     */
+    private static function suggestIdentifiers(string $identifier, array $known): array
+    {
+        $needle = strtolower(basename($identifier));
+        if ($needle === '') {
+            return [];
+        }
+
+        // When the caller named a group, a candidate from the SAME group is
+        // the better guess even if another one is spelled slightly closer:
+        // asking for frontend_module/x means a frontend module.
+        $wantedGroup = str_contains($identifier, '/') ? strtolower(\dirname($identifier)) : null;
+
+        $scored = [];
+
+        foreach ($known as $candidate) {
+            $candidate = (string) $candidate;
+            $base = strtolower(basename($candidate));
+            $groupBonus = $wantedGroup !== null && str_contains($candidate, '/')
+                && strtolower(\dirname($candidate)) === $wantedGroup ? -50 : 0;
+
+            if ($base === $needle) {
+                $scored[$candidate] = 0 + $groupBonus;         // same name, other group
+                continue;
+            }
+            if (str_contains($base, $needle) || str_contains($needle, $base)) {
+                $scored[$candidate] = 1 + abs(\strlen($base) - \strlen($needle)) + $groupBonus;
+                continue;
+            }
+
+            $distance = levenshtein($needle, $base);
+            // Only near spellings; beyond a third of the word it is a different
+            // template, not a typo.
+            if ($distance > 0 && $distance <= (int) max(2, \strlen($needle) / 3)) {
+                $scored[$candidate] = 100 + $distance + $groupBonus;
+            }
+        }
+
+        asort($scored);
+
+        return array_slice(array_keys($scored), 0, 8);
+    }
+
     private function classifyLayer(string $absolutePath): string
     {
         $norm = str_replace('\\', '/', $absolutePath);
@@ -738,6 +845,25 @@ final class Tool
     {
         $names = [];
 
+        // Modern Contao 5 templates are identified by group + name
+        // ("frontend_module/navigation"), and the ONLY authority on that
+        // identifier is Contao's own Twig loader: whether a bundle keeps them
+        // in contao/templates/ or contao/templates/twig/ depends on a
+        // `.twig-root` marker, so deriving the identifier from the file path
+        // would be guesswork. Scanning by filename alone loses the group
+        // entirely and reports "navigation" for both a frontend module and a
+        // content element.
+        try {
+            foreach (array_keys($this->contaoLoader->getInheritanceChains()) as $identifier) {
+                $names[] = (string) $identifier;
+            }
+        } catch (\Throwable) {
+            // A broken chain must not empty the list; the file scan below still
+            // finds the legacy names.
+        }
+
+        // Legacy .html5 templates are not part of the Twig chain, so they are
+        // found the only way they can be — on disk, by filename.
         foreach ($this->allTemplateDirectories() as $dir) {
             if (!is_dir($dir)) {
                 continue;
@@ -748,11 +874,34 @@ final class Tool
                 ->name(['*.html.twig', '*.html5']);
 
             foreach ($finder as $file) {
-                $names[] = self::stripExtension($file->getFilename());
+                $name = self::stripExtension($file->getFilename());
+                // A modern template already came from the loader with its
+                // group; adding the bare filename here would list it twice
+                // under two different identifiers.
+                if (\in_array($name, $names, true) || $this->isKnownWithGroup($names, $name)) {
+                    continue;
+                }
+                $names[] = $name;
             }
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * @param list<string> $names
+     */
+    private function isKnownWithGroup(array $names, string $bareName): bool
+    {
+        $suffix = '/'.$bareName;
+
+        foreach ($names as $known) {
+            if (str_ends_with($known, $suffix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
