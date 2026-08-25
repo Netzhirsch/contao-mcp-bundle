@@ -74,6 +74,9 @@ final class Tool
 
             Returns {url, absolute, page_id, language, host}. Errors if the page is invisible,
             unpublished, or has no resolvable URL (e.g. error pages, sections).
+
+            This is also the tool to reach for before a VISUAL check: the server renders no
+            pixels, so hand this URL to a browser tool on the client side.
         DESC,
     )]
     public function pageUrl(int $page_id, bool $absolute = true): array
@@ -125,6 +128,13 @@ final class Tool
             By default returns the FULL HTML body (capped at 64 KB). Pass `excerpt_only=true`
             to receive a structured summary instead: `{title, h1, meta_description, body_text}`
             — useful for content checks without dragging full markup into the LLM context.
+
+            Markup only, NOT a rendering. Whether a headline is present is answerable here;
+            whether it is centred, whether the mobile menu opens, whether a column collapsed
+            is not — that needs a browser, and this server has none. For visual checks take
+            page_url and open it with a browser tool on the client side. What CAN be checked
+            here without pixels is which markup survives Contao's output filter — see
+            html_filter_preview.
 
             Note: the request goes to the page's PUBLIC url (the root page's dns/domain), not
             over loopback. Member-area pages are fetched unauthenticated — the preview shows

@@ -212,6 +212,19 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Inkonsistenz erzeugt hat, war die Über-Ausgabe der Paletten oben: Die
   Offcanvas-*Inhalts*felder wurden fälschlich angeboten, der *Schalter* dagegen
   korrekt abgelehnt.
+- **Kein `page_screenshot` und kein `page_computed_style`** (AP4) — bewusste
+  Entscheidung, nicht Vergessenheit. Beides braucht eine Browser-Engine auf dem
+  Host: Screenshots offensichtlich, berechnete Stile genauso, weil sie Kaskade
+  und Layout voraussetzen. Auf dem Shared Hosting, auf dem die Kundeninstanzen
+  laufen, lässt sich keine Chrome-Binary installieren — das Tool wäre also
+  ausgerechnet dort nicht verfügbar, wo der Bedarf entstanden ist. Ein externer
+  Screenshot-Dienst schiede Kundenseiten an Dritte aus und kostet laufend.
+
+  Der Weg ist stattdessen die **Browser-Anbindung auf der Client-Seite**:
+  `page_url` liefert die Adresse, der Browser des Clients macht das Bild.
+  `page_preview` und `page_url` sagen das in ihrer Beschreibung jetzt auch, damit
+  ein Modell nicht auf die Idee kommt, HTML sei eine Sichtprüfung.
+
 - Smoke-Test: 383 Asserts (vorher 339). PHPUnit: 310 Tests.
 
 - Übersetzt wird **an Ort und Stelle**. Für einen zweiten Sprachbaum erst
