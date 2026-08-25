@@ -304,11 +304,23 @@ composer update netzhirsch/contao-mcp-bundle
 `Server\ContaoDispatcher`, a subclass. After a `php-mcp/server` major bump,
 check there that `handleToolList()` and `handleToolCall()` still line up.
 
-### Instances tracking `dev-master`
+### When an update aborts with "no merge base"
 
-For a branch rather than a tag, Composer installs **from source** by default, so
-`vendor/netzhirsch/contao-mcp-bundle/` is a real git checkout. Before every
-update Composer inspects it for local changes with
+This hits any instance where the bundle sits in vendor as a **git checkout** (a
+"source install"). Two things lead there, and it is BOTH of them, not just the
+first:
+
+1. The constraint is a branch (`dev-master`) — Composer installs branches from
+   source by default.
+2. The root `composer.json` still carries a `repositories` entry of type `vcs`
+   pointing at the GitHub repository. Without a GitHub token that provides NO
+   dist archive, so Composer installs even a TAG from source.
+
+The log tells you which you have: an archive reads `Downloading
+netzhirsch/contao-mcp-bundle`, a source install reads `Syncing
+netzhirsch/contao-mcp-bundle … into cache`.
+
+Before every update Composer inspects the checkout for local changes with
 `git diff --name-status origin/master...master`. That three-dot form needs a
 common ancestor, and once the Composer cache has been rebuilt in between, the
 vendor clone no longer shares one with its `origin`:
@@ -357,8 +369,20 @@ composer config preferred-install.netzhirsch/contao-mcp-bundle dist
 composer update netzhirsch/contao-mcp-bundle
 ```
 
-Instances tracking a tag (`^1.7`) never hit this; Composer installs those from
-the archive anyway.
+**Remove the actual cause:** the bundle is on
+[Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle), which
+serves a zip for every tag. A `repositories` entry of type `vcs` pointing at
+GitHub is therefore redundant — and as long as it is there it wins over
+Packagist and forces the git checkout. Drop it from the root `composer.json`:
+
+```jsonc
+"repositories": [
+    { "type": "vcs", "url": "git@github.com:Netzhirsch/contao-mcp-bundle.git" }  // ← remove
+]
+```
+
+Then `composer update netzhirsch/contao-mcp-bundle`. A tag now arrives as an
+archive and `GitDownloader` is out of the picture entirely.
 
 | Command | Purpose | Suggested cadence |
 |---|---|---|

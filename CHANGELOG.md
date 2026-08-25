@@ -292,8 +292,15 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Vorfahren mehr und Composer bricht ab. Die Meldung erscheint unter dem Paket,
   das gerade an der Reihe war (beobachtet: `php-mcp/server`) — der Branch im
   Kommando verrät den tatsächlichen: `php-mcp/server` liegt auf `main`, `master`
-  ist dieses Bundle. Reparatur und dauerhafte Umgehung stehen jetzt im README
-  unter „Instanzen, die `dev-master` verfolgen".
+  ist dieses Bundle.
+
+  **Nachtrag:** Ein Tag genügt als Gegenmittel **nicht**. Trägt die
+  Root-`composer.json` noch einen `repositories`-Eintrag vom Typ `vcs` auf
+  GitHub, liefert der ohne Token kein Dist — dann installiert Composer auch
+  `v1.8.0` aus der Quelle und läuft in denselben Fehler. Ursache ist der
+  Source-Install, nicht der Branch. Beseitigt wird sie, indem der
+  `repositories`-Eintrag verschwindet: Packagist liefert zu jedem Tag ein Zip.
+  Details im README unter „Wenn ein Update mit ‚no merge base' abbricht".
 
 - **AP1 und AP2 waren keine Bundle-Fehler** — beide auf `lau.netzhirsch.de`
   gegengeprüft. Die sechs `netzhirsch_nav_*`-Felder gehören zum Modultyp

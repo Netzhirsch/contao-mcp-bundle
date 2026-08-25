@@ -482,13 +482,23 @@ Dispatcher braucht (Lazy-Mode-Filter, Post-Call-Cleanup), liegt in
 `Server\ContaoDispatcher` als Subklasse. Bei einem `php-mcp/server`-Major-Bump
 dort prüfen, ob `handleToolList()`/`handleToolCall()` noch passen.
 
-### Instanzen, die `dev-master` verfolgen
+### Wenn ein Update mit „no merge base" abbricht
 
-Für einen Branch statt eines Tags installiert Composer standardmäßig **aus der
-Quelle**, legt also einen echten Git-Checkout unter
-`vendor/netzhirsch/contao-mcp-bundle/` an. Vor jedem Update prüft Composer diesen
-Checkout mit `git diff --name-status origin/master...master` auf lokale
-Änderungen. Diese Drei-Punkt-Form braucht einen gemeinsamen Vorfahren — und wenn
+Betrifft jede Instanz, auf der das Bundle **als Git-Checkout** im Vendor liegt
+(„Source-Install"). Zwei Wege führen dorthin, und **beide, nicht nur der erste**:
+
+1. Die Versionsangabe ist ein Branch (`dev-master`) — für Branches installiert
+   Composer standardmäßig aus der Quelle.
+2. Die Root-`composer.json` enthält noch einen `repositories`-Eintrag vom Typ
+   `vcs` auf das GitHub-Repository. Ohne GitHub-Token liefert der **kein**
+   Dist-Archiv, also installiert Composer auch einen **Tag** aus der Quelle.
+
+Ob es einen trifft, steht im Log: Bei einem Archiv steht dort `Downloading
+netzhirsch/contao-mcp-bundle`, bei einem Source-Install `Syncing
+netzhirsch/contao-mcp-bundle … into cache`.
+
+Vor jedem Update prüft Composer den Checkout mit
+`git diff --name-status origin/master...master` auf lokale Änderungen. Diese Drei-Punkt-Form braucht einen gemeinsamen Vorfahren — und wenn
 der Composer-Cache zwischendurch neu aufgebaut wurde, hat der Vendor-Klon
 gegenüber seinem `origin` keinen mehr:
 
@@ -537,8 +547,21 @@ composer config preferred-install.netzhirsch/contao-mcp-bundle dist
 composer update netzhirsch/contao-mcp-bundle
 ```
 
-Auf Instanzen, die einen Tag verfolgen (`^1.7`), tritt das nicht auf — dort
-installiert Composer ohnehin aus dem Archiv.
+**Die eigentliche Ursache beseitigen:** Das Bundle liegt auf
+[Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle), und
+Packagist liefert zu jedem Tag ein Zip. Ein `repositories`-Eintrag vom Typ `vcs`
+auf GitHub ist damit überflüssig — und solange er dort steht, gewinnt er gegen
+Packagist und erzwingt den Git-Checkout. Also aus der Root-`composer.json`
+entfernen:
+
+```jsonc
+"repositories": [
+    { "type": "vcs", "url": "git@github.com:Netzhirsch/contao-mcp-bundle.git" }  // ← weg
+]
+```
+
+Danach `composer update netzhirsch/contao-mcp-bundle`. Ein Tag kommt dann als
+Archiv, und der `GitDownloader` ist gar nicht mehr beteiligt.
 
 ### Console-Kommandos
 
