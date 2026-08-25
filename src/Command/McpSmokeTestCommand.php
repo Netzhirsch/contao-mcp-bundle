@@ -24,6 +24,7 @@ use Netzhirsch\ContaoMcpBundle\Tool\Extension\Newsletter\Tool as NewsletterTool;
 use Netzhirsch\ContaoMcpBundle\Tool\File\Tool as FileTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Form\Tool as FormTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FormField\Tool as FormFieldTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Html\Tool as HtmlTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Layout\Tool as LayoutTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Member\Tool as MemberTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Module\Tool as ModuleTool;
@@ -103,6 +104,7 @@ final class McpSmokeTestCommand extends Command
         private readonly FaqTool $faqTool,
         private readonly DeepLTool $deepLTool,
         private readonly ModuleTool $moduleTool,
+        private readonly HtmlTool $htmlTool,
         private readonly Connection $connection,
         private readonly RequestStack $requestStack,
         private readonly KeyManager $keyManager,
@@ -2558,6 +2560,57 @@ final class McpSmokeTestCommand extends Command
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
 
 
+
+        // ═══════════════════ HTML-Ausgabefilter ═══════════════════
+        //
+        // What is stored is not what is rendered. MCP writes go through the
+        // Model, so the database keeps the markup byte for byte and a read-back
+        // looks perfect — while sanitize_html('contao') strips it at render
+        // time. Two review rounds in AL-07 went on exactly this, both times
+        // with a clean read-back in hand.
+        $output->writeln("
+<comment>HTML-Ausgabefilter</comment>");
+
+        $filterInfo = $this->htmlTool->filterInfo();
+        $expect('html_filter_info reports tags and per-tag attributes', $filterInfo,
+            static fn ($r) => \count($r['allowed_tags'] ?? []) > 20
+                && \in_array('a', $r['allowed_tags'] ?? [], true)
+                && \in_array('href', $r['allowed_attributes']['a'] ?? [], true));
+
+        // The exact case that killed the mobile burger: both tags are allowed,
+        // both attributes are not, and the read-back showed neither.
+        $burger = $this->htmlTool->filterPreview(
+            '<input type="checkbox" id="nav-toggle"><label for="nav-toggle">Menu</label>',
+        );
+        $expect('a dropped attribute is named with its tag', $burger,
+            static fn ($r) => ($r['changed'] ?? false) === true
+                && \in_array(['tag' => 'input', 'attribute' => 'type'], $r['removed_attributes'] ?? [], true)
+                && \in_array(['tag' => 'label', 'attribute' => 'for'], $r['removed_attributes'] ?? [], true));
+        $expect('and the output shows what actually renders', $burger,
+            static fn ($r) => !str_contains((string) $r['output'], 'type=')
+                && !str_contains((string) $r['output'], 'for=')
+                && str_contains((string) $r['output'], 'id='));
+
+        $expect('a dropped tag is reported as a tag, not as its attributes',
+            $this->htmlTool->filterPreview('<svg viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>'),
+            static fn ($r) => ($r['removed_tags'] ?? []) === ['svg', 'path']
+                && ($r['removed_attributes'] ?? []) === []);
+
+        // Markup that survives must report no findings at all, or the tool is
+        // just noise the caller learns to ignore.
+        $expect('untouched markup reports nothing removed',
+            $this->htmlTool->filterPreview('<p class="lead">A <strong>sentence</strong>.</p>'),
+            static fn ($r) => ($r['changed'] ?? true) === false
+                && ($r['removed_tags'] ?? ['x']) === []
+                && ($r['removed_attributes'] ?? ['x']) === []);
+
+        // Prefix rules: data-* and aria-* pass, an event handler does not.
+        $expect('wildcard attribute rules are honoured, event handlers are not',
+            $this->htmlTool->filterPreview('<div data-controller="x" aria-label="y" onclick="evil()">z</div>'),
+            static fn ($r) => ($r['removed_attributes'] ?? []) === [['tag' => 'div', 'attribute' => 'onclick']]);
+
+        $expect('an empty preview is refused', $this->htmlTool->filterPreview(''),
+            static fn ($r) => ($r['error'] ?? '') === 'no_text');
 
         // ═══════════════════ Paletten pro Typ ═══════════════════
         //

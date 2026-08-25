@@ -134,6 +134,12 @@ final class ToolPermissionMap
         'deepl_translate_records' => ['kind' => 'dc_arg', 'op' => 'update'],
         'deepl_translate_page_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'update'],
 
+        // Read-only introspection of the site-wide output filter. No record is
+        // touched and the answer is the same for every caller, so there is no
+        // table to gate on.
+        'html_filter_info' => ['kind' => 'none'],
+        'html_filter_preview' => ['kind' => 'none'],
+
         // External-id + move + language-link operate on a table given in args.
         'external_id_set' => ['kind' => 'dc_arg', 'op' => 'update'],
         'external_id_unset' => ['kind' => 'dc_arg', 'op' => 'update'],

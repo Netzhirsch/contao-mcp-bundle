@@ -282,6 +282,7 @@ final class ToolCatalog
             'external' => 'external_id',
             'dbafs' => 'maintenance',
             'insert' => 'system',
+            'html_filter' => 'system',
             'server' => 'system',
             'language' => 'multilingual',
         ];

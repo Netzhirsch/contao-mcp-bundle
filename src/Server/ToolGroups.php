@@ -42,6 +42,7 @@ final class ToolGroups
             'template_overrides_',
             'pages_tree',
             'folder_',
+            'html_filter_',
         ];
 
         foreach ($prefixes as $prefix) {
