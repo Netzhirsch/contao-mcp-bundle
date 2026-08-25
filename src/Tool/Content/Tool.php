@@ -34,6 +34,12 @@ use Psr\Log\LoggerInterface;
  */
 final class Tool
 {
+    /**
+     * Elements per content_create_tree call. A page-sized block is a dozen or
+     * two; beyond this a failure stops being attributable to a node.
+     */
+    private const MAX_TREE_ELEMENTS = 200;
+
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly LoggerInterface $logger,
@@ -365,6 +371,255 @@ final class Tool
     }
 
     // ──────────────────── content_palette_get ───────────────────────
+
+    // ────────────────────── content_create_tree ──────────────────────
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'content_create_tree',
+        description: <<<'DESC'
+            Creates a whole block of content elements in ONE call. Pass `ptable` + `pid`
+            (the article, news entry, event or FAQ the elements belong to) and `elements`
+            as a LIST of nodes.
+
+            A node is {type, fields?, children?}. `fields` is the same object
+            content_create takes, validated against content_palette_get(type). `children`
+            nests elements INTO the node — which only renders for container types
+            (accordion, element_group, swiper); on any other type the children are created
+            but never shown.
+
+            Example:
+              {"ptable": "tl_article", "pid": 12, "elements": [
+                {"type": "headline", "fields": {"headline": {"value": "Leistungen", "unit": "h1"}}},
+                {"type": "text", "fields": {"text": "<p>Was wir tun.</p>"}},
+                {"type": "element_group", "children": [
+                  {"type": "text", "fields": {"text": "<p>Spalte eins</p>"}},
+                  {"type": "text", "fields": {"text": "<p>Spalte zwei</p>"}}
+                ]}
+              ]}
+
+            `sorting` is filled in automatically per level in Contao's 128 increments; pass
+            it in a node only to override.
+
+            Why: every separate tool call costs a full framework boot on top of the actual
+            work, plus a round-trip. A twelve-block page is one call instead of twelve.
+
+            Everything checkable is checked BEFORE the first write — unknown types, unknown
+            field keys per type, malformed nodes — and reported for the whole tree with
+            nothing created. Runtime failures can still happen mid-run: that node is
+            reported with its error and its children are skipped, siblings continue. There
+            is no transaction and no bulk undo; every element carries its own version entry,
+            so a partial result stays as it is and the per-node ids let a retry pick up
+            instead of duplicating.
+
+            Use `dry_run=true` for the plan (paths, types, computed sorting) without writing.
+        DESC,
+    )]
+    public function createTree(
+        string $ptable,
+        int $pid,
+        #[Schema(type: 'array')] mixed $elements,
+        bool $dry_run = false,
+    ): array {
+        $this->framework->initialize();
+
+        if (!\is_array($elements) || !array_is_list($elements) || $elements === []) {
+            return ['error' => 'invalid_input', 'message' => '`elements` must be a non-empty JSON list of node objects.'];
+        }
+
+        $problems = [];
+        $count = 0;
+        $this->validateElementNodes($elements, '', $problems, $count);
+
+        if ($count > self::MAX_TREE_ELEMENTS) {
+            return [
+                'error' => 'too_many_elements',
+                'message' => sprintf('%d elements exceed the limit of %d per call — split the block.', $count, self::MAX_TREE_ELEMENTS),
+            ];
+        }
+
+        if ($problems !== []) {
+            // Reported before the first write: a typo in one node must not leave
+            // half a page behind.
+            return [
+                'error' => 'invalid_input',
+                'message' => 'The tree was rejected before anything was created.',
+                'problems' => $problems,
+            ];
+        }
+
+        if ($dry_run) {
+            $plan = [];
+            self::planElementNodes($elements, '', $plan);
+
+            return ['dry_run' => true, 'elements' => $count, 'plan' => $plan];
+        }
+
+        $result = ['created' => 0, 'failed' => 0, 'skipped' => 0, 'elements' => []];
+        $this->createElementNodes($elements, $ptable, $pid, '', $result);
+
+        return $result;
+    }
+
+    /**
+     * @param array<int, mixed>          $nodes
+     * @param list<array<string, mixed>> $problems
+     */
+    private function validateElementNodes(array $nodes, string $path, array &$problems, int &$count): void
+    {
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            ++$count;
+
+            if (!\is_array($node)) {
+                $problems[] = ['path' => $here, 'error' => 'node must be an object'];
+                continue;
+            }
+
+            foreach (array_keys($node) as $key) {
+                if (!\in_array($key, ['type', 'fields', 'sorting', 'children'], true)) {
+                    $problems[] = ['path' => $here, 'error' => sprintf('unknown key "%s" — a node is {type, fields?, sorting?, children?}', $key)];
+                }
+            }
+
+            $type = $node['type'] ?? null;
+            if (!\is_string($type) || trim($type) === '') {
+                $problems[] = ['path' => $here, 'error' => 'type is required and must be a non-empty string'];
+                $type = null;
+            } elseif (!\in_array($type, $this->mapper->allKnownTypes(), true)) {
+                $problems[] = ['path' => $here, 'error' => sprintf('unknown content type "%s" — see content_types_list', $type)];
+                $type = null;
+            }
+
+            // Field keys are checked per type up front. They would be rejected
+            // at write time anyway, but by then the earlier siblings exist and
+            // the caller has half a page to clean up.
+            $fields = $node['fields'] ?? null;
+            if ($fields !== null && (!\is_array($fields) || array_is_list($fields))) {
+                $problems[] = ['path' => $here, 'error' => '`fields` must be a JSON object'];
+            } elseif (\is_array($fields) && $type !== null) {
+                $allowed = $this->mapper->allowedFieldsFor($type);
+                foreach (array_keys($fields) as $field) {
+                    if (!\in_array($field, $allowed, true)) {
+                        $problems[] = [
+                            'path' => $here,
+                            'error' => sprintf('"%s" is not a field of content type "%s" — see content_palette_get("%s")', $field, $type, $type),
+                        ];
+                    }
+                }
+            }
+
+            $children = $node['children'] ?? [];
+            if ($children !== [] && (!\is_array($children) || !array_is_list($children))) {
+                $problems[] = ['path' => $here, 'error' => 'children must be a list of node objects'];
+                continue;
+            }
+            if (\is_array($children) && $children !== []) {
+                $this->validateElementNodes($children, $here, $problems, $count);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed>          $nodes
+     * @param list<array<string, mixed>> $plan
+     */
+    private static function planElementNodes(array $nodes, string $path, array &$plan): void
+    {
+        $sorting = 128;
+
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            $plan[] = [
+                'path' => $here,
+                'type' => (string) $node['type'],
+                'sorting' => $node['sorting'] ?? $sorting,
+                'fields' => array_keys(\is_array($node['fields'] ?? null) ? $node['fields'] : []),
+            ];
+            $sorting += 128;
+
+            if (!empty($node['children'])) {
+                self::planElementNodes($node['children'], $here, $plan);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed>    $nodes
+     * @param array<string, mixed> $result
+     */
+    private function createElementNodes(array $nodes, string $ptable, int $pid, string $path, array &$result): void
+    {
+        $sorting = 128;
+
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            $children = $node['children'] ?? [];
+            $type = (string) $node['type'];
+            $ownSorting = (int) ($node['sorting'] ?? $sorting);
+            $sorting += 128;
+
+            try {
+                $created = $this->create($ptable, $pid, $type, $ownSorting, $node['fields'] ?? null);
+            } catch (\Throwable $e) {
+                $created = ['error' => 'exception', 'message' => $e->getMessage()];
+            }
+
+            if (!isset($created['id'])) {
+                ++$result['failed'];
+                $skipped = self::countElementNodes($children);
+                $result['skipped'] += $skipped;
+                $result['elements'][] = [
+                    'path' => $here,
+                    'type' => $type,
+                    'error' => $created['error'] ?? 'unknown',
+                    'message' => $created['message'] ?? '',
+                    // Children are skipped rather than reparented: an element
+                    // whose container does not exist would land loose in the
+                    // article, which looks like it worked.
+                    'skipped_children' => $skipped,
+                ];
+                continue;
+            }
+
+            ++$result['created'];
+            $id = (int) $created['id'];
+            $result['elements'][] = [
+                'path' => $here,
+                'id' => $id,
+                'type' => $type,
+                'ptable' => $ptable,
+                'pid' => $pid,
+                'sorting' => $ownSorting,
+            ];
+
+            if (\is_array($children) && $children !== []) {
+                $this->createElementNodes($children, 'tl_content', $id, $here, $result);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed>|mixed $nodes
+     */
+    private static function countElementNodes(mixed $nodes): int
+    {
+        if (!\is_array($nodes)) {
+            return 0;
+        }
+
+        $n = 0;
+        foreach ($nodes as $node) {
+            ++$n;
+            if (\is_array($node) && !empty($node['children'])) {
+                $n += self::countElementNodes($node['children']);
+            }
+        }
+
+        return $n;
+    }
 
     /**
      * @return array<string, mixed>

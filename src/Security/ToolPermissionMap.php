@@ -159,6 +159,8 @@ final class ToolPermissionMap
         // have read it as a lookup and let a read-only user build a page tree.
         'pages_create_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'create'],
         'pages_delete_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'delete'],
+        // Same shape for content elements — explicit for the same reason.
+        'content_create_tree' => ['kind' => 'dc', 'table' => 'tl_content', 'op' => 'create'],
         'page_translations_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'page_url' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],
         'page_preview' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'read'],

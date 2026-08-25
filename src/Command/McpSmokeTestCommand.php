@@ -2594,6 +2594,88 @@ final class McpSmokeTestCommand extends Command
 
 
 
+        // ═══════════════════ Content-Baum (Batch) ═══════════════════
+        //
+        // pages_create_tree's counterpart for the inside of a page. Twelve
+        // blocks on a start page used to be twelve calls, each paying a full
+        // framework boot — and a ticket that reads as a list of steps rather
+        // than as the thing being built.
+        $output->writeln("\n<comment>Content-Baum (Batch)</comment>");
+
+        $ctreePageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 1");
+        $ctreeArticle = $ctreePageId > 0
+            ? $this->articleTool->create(page_id: $ctreePageId, title: $stamp.'_ctree', sorting: 128, inColumn: 'main')
+            : ['id' => 0];
+        $ctreeArticleId = (int) ($ctreeArticle['id'] ?? 0);
+
+        if ($ctreeArticleId > 0) {
+            $ctreeNodes = [
+                ['type' => 'headline', 'fields' => ['headline' => ['value' => 'Leistungen', 'unit' => 'h1']]],
+                ['type' => 'text', 'fields' => ['text' => '<p>Was wir tun.</p>']],
+                ['type' => 'element_group', 'children' => [
+                    ['type' => 'text', 'fields' => ['text' => '<p>Spalte eins</p>']],
+                    ['type' => 'text', 'fields' => ['text' => '<p>Spalte zwei</p>']],
+                ]],
+            ];
+
+            // Everything checkable is checked before the first write.
+            $expect('an unknown field is caught before anything is created',
+                $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                    ['type' => 'text', 'fields' => ['text' => '<p>ok</p>']],
+                    ['type' => 'text', 'fields' => ['no_such_field' => 'x']],
+                ]),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && \count($r['problems'] ?? []) === 1
+                    && ($r['problems'][0]['path'] ?? '') === '2');
+            $expect('an unknown type is caught the same way',
+                $this->contentTool->createTree('tl_article', $ctreeArticleId, [['type' => 'no_such_type']]),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['problems'][0]['error'] ?? ''), 'unknown content type'));
+            $expect('and the rejected tree created nothing',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]),
+                static fn (int $n) => $n === 0);
+
+            $ctreePlan = $this->contentTool->createTree('tl_article', $ctreeArticleId, $ctreeNodes, dry_run: true);
+            $expect('a dry run counts the nested nodes and assigns sorting', $ctreePlan,
+                static fn ($r) => ($r['dry_run'] ?? false) === true
+                    && ($r['elements'] ?? 0) === 5
+                    && ($r['plan'][0]['sorting'] ?? 0) === 128
+                    && ($r['plan'][1]['sorting'] ?? 0) === 256);
+            $expect('the dry run wrote nothing either',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]),
+                static fn (int $n) => $n === 0);
+
+            $ctreeResult = $this->contentTool->createTree('tl_article', $ctreeArticleId, $ctreeNodes);
+            $expect('the real run creates every node', $ctreeResult,
+                static fn ($r) => ($r['created'] ?? 0) === 5 && ($r['failed'] ?? 1) === 0);
+
+            // Nesting is structural: the children hang off the container, not
+            // off the article. Getting this wrong looks like success — the
+            // elements exist, they just render in the wrong place.
+            $groupId = 0;
+            foreach ($ctreeResult['elements'] ?? [] as $element) {
+                if (($element['type'] ?? '') === 'element_group') {
+                    $groupId = (int) $element['id'];
+                }
+            }
+            $expect('the children hang off the container, not off the article',
+                [$groupId, (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $groupId])],
+                static fn (array $r) => $r[0] > 0 && $r[1] === 2);
+            $expect('and the article holds exactly the three top-level elements',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]),
+                static fn (int $n) => $n === 3);
+
+            $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $groupId]);
+            $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]);
+            $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$ctreeArticleId]);
+        } else {
+            $output->writeln('  <comment>~ Content-Baum-Test übersprungen — keine Seite zum Anlegen eines Artikels</comment>');
+        }
+
         // ═══════════════════ Template-Auffindbarkeit ═══════════════════
         //
         // Modern Contao 5 templates are identified by group + name
