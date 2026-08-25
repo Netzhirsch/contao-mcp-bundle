@@ -7,6 +7,56 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 ## [Unreleased]
 
 ### Added
+- **`entity_field_patch` — eine Stelle ändern statt das Feld neu schreiben**
+  (AP3 aus AL-07). `entity_field_patch(table, id, field, old, new)` ersetzt eine
+  Passage in einer Textspalte. Die `*_update`-Tools nehmen ganze Feldwerte, was
+  bei einer Überschrift richtig und bei 9 KB SCSS falsch ist: Für drei geänderte
+  Zahlen muss jedes andere Byte aus dem Gedächtnis reproduziert werden, und jede
+  Reproduktion kann etwas verlieren, das nie Teil der Änderung war. In AL-07
+  wurde ein Theme-Feld dafür fünfmal komplett neu geschrieben.
+
+  Die Sicherheit steckt in der Trefferzahl: `old` muss **genau**
+  `expect_occurrences` mal vorkommen (Default 1), jede andere Zahl bricht ab,
+  **ohne** den Datensatz anzufassen. Ein Anker, der sich als mehrdeutig
+  herausstellt, scheitert damit laut statt an der falschen Stelle zu patchen.
+  `dry_run` zeigt jeden Treffer im Kontext.
+
+  Geschrieben wird über das `*_update`-Tool der Tabelle — Feldvalidierung,
+  Versions-Snapshot, `tl_log`, `changed_fields`. Ein Patch ist damit genauso
+  rückholbar wie jede andere Änderung, was hier mehr zählt als sonst.
+
+- **`content_create_tree` — eine ganze Inhaltsstrecke in einem Aufruf**
+  (AP7). Gegenstück zu `pages_create_tree` für das Innere einer Seite: Zwölf
+  Blöcke auf einer Startseite waren zwölf Aufrufe, jeder mit vollem
+  Framework-Boot — und ein Ticket, das sich wie eine Schrittliste las statt wie
+  die Sache, die gebaut wird. Ein Knoten ist `{type, fields?, children?}`;
+  `children` verschachtelt **in** den Knoten, was nur Container-Typen
+  (accordion, element_group, swiper) rendern.
+
+  Alles Prüfbare wird **vor** dem ersten Schreibvorgang geprüft: unbekannte
+  Typen, kaputte Knoten und unbekannte Feldschlüssel pro Typ. Laufzeitfehler
+  überspringen weiterhin nur den Teilbaum, Geschwister laufen weiter.
+
+- **`html_filter_info` + `html_filter_preview` — was der Ausgabefilter übrig
+  lässt** (AP5). Gespeichert ist nicht gerendert: MCP schreibt über das Model,
+  die Datenbank behält das Markup Byte für Byte, und der Read-back sieht
+  makellos aus — gefiltert wird erst im Template über
+  `sanitize_html('contao')` → `Input::stripTags()` mit `allowedTags` /
+  `allowedAttributes`. Nichts in irgendeiner Antwort des Servers machte das
+  sichtbar.
+
+  `html_filter_info` nennt die erlaubten Tags und die Attribute pro Tag
+  (`*` = für alle). `html_filter_preview(text)` schickt Markup durch den echten
+  Filter und liefert die Ausgabe **plus die Regel**, die sie verändert hat:
+  `removed_tags` und `removed_attributes` als `{tag, attribute}`-Paare.
+  Abgeleitet aus der Konfiguration, nicht aus einem Diff — ein Diff sagt, *dass*
+  sich etwas geändert hat, das hier sagt, *welche Regel* es war.
+
+  Gegen die echte Contao-Konfiguration mit den Fällen aus AL-07 geprüft:
+  `<input type>` und `<label for>` fallen weg, obwohl beide Tags erlaubt sind;
+  `svg`/`path` fallen als Tags weg; `<a target rel>` bleibt unverändert;
+  `onclick` fliegt raus. Jeder dieser Fälle war eine Korrekturrunde.
+
 - **Übersetzen über DeepL** — vier Tools auf Basis von
   [`numero2/contao-deepl`](https://github.com/numero2/contao-deepl):
   `deepl_status`, `deepl_translate`, `deepl_translate_records` und
@@ -74,6 +124,75 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   pro Aufruf), nicht Feld für Feld.
 
 ### Fixed
+- **Subpaletten gehören zu ihrem Typ** (der eigentliche Befund hinter AP1).
+  Die drei palettengesteuerten Tabellen (`tl_module`, `tl_content`,
+  `tl_form_field`) haben **jeden** Eintrag aus `$dca['subpalettes']` in **jeden**
+  Typ gemischt. Contao hält pro DCA eine breite Tabelle, also wurden damit
+  Spalten angeboten, die das Backend für diesen Typ nie zeigt: Ein
+  `netzhirsch_megamenu`-Modul führte die sieben Offcanvas-Felder von
+  `netzhirsch_navigation` auf, dazu `reg_homeDir`, `reg_jumpTo` und `reg_text`
+  vom Login-Modul. Wer eines davon schrieb, bekam einen Erfolg zurück — der Wert
+  landete in der Zeile, und nichts rendert ihn.
+
+  Eine Subpalette gehört jetzt zu einem Typ, wenn ihr Selektor in dessen Palette
+  steht, in beiden Formen, die Contao kennt: `subpalettes[$selector]` für eine
+  Checkbox, `subpalettes[$selector.'_'.$wert]` für ein Select. Welche Variante
+  gerade **offen** ist, hängt vom gespeicherten Wert ab — Backend-UI-Zustand, der
+  den Schreibpfad nicht einschränken darf, sonst ließen sich Schalter und Felder
+  nie in einem Aufruf setzen. Ausnahme ist der Typ-Selektor selbst.
+
+  Subpaletten **verschachteln** außerdem: Ein Text-Element erreicht `alt` erst
+  über `addImage` → `overwriteMeta` → `alt`. Die Auflösung expandiert deshalb
+  weiter, solange neu erreichte Felder selbst Selektoren sind (mit
+  Zyklusschutz).
+
+  `*_palette_get` liefert zusätzlich `subpalettes` als Selektor → Kindfelder.
+  Die Frage „welcher Schalter öffnet dieses Feld" ist damit ein Aufruf statt
+  eines Experiments.
+
+  > **Verhaltensänderung:** Ein Feld, das bisher nur durchkam, weil es zur
+  > Subpalette eines *anderen* Typs gehörte, wird jetzt abgelehnt — mit Nennung
+  > des Typs. Genau das ist der Zweck: Diese Schreibvorgänge hatten nie eine
+  > Wirkung.
+
+- **Sections ohne Template erzeugen keine 500 mehr** (AP8). Eine Layout-Section
+  mit `template: ""` — oder ohne den Schlüssel, den der Mapper zu `""` machte —
+  ließ **jede Seite** mit einem Modul in dieser Section HTTP 500 antworten.
+  Contaos `FrontendTemplateTrait` fällt nur dann auf `block_section` zurück, wenn
+  der Schlüssel **fehlt** (`$template === null` bzw. `!isset()`); ein leerer
+  String ist keins von beidem und landet in `getTemplate('')`. Der
+  sectionWizard im Backend schreibt immer ein gewähltes Template, diese Form
+  konnte also nur über MCP entstehen — und blieb unsichtbar, bis die Section
+  gefüllt wurde. Ein leeres Template hat keine gültige Bedeutung und wird beim
+  Schreiben auf `block_section` normalisiert.
+
+- **Moderne Templates sind wieder auffindbar** (AP6). `templates_list` hat nur
+  die vierzehn Legacy-Präfixe (`mod_`, `ce_`, …) ausgewertet, wodurch **jedes**
+  moderne Contao-5-Template — die `frontend_module/…`- und
+  `content_element/…`-Konvention — in **keiner** Gruppe auftauchte. Auf einer
+  Standardinstallation sind das 55 Templates in einer neuen `other`-Gruppe plus
+  161 in modernen Gruppen. AL-07 hat die Struktur eines Fußbereichs deshalb mit
+  fünf Wegwerf-HTML-Modulen und einem Preview ermittelt.
+
+  Die Identifier kommen jetzt aus Contaos eigener Twig-Vererbungskette statt aus
+  Dateinamen: Ob ein Bundle moderne Templates in `contao/templates/` oder
+  `contao/templates/twig/` hält, entscheidet eine `.twig-root`-Markierung — aus
+  dem Pfad abzuleiten wäre geraten, und ein reiner Dateinamen-Scan meldet
+  „navigation" für ein Frontend-Modul und ein Inhaltselement gleichermaßen.
+  Legacy-`.html5`-Templates stehen nicht in dieser Kette und werden weiterhin
+  auf der Platte gefunden.
+
+  Die Gruppierung ist jetzt **vollständig**: Verzeichnis, sonst Präfix, sonst
+  `other`. Jedes Template steht in genau einer Gruppe, `count` ist die Summe —
+  abgesichert im Smoke-Test, weil der alte Fehlermodus stilles Weglassen war.
+
+- **`template_lookup` schlägt vor, statt nur `not_found` zu sagen.** Wer
+  `frontend_module/netzhirsch_pagination` sucht, bekommt jetzt
+  `frontend_module/pagination` als ersten Vorschlag — Vorschläge aus der
+  angefragten Gruppe zuerst. Ein Modul- oder Element-**Typ** heißt nicht
+  zwangsläufig wie sein Template; genau diese Annahme hat AL-07 ausgebremst. Was
+  nichts ähnelt, liefert weiterhin keine Vorschläge.
+
 - Beide READMEs beschrieben noch den **IAT-Button**, den es seit 1.6 nicht mehr
   gibt, und nannten `restricted` ein „Initial-Access-Token-Gate" — der Modus
   meint das Pairing-Fenster, der Token-Pfad ist für Skripte. `PairingWordingTest`
@@ -82,6 +201,19 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   182.
 
 ### Notes
+- **AP1 und AP2 waren keine Bundle-Fehler** — beide auf `lau.netzhirsch.de`
+  gegengeprüft. Die sechs `netzhirsch_nav_*`-Felder gehören zum Modultyp
+  `netzhirsch_navigation`, nicht zu `netzhirsch_megamenu`; auf dem richtigen Typ
+  waren sie die ganze Zeit schreibbar (`module_update` mit
+  `netzhirsch_nav_burger` läuft dort durch). Und `unfilteredHtml` ist kein
+  verstecktes Feld des `html`-Typs, sondern gehört zum eigenen Typ
+  `unfiltered_html` — als Inhaltselement wie als Modul, beide in
+  `content_types_list` bzw. `module_types_list` gelistet. Was den Eindruck einer
+  Inkonsistenz erzeugt hat, war die Über-Ausgabe der Paletten oben: Die
+  Offcanvas-*Inhalts*felder wurden fälschlich angeboten, der *Schalter* dagegen
+  korrekt abgelehnt.
+- Smoke-Test: 383 Asserts (vorher 339). PHPUnit: 310 Tests.
+
 - Übersetzt wird **an Ort und Stelle**. Für einen zweiten Sprachbaum erst
   `entity_duplicate(..., with_children: true)`, dann die Kopie übersetzen.
 - **`alias` ist absichtlich nicht übersetzbar.** DeepL liefert Fließtext, kein
@@ -97,7 +229,6 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Registrierung und Schema und laufen auch ohne das Host-Bundle — dort, wo es
   fehlt, wird stattdessen `extension_not_available` auf allen drei Tools
   nachgewiesen. PHPUnit: 296 Tests, 929 Asserts (vorher 259/682).
-
 
 ## [1.7.0] – 2026-08-20
 

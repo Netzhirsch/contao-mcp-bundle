@@ -18,7 +18,7 @@ no REST endpoints of your own, no middleware and no extra port.
 Instead of building a bespoke API endpoint for every AI task, the AI session gets
 structured access to the whole DCA stack: editors can create content by
 describing it, pipelines can populate pages from third-party systems, developers
-can script structural migrations — all through the same **182 tools**, and all
+can script structural migrations — all through the same **186 tools**, and all
 constrained by exactly the same backend permissions that apply when a person
 clicks through the backend.
 
@@ -28,7 +28,7 @@ URL rewrites, form leads, maintenance and system settings.
 
 ## What you get
 
-- **182 tools** across Contao core entities plus popular extensions.
+- **186 tools** across Contao core entities plus popular extensions.
 - **Lazy-mode discovery**: three meta tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) hide the rest from `tools/list` — worth
   roughly 12 KB of system-prompt overhead per turn in Claude Desktop.
@@ -47,6 +47,18 @@ URL rewrites, form leads, maintenance and system settings.
 - **Site-building helpers**: `entity_move`, `page_cache_invalidate`,
   `system_settings_update`, `insert_tags_list`, `page_preview`, `maintenance_run`,
   `dbafs_sync` (reconcile `tl_files` against the disk).
+- **Build in one call instead of a list of steps**: `pages_create_tree` and
+  `pages_delete_tree` for the page tree, `content_create_tree` for a whole block
+  of content elements including nested containers. Everything checkable is
+  checked before the first write; `dry_run` shows the plan.
+- **`entity_field_patch`** replaces one passage inside a text column instead of
+  resending the whole value. `old` has to occur exactly as often as expected, or
+  the call refuses without touching the record — and the write still goes through
+  the table's own `*_update` tool, with its Versions snapshot.
+- **`html_filter_info` + `html_filter_preview`** show what Contao's output filter
+  will leave of your markup BEFORE it is written. Stored is not rendered: a
+  read-back returns the markup unchanged while `<input type>` and `<label for>`
+  are long gone in the frontend.
 - **External IDs** make repeated imports idempotent — the same source row updates
   the same record instead of creating duplicates.
 - **Optional extension tools** appear automatically once the matching bundle is

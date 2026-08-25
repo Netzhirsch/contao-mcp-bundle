@@ -18,7 +18,7 @@ Statt jeder KI-Aufgabe einen eigenen API-Endpunkt nachzuziehen, bekommt die
 KI-Session strukturierten Zugriff auf den gesamten DCA-Stack: Redakteure können
 per natürlichsprachlichem Auftrag Inhalte anlegen, Pipelines können Seiten
 vollautomatisch aus Drittsystemen befüllen, Entwickler können Strukturmigrationen
-skripten — alles über dieselben 182 Tools, abgesichert mit denselben
+skripten — alles über dieselben 186 Tools, abgesichert mit denselben
 Backend-Benutzerrechten wie beim manuellen Bearbeiten.
 
 **Unterstützte Entitäten:** News, Seiten, Artikel, Kalender, FAQ, Mitglieder,
@@ -28,7 +28,7 @@ System-Einstellungen.
 
 ## Was drin ist
 
-- **182 Tools** über Contao-Kernentitäten + populäre Extensions.
+- **186 Tools** über Contao-Kernentitäten + populäre Extensions.
 - **Lazy-Mode-Discovery**: drei Meta-Tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) verstecken die übrigen vor
   `tools/list` — spart bei Claude Desktop ~12 KB System-Prompt-Overhead pro
@@ -46,6 +46,19 @@ System-Einstellungen.
 - **Site-Building-Helfer**: `entity_move`, `page_cache_invalidate`,
   `system_settings_update`, `insert_tags_list`, `page_preview`,
   `maintenance_run`, `dbafs_sync` (Reconcile `tl_files` ↔ Disk).
+- **Bauen in einem Aufruf statt in einer Schrittliste**: `pages_create_tree` und
+  `pages_delete_tree` für den Seitenbaum, `content_create_tree` für eine ganze
+  Inhaltsstrecke inklusive verschachtelter Container. Alles Prüfbare wird vor
+  dem ersten Schreibvorgang geprüft; `dry_run` zeigt den Plan.
+- **`entity_field_patch`**: eine Passage in einer Textspalte ersetzen, statt das
+  ganze Feld neu zu schreiben. `old` muss genau so oft vorkommen wie erwartet,
+  sonst bricht der Aufruf ab, ohne den Datensatz anzufassen — und der
+  Schreibvorgang läuft trotzdem über das `*_update`-Tool der Tabelle, mit
+  Versions-Snapshot.
+- **`html_filter_info` + `html_filter_preview`**: was der Ausgabefilter von
+  eigenem Markup übrig lässt — **bevor** es geschrieben wird. Gespeichert ist
+  nicht gerendert: Der Read-back liefert das Markup unverändert zurück, während
+  `<input type>` und `<label for>` im Frontend längst entfernt sind.
 - **Optionale Extension-Tools**: erscheinen automatisch, sobald das jeweilige
   Bundle installiert ist (sonst sauberer `extension_not_available`-Fehler):
   Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
