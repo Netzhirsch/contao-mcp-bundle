@@ -6,6 +6,29 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.8.0] – 2026-08-25
+
+> **Eine Verhaltensänderung, die eine Automatisierung merken kann:** Die
+> palettengesteuerten Tabellen `tl_content`, `tl_module` und `tl_form_field`
+> akzeptieren **kein Feld mehr, das zur Subpalette eines anderen Typs gehört**.
+> Bisher wurde jede Subpalette in jeden Typ gemischt — ein
+> `netzhirsch_megamenu`-Modul bot die Offcanvas-Felder von
+> `netzhirsch_navigation` an, ein `html`-Modul die Login-Felder. Wer eines davon
+> schrieb, bekam `success` zurück; der Wert landete in der Zeile, und nichts hat
+> ihn je gerendert. Jetzt kommt stattdessen `invalid_input` mit Nennung des Typs.
+> `*_palette_get` liefert zusätzlich `subpalettes` als Selektor → Kindfelder, um
+> die richtigen Namen zu finden.
+>
+> **Sonst nichts zu tun.** Schemafrei — keine Migration, keine DCA-Änderung. In
+> der CI von `v1.7.0` hochgezogen, zweimal migriert; der zweite Lauf findet
+> nichts Offenes, und die aktualisierte Instanz liefert dieselben Smoke-Asserts
+> wie eine frische Installation.
+>
+> **Für Instanzen auf `dev-master`:** Der Wechsel auf `^1.8` löst nebenbei den
+> Composer-Fehler `origin/master...master: no merge base` — ein Tag wird als
+> Archiv installiert, der `GitDownloader` ist dann nicht mehr beteiligt.
+
+
 ### Added
 - **`entity_field_patch` — eine Stelle ändern statt das Feld neu schreiben**
   (AP3 aus AL-07). `entity_field_patch(table, id, field, old, new)` ersetzt eine
