@@ -261,6 +261,17 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   182.
 
 ### Notes
+- **`dev-master`-Instanzen: „no merge base" beim Update ist kein Bundle-Fehler.**
+  Für einen Branch statt eines Tags installiert Composer aus der Quelle, legt
+  also einen Git-Checkout im Vendor an, und prüft ihn vor jedem Update mit
+  `git diff --name-status origin/master...master`. Wurde der Composer-Cache
+  zwischendurch neu aufgebaut, haben Vendor-Klon und `origin` keinen gemeinsamen
+  Vorfahren mehr und Composer bricht ab. Die Meldung erscheint unter dem Paket,
+  das gerade an der Reihe war (beobachtet: `php-mcp/server`) — der Branch im
+  Kommando verrät den tatsächlichen: `php-mcp/server` liegt auf `main`, `master`
+  ist dieses Bundle. Reparatur und dauerhafte Umgehung stehen jetzt im README
+  unter „Instanzen, die `dev-master` verfolgen".
+
 - **AP1 und AP2 waren keine Bundle-Fehler** — beide auf `lau.netzhirsch.de`
   gegengeprüft. Die sechs `netzhirsch_nav_*`-Felder gehören zum Modultyp
   `netzhirsch_navigation`, nicht zu `netzhirsch_megamenu`; auf dem richtigen Typ

@@ -304,6 +304,51 @@ composer update netzhirsch/contao-mcp-bundle
 `Server\ContaoDispatcher`, a subclass. After a `php-mcp/server` major bump,
 check there that `handleToolList()` and `handleToolCall()` still line up.
 
+### Instances tracking `dev-master`
+
+For a branch rather than a tag, Composer installs **from source** by default, so
+`vendor/netzhirsch/contao-mcp-bundle/` is a real git checkout. Before every
+update Composer inspects it for local changes with
+`git diff --name-status origin/master...master`. That three-dot form needs a
+common ancestor, and once the Composer cache has been rebuilt in between, the
+vendor clone no longer shares one with its `origin`:
+
+```
+In GitDownloader.php line 236:
+  Failed to execute git diff --name-status origin/master...master --
+  fatal: origin/master...master: no merge base
+```
+
+Composer files this error under whichever package was being processed at the
+time — observed as `php-mcp/server`. The branch in the command names the real
+culprit: `php-mcp/server` lives on `main`, `master` is THIS bundle.
+
+Recovery — throw the broken checkout away and let Composer fetch it again:
+
+```bash
+rm -rf vendor/netzhirsch/contao-mcp-bundle
+composer install --no-dev --optimize-autoloader
+```
+
+If that is not enough, the cache side is affected too:
+
+```bash
+composer clear-cache
+rm -rf vendor/netzhirsch/contao-mcp-bundle
+composer install --no-dev --optimize-autoloader
+```
+
+To avoid it altogether, install the bundle as an archive instead of a git
+checkout — then `GitDownloader` is not involved at all:
+
+```bash
+composer config preferred-install.netzhirsch/contao-mcp-bundle dist
+composer update netzhirsch/contao-mcp-bundle
+```
+
+Instances tracking a tag (`^1.7`) never hit this; Composer installs those from
+the archive anyway.
+
 | Command | Purpose | Suggested cadence |
 |---|---|---|
 | `contao:mcp:license status\|trial\|activate\|renew` | manage license and trial | as needed (renewal runs via cron) |
