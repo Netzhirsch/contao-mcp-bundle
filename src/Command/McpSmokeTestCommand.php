@@ -2594,6 +2594,58 @@ final class McpSmokeTestCommand extends Command
 
 
 
+        // ═══════════════════ fileTree-Felder (binary(16)) ═══════════════════
+        //
+        // Contao stores file references as binary(16). The backend picker
+        // writes that shape; a programmatic Model write does not, because DCA
+        // save_callbacks only run for form submissions. So a 36-character UUID
+        // string or a files/… path went straight into a 16-byte column and
+        // MySQL answered "Data too long" — the write failed hard. Which columns
+        // those are cannot be a hardcoded list: every extension brings its own.
+        $output->writeln("
+<comment>fileTree-Felder (binary(16))</comment>");
+
+        $ftFile = $this->connection->fetchAssociative("SELECT uuid, path FROM tl_files WHERE type = 'file' ORDER BY id LIMIT 1");
+        $ftThemeId = (int) $this->connection->fetchOne('SELECT id FROM tl_theme ORDER BY id LIMIT 1');
+
+        if (\is_array($ftFile) && $ftThemeId > 0) {
+            $ftUuid = StringUtil::binToUuid((string) $ftFile['uuid']);
+            $ftModule = $this->moduleTool->create(theme_id: $ftThemeId, type: 'randomImage', name: $stamp.'_filetree');
+            $ftId = (int) ($ftModule['id'] ?? 0);
+
+            $expect('a file path is accepted and stored as a binary uuid',
+                [$this->moduleTool->update($ftId, ['multiSRC' => $ftFile['path']]),
+                    StringUtil::deserialize((string) $this->connection->fetchOne('SELECT multiSRC FROM tl_module WHERE id = ?', [$ftId]), true)],
+                static fn (array $r) => \in_array('multiSRC', $r[0]['changed_fields'] ?? [], true)
+                    && \count($r[1]) === 1
+                    && \strlen((string) $r[1][0]) === 16);
+
+            // Same file, other notation: the value did not change, so neither
+            // should the record — otherwise every re-run writes a new version.
+            $expect('the same file as a string uuid is recognised as unchanged',
+                $this->moduleTool->update($ftId, ['multiSRC' => $ftUuid]),
+                static fn ($r) => ($r['changed_fields'] ?? ['x']) === []);
+
+            $expect('the read-back is a readable uuid, not a binary blob',
+                $this->moduleTool->get($ftId),
+                static fn ($r) => ($r['multiSRC'][0] ?? null) === $ftUuid
+                    && json_encode($r) !== false);
+
+            $expect('an unknown path is refused with a usable message',
+                $this->moduleTool->update($ftId, ['multiSRC' => 'files/does-not-exist.png']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'files_list'));
+
+            $expect('and an empty value clears the field',
+                [$this->moduleTool->update($ftId, ['multiSRC' => '']),
+                    (string) $this->connection->fetchOne('SELECT multiSRC FROM tl_module WHERE id = ?', [$ftId])],
+                static fn (array $r) => \in_array('multiSRC', $r[0]['changed_fields'] ?? [], true) && $r[1] === '');
+
+            $this->connection->executeStatement('DELETE FROM tl_module WHERE id = ?', [$ftId]);
+        } else {
+            $output->writeln('  <comment>~ fileTree-Test übersprungen — keine Datei in tl_files oder kein Theme</comment>');
+        }
+
         // ═══════════════════ Content-Baum (Batch) ═══════════════════
         //
         // pages_create_tree's counterpart for the inside of a page. Twelve

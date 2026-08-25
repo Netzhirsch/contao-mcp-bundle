@@ -9,6 +9,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\ModuleModel;
 use Contao\StringUtil;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
 
 /**
  * Field mapper for tl_module. tl_module is the type-driven sibling of tl_content:
@@ -221,8 +222,35 @@ final class FieldMapper
         return $current !== '' ? $current : 'html';
     }
 
+    /**
+     * "single" | "multiple" for a fileTree column, null for anything else.
+     */
+    private function fileTreeKind(string $field): ?string
+    {
+        $definition = $GLOBALS['TL_DCA']['tl_module']['fields'][$field] ?? null;
+
+        if (!\is_array($definition) || ($definition['inputType'] ?? null) !== 'fileTree') {
+            return null;
+        }
+
+        $eval = \is_array($definition['eval'] ?? null) ? $definition['eval'] : [];
+
+        return !empty($eval['multiple']) ? 'multiple' : 'single';
+    }
+
     private function castValue(string $field, mixed $value): mixed
     {
+        // fileTree columns are binary(16), and which columns those are cannot
+        // be a hardcoded list: every extension brings its own (the case that
+        // surfaced this was netzhirsch_nav_logo). Ask the live DCA instead, the
+        // same source the whitelist above comes from.
+        $fileTree = $this->fileTreeKind($field);
+        if ($fileTree !== null) {
+            return $fileTree === 'multiple'
+                ? FileUuid::toBinaryList($value, $field)
+                : FileUuid::toBinary($value, $field);
+        }
+
         if (\in_array($field, self::BOOL_FIELDS, true)) {
             return $value ? 1 : 0;
         }

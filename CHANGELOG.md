@@ -155,6 +155,28 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   > des Typs. Genau das ist der Zweck: Diese Schreibvorgänge hatten nie eine
   > Wirkung.
 
+- **`fileTree`-Felder in `tl_module` sind schreibbar** (aus dem Briefing
+  „`netzhirsch_nav_logo` (binary(16)) nicht schreibbar"). Contao legt
+  Dateireferenzen als `binary(16)` ab. Der Backend-Picker schreibt diese Form,
+  ein programmatischer Model-Write nicht — DCA-`save_callbacks` laufen nur bei
+  Formular-Submits. Eine 36-Zeichen-UUID oder ein `files/…`-Pfad ging damit
+  ungewandelt in eine 16-Byte-Spalte, MySQL antwortete
+  `SQLSTATE[22001]: Data too long`. Der Write scheiterte also hart statt still
+  abzuschneiden — das bessere von beiden, aber unbenutzbar.
+
+  Welche Spalten das sind, kann keine feste Namensliste sein: Jede Erweiterung
+  bringt eigene mit (`netzhirsch_nav_logo` war der Auslöser). Erkannt wird
+  deshalb am **Live-DCA** (`inputType: fileTree`, `eval.multiple`) — dieselbe
+  Quelle, aus der auch die Whitelist kommt. Akzeptiert wird, was der Picker
+  selbst erzeugt: String-UUID, Pfad unterhalb des Upload-Verzeichnisses, bereits
+  binäre UUID (idempotent, ein zurückgelesener Wert lässt sich direkt wieder
+  schreiben), leer → `null`. Ein unbekannter Pfad wird mit Verweis auf
+  `files_list` abgelehnt, statt etwas zu raten.
+
+  Die Leseseite liefert lesbare String-UUIDs statt Binärblobs — sonst bricht
+  `json_encode` an der Antwort. Damit sind auch die Kern-Felder `singleSRC`,
+  `multiSRC` und `orderSRC` in `tl_module` erstmals über MCP setzbar.
+
 - **Sections ohne Template erzeugen keine 500 mehr** (AP8). Eine Layout-Section
   mit `template: ""` — oder ohne den Schlüssel, den der Mapper zu `""` machte —
   ließ **jede Seite** mit einem Modul in dieser Section HTTP 500 antworten.
