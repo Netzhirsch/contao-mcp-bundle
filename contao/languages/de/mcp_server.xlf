@@ -156,6 +156,7 @@
       <trans-unit id="mcp_server.tool_group_multilingual"><source>Multilingual (changelanguage)</source><target>Mehrsprachigkeit (changelanguage)</target></trans-unit>
       <trans-unit id="mcp_server.tool_group_url_rewrite"><source>URL rewrite (terminal42)</source><target>URL-Umleitungen (terminal42)</target></trans-unit>
       <trans-unit id="mcp_server.tool_group_lead"><source>Form leads (terminal42, read-only)</source><target>Formular-Leads (terminal42, nur lesend)</target></trans-unit>
+      <trans-unit id="mcp_server.tool_group_deepl"><source>Translation (DeepL, numero2)</source><target>Übersetzung (DeepL, numero2)</target></trans-unit>
       <trans-unit id="mcp_server.tool_group_external_id"><source>External IDs (automation)</source><target>Externe IDs (Automation)</target></trans-unit>
       <trans-unit id="mcp_server.tool_group_entity"><source>Cross-entity helpers</source><target>Entitätsübergreifende Helfer</target></trans-unit>
     </body>
