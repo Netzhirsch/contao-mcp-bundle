@@ -23,6 +23,12 @@ use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
  *  2. It gives no cost signal back. Translating a page tree can be hundreds of
  *     records, and the operator asked to see what a call actually spends.
  *
+ * It also cannot be called safely without a key: `DeepLApi::translate()` guards
+ * with `if (!$this->translator)` on a typed property its constructor only
+ * assigns when a key is present, so an unconfigured instance raises
+ * "must not be accessed before initialization" instead of returning ''
+ * (verified against 1.0.9). Our own gate answers `deepl_not_configured` first.
+ *
  * What we DO take from the host bundle is its configuration: the API key comes
  * from `contao.deepl.api_key`, the parameter numero2's extension sets from
  * `DEEPL_API_KEY` or `deepl.api_key`. The operator configures DeepL once, and
