@@ -146,6 +146,10 @@ final class ToolPermissionMap
         'external_id_lookup' => ['kind' => 'none'],
         'external_ids_list' => ['kind' => 'none'],
         'entity_move' => ['kind' => 'dc_arg', 'op' => 'update'],
+        // "_patch" is not one of the write verbs the name heuristic knows, and
+        // this one replaces text inside a record — it must never be read as a
+        // lookup.
+        'entity_field_patch' => ['kind' => 'dc_arg', 'op' => 'update'],
         'entity_language_link' => ['kind' => 'dc_arg', 'op' => 'update'],
 
         // Page-tree helpers (tl_page reads/writes).

@@ -8,6 +8,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
+use Netzhirsch\ContaoMcpBundle\Service\AuditedUpdater;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 
@@ -79,7 +80,7 @@ final class Tool
         private readonly ContaoFramework $framework,
         private readonly Connection $connection,
         private readonly Client $client,
-        private readonly RecordSaver $saver,
+        private readonly AuditedUpdater $saver,
         private readonly McpPermissionGuard $guard,
     ) {
     }

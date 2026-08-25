@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Tool\DeepL;
 
-use Netzhirsch\ContaoMcpBundle\Tool\Extension\DeepL\RecordSaver;
+use Netzhirsch\ContaoMcpBundle\Service\AuditedUpdater;
 use Netzhirsch\ContaoMcpBundle\Tool\Extension\DeepL\TranslatableFields;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -50,8 +50,8 @@ final class TranslatableFieldsTest extends TestCase
     {
         self::assertSame(
             [],
-            array_diff(TranslatableFields::tables(), RecordSaver::tables()),
-            'A table is translatable but RecordSaver cannot write it.',
+            array_diff(TranslatableFields::tables(), AuditedUpdater::tables()),
+            'A table is translatable but AuditedUpdater cannot write it.',
         );
     }
 

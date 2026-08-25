@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Netzhirsch\ContaoMcpBundle\Tool\Extension\DeepL;
+namespace Netzhirsch\ContaoMcpBundle\Service;
 
 use Netzhirsch\ContaoMcpBundle\Tool\Article\Tool as ArticleTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Calendar\Tool as CalendarTool;
@@ -12,37 +12,39 @@ use Netzhirsch\ContaoMcpBundle\Tool\Faq\Tool as FaqTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FaqCategory\Tool as FaqCategoryTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Form\Tool as FormTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FormField\Tool as FormFieldTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Layout\Tool as LayoutTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Member\Tool as MemberTool;
+use Netzhirsch\ContaoMcpBundle\Tool\MemberGroup\Tool as MemberGroupTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Module\Tool as ModuleTool;
 use Netzhirsch\ContaoMcpBundle\Tool\News\Tool as NewsTool;
 use Netzhirsch\ContaoMcpBundle\Tool\NewsArchive\Tool as NewsArchiveTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Page\Tool as PageTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Theme\Tool as ThemeTool;
 
 /**
- * Writes translated values back through the table's OWN `*_update` tool.
+ * Writes a set of fields to a record through the table's OWN `*_update` tool.
  *
- * This exists so translation never becomes a second way into the database. The
- * update tools are where field validation, the Versions snapshot, the tl_log
- * entry and the changed-field reporting live; a shortcut straight to the Model
- * would reproduce roughly half of that and quietly lose the rest. The price is
- * this dispatch table — and the dispatch table is visible, whereas a missing
- * version history is not.
+ * This exists so that a tool which changes records for some other reason —
+ * translating them, patching one substring — never becomes a second way into
+ * the database. The update tools are where field validation, the Versions
+ * snapshot, the tl_log entry and the changed-field reporting live; a shortcut
+ * straight to the Model would reproduce roughly half of that and quietly lose
+ * the rest. The price is this dispatch table — and the dispatch table is
+ * visible, whereas a missing version history is not.
  *
- * Two calling conventions, because the update tools have two: most take named
- * arguments per column, the palette-driven ones (`tl_content`, `tl_form*`,
- * `tl_module`) take a `fields` object. Named arguments are spread from a
- * string-keyed array, so a field the target method does not declare fails
- * loudly with an \Error rather than being written blind.
+ * Two calling conventions, because the update tools have two: most take a
+ * `fields` object, the older ones take named arguments per column. Named
+ * arguments are spread from a string-keyed array, so a field the target method
+ * does not declare fails loudly with an \Error rather than being written blind.
  */
-final class RecordSaver
+final class AuditedUpdater
 {
     private const NAMED = 'named';
     private const FIELDS = 'fields';
 
     /**
-     * Which table is written how. Public and static so a test can assert that
-     * every table {@see TranslatableFields} offers actually has a way back into
-     * the database — a translatable table with no updater would only fail at
-     * save time, on real content.
+     * Which table is written how. Public and static so a caller (and a test)
+     * can ask what is writable without instantiating sixteen tools.
      *
      * @var array<string, string>
      */
@@ -59,6 +61,10 @@ final class RecordSaver
         'tl_form' => self::FIELDS,
         'tl_form_field' => self::FIELDS,
         'tl_module' => self::FIELDS,
+        'tl_theme' => self::FIELDS,
+        'tl_layout' => self::FIELDS,
+        'tl_member' => self::FIELDS,
+        'tl_member_group' => self::FIELDS,
     ];
 
     public function __construct(
@@ -74,6 +80,10 @@ final class RecordSaver
         private readonly FormTool $formTool,
         private readonly FormFieldTool $formFieldTool,
         private readonly ModuleTool $moduleTool,
+        private readonly ThemeTool $themeTool,
+        private readonly LayoutTool $layoutTool,
+        private readonly MemberTool $memberTool,
+        private readonly MemberGroupTool $memberGroupTool,
     ) {
     }
 
@@ -103,6 +113,7 @@ final class RecordSaver
             return [
                 'error' => 'table_not_writable',
                 'message' => sprintf('No audited update tool is wired for "%s".', $table),
+                'writable_tables' => self::tables(),
             ];
         }
 
@@ -136,6 +147,10 @@ final class RecordSaver
             'tl_form' => $this->formTool,
             'tl_form_field' => $this->formFieldTool,
             'tl_module' => $this->moduleTool,
+            'tl_theme' => $this->themeTool,
+            'tl_layout' => $this->layoutTool,
+            'tl_member' => $this->memberTool,
+            'tl_member_group' => $this->memberGroupTool,
             default => null,
         };
     }

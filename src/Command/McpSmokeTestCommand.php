@@ -34,6 +34,7 @@ use Netzhirsch\ContaoMcpBundle\Tool\NewsArchive\Tool as NewsArchiveTool;
 use Netzhirsch\ContaoMcpBundle\Tool\MemberGroup\Tool as MemberGroupTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Maintenance\Tool as MaintenanceTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Page\Tool as PageTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Patch\Tool as PatchTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Search\Tool as SearchTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Sorting\Tool as SortingTool;
 use Netzhirsch\ContaoMcpBundle\Tool\System\Tool as SystemTool;
@@ -105,6 +106,7 @@ final class McpSmokeTestCommand extends Command
         private readonly DeepLTool $deepLTool,
         private readonly ModuleTool $moduleTool,
         private readonly HtmlTool $htmlTool,
+        private readonly PatchTool $patchTool,
         private readonly Connection $connection,
         private readonly RequestStack $requestStack,
         private readonly KeyManager $keyManager,
@@ -2591,6 +2593,88 @@ final class McpSmokeTestCommand extends Command
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
 
 
+
+        // ═══════════════════ Feldweiser Patch ═══════════════════
+        //
+        // The *_update tools take whole field values, which is right for a
+        // headline and wrong for a 9 KB SCSS blob: changing three numbers means
+        // reproducing every other byte, and every reproduction can lose
+        // something. The guard that makes this safe is the occurrence count —
+        // an ambiguous anchor must refuse rather than patch the wrong place.
+        $output->writeln("\n<comment>Feldweiser Patch</comment>");
+
+        $patchPageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 1");
+        $patchArticle = $patchPageId > 0
+            ? $this->articleTool->create(page_id: $patchPageId, title: $stamp.'_patch', sorting: 128, inColumn: 'main')
+            : ['id' => 0];
+        $patchArticleId = (int) ($patchArticle['id'] ?? 0);
+
+        if ($patchArticleId > 0) {
+            $patchBody = "<p>Zeile eins mit --fs-fhead: 1.375rem;</p>\n<p>Zeile zwei ohne Anker.</p>\n<p>Zeile drei mit --fs-fhead: 1.375rem;</p>";
+            $patchElement = $this->contentTool->create(
+                ptable: 'tl_article', pid: $patchArticleId, type: 'text', sorting: 128,
+                fields: ['text' => $patchBody],
+            );
+            $patchId = (int) ($patchElement['id'] ?? 0);
+
+            // Two matches, one expected → refuse, and say how many there are.
+            $expect('an ambiguous anchor refuses and writes nothing',
+                $this->patchTool->patch('tl_content', $patchId, 'text', '--fs-fhead: 1.375rem;', '--fs-fhead: 1.25rem;'),
+                static fn ($r) => ($r['error'] ?? '') === 'occurrence_mismatch' && ($r['occurrences'] ?? 0) === 2);
+            $expect('and the record is untouched after the refusal',
+                (string) $this->connection->fetchOne('SELECT text FROM tl_content WHERE id = ?', [$patchId]),
+                static fn (string $t) => substr_count($t, '1.375rem') === 2);
+
+            // A unique anchor: dry run first, which must not write either.
+            $dryPatch = $this->patchTool->patch('tl_content', $patchId, 'text', 'Zeile zwei ohne Anker.', 'Zeile zwei, jetzt anders.', dry_run: true);
+            $expect('a dry run reports the match with its context', $dryPatch,
+                static fn ($r) => ($r['dry_run'] ?? false) === true
+                    && ($r['occurrences'] ?? 0) === 1
+                    && str_contains((string) ($r['matches'][0]['context'] ?? ''), 'Zeile zwei'));
+            $expect('the dry run wrote nothing',
+                (string) $this->connection->fetchOne('SELECT text FROM tl_content WHERE id = ?', [$patchId]),
+                static fn (string $t) => str_contains($t, 'Zeile zwei ohne Anker.'));
+
+            $realPatch = $this->patchTool->patch('tl_content', $patchId, 'text', 'Zeile zwei ohne Anker.', 'Zeile zwei, jetzt anders.');
+            $expect('the real patch reports sizes and changed fields', $realPatch,
+                static fn ($r) => ($r['patched'] ?? false) === true
+                    && \in_array('text', $r['changed_fields'] ?? [], true)
+                    && ($r['field_size_after'] ?? 0) !== ($r['field_size_before'] ?? 0));
+            $expect('and only the anchored passage changed',
+                (string) $this->connection->fetchOne('SELECT text FROM tl_content WHERE id = ?', [$patchId]),
+                static fn (string $t) => str_contains($t, 'Zeile zwei, jetzt anders.')
+                    && substr_count($t, '1.375rem') === 2
+                    && str_contains($t, 'Zeile eins'));
+
+            // Stated count makes a repeated anchor legitimate.
+            $expect('an explicit count patches every occurrence',
+                $this->patchTool->patch('tl_content', $patchId, 'text', '1.375rem', '1.25rem', expect_occurrences: 2),
+                static fn ($r) => ($r['patched'] ?? false) === true && ($r['occurrences'] ?? 0) === 2);
+
+            // The write is an ordinary edit, so it is in the version history.
+            $expect('the patch is in the version history',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_version WHERE fromTable = ? AND pid = ?', ['tl_content', $patchId],
+                ),
+                static fn (int $n) => $n > 0);
+
+            $expect('an unknown field is refused, not guessed',
+                $this->patchTool->patch('tl_content', $patchId, 'no_such_column', 'a', 'b'),
+                static fn ($r) => ($r['error'] ?? '') === 'unknown_field');
+            $expect('an empty anchor is refused',
+                $this->patchTool->patch('tl_content', $patchId, 'text', '', 'b'),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input');
+
+            $this->connection->executeStatement('DELETE FROM tl_content WHERE id = ?', [$patchId]);
+            $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$patchArticleId]);
+        } else {
+            $output->writeln('  <comment>~ Patch-Test übersprungen — keine Seite zum Anlegen eines Artikels</comment>');
+        }
+
+        $expect('a table without an audited updater is refused, and says which have one',
+            $this->patchTool->patch('tl_user', 1, 'username', 'a', 'b'),
+            static fn ($r) => ($r['error'] ?? '') === 'table_not_patchable'
+                && \in_array('tl_theme', $r['writable_tables'] ?? [], true));
 
         // ═══════════════════ HTML-Ausgabefilter ═══════════════════
         //
