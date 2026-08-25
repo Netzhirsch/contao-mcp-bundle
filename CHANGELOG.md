@@ -124,6 +124,44 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   pro Aufruf), nicht Feld für Feld.
 
 ### Fixed
+- **`deepl_translate_page_tree` ließ einzelne Datensätze still in der
+  Ausgangssprache** (gemeldet von grass-merkur.de). Die Feldauswahl lief pro
+  **Tabelle**, nicht pro **Datensatz**: `tl_content`, `tl_module` und
+  `tl_form_field` halten je eine breite Tabelle und entscheiden **pro Zeile**
+  anhand des Typs, welche Spalten es gibt. Ein `headline`-Element mit einer noch
+  befüllten `text`-Spalte — Altlast aus einem früheren Typwechsel — bekam also
+  `text` mitgeplant, und `content_update` lehnte daraufhin den **kompletten**
+  Datensatz ab.
+
+  Der Schreibvorgang ist pro Datensatz alles-oder-nichts, deshalb blieb auch die
+  Überschrift deutsch, obwohl `headline` allein gültig gewesen wäre. Über 61
+  Seiten entstehen so verstreute deutsche Headlines in einem englischen Baum, im
+  Backend praktisch nicht auffindbar. Im Pilotlauf 2 von 46 Datensätzen.
+
+  Gefiltert wird jetzt **pro Datensatz gegen die Typ-Palette** — dieselbe Quelle,
+  die `content_palette_get(type)` bedient. Verworfene Spalten stehen als
+  `dropped_fields` in der Antwort, und zwar in **allen drei Modi**, nicht nur im
+  Fehlerfall. Das spart nebenbei Geld: Text, der ohnehin nicht gespeichert werden
+  könnte, wird gar nicht erst an DeepL geschickt.
+
+  Bewusst **nicht** feldweise geschrieben: Ein `*_update` pro Feld hieße ein
+  Versions-Eintrag pro Feld. Das Verwerfen ist deterministisch und erklärbar
+  („diese Spalte gehört nicht zu diesem Typ"), ein Laufzeitfehler bleibt dagegen
+  weiterhin ein gemeldeter Fehlschlag — stilles Wegwerfen von allem, was klemmt,
+  wäre genau die Sorte Verhalten, die diesen Bug so teuer gemacht hat.
+
+- **Die Grenzen von `deepl_translate_page_tree` waren für echte Bäume zu knapp.**
+  Gemessen: eine einzelne Seite ergibt rund 46 Datensätze und ~7.000 Zeichen.
+  `max_records` steigt von 300 auf 1.000 (≈ 20 Seiten), `max_characters` von
+  100.000 auf 250.000 (≈ 35 Seiten).
+
+  Eine ganze Site passt weiterhin **absichtlich** nicht in einen Aufruf: Ein Lauf
+  über mehrere tausend Datensätze dauert Minuten, und ein HTTP-Transport, der
+  mittendrin abläuft, hinterlässt einen halb übersetzten Baum ohne Auskunft
+  darüber, wo er stehen geblieben ist. Eine Ablehnung ist reparierbar, ein
+  abgeschnittener Schreiblauf nicht. Ablehnung und Kürzungs-Warnung sagen das
+  jetzt und verweisen auf astweises Vorgehen (`include_children: false`).
+
 - **Subpaletten gehören zu ihrem Typ** (der eigentliche Befund hinter AP1).
   Die drei palettengesteuerten Tabellen (`tl_module`, `tl_content`,
   `tl_form_field`) haben **jeden** Eintrag aus `$dca['subpalettes']` in **jeden**

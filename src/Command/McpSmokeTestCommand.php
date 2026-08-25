@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Command;
 
 use Contao\Search;
+use Contao\Model\Registry;
 use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\McpActivityLog;
@@ -3128,6 +3129,62 @@ final class McpSmokeTestCommand extends Command
                 $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', save: true),
                 static fn ($r) => ($r['totals']['saved'] ?? 1) === 0
                     && ($r['totals']['unchanged'] ?? 0) >= 3);
+
+            // A record whose type changed once and kept the old column filled.
+            // tl_content decides per ROW which columns its type has, so
+            // planning per table offered `text` on a headline element — and the
+            // update then refused the WHOLE record, leaving the headline in the
+            // source language inside an otherwise translated tree. Reported
+            // from a live site; two of 46 records, invisible in the backend.
+            $staleElement = $this->contentTool->create(
+                ptable: 'tl_article', pid: $dlArticleId, type: 'headline', sorting: 512,
+                fields: ['headline' => ['value' => 'Mehr als nur Rackspace', 'unit' => 'h2']],
+            );
+            $staleId = (int) ($staleElement['id'] ?? 0);
+            $this->connection->executeStatement(
+                'UPDATE tl_content SET text = ? WHERE id = ?',
+                ['<p>Altlast aus einem frueheren Typwechsel.</p>', $staleId],
+            );
+            // The Model registry still holds the row as it was created; on a
+            // server every call is a fresh process.
+            Registry::getInstance()->reset();
+
+            $stalePlan = $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', dry_run: true);
+            $staleEntry = null;
+            foreach ($stalePlan['records'] ?? [] as $planned) {
+                if (($planned['id'] ?? 0) === $staleId) {
+                    $staleEntry = $planned;
+                }
+            }
+
+            $expect('a column the record type does not have is not planned', $staleEntry,
+                static fn ($r) => \is_array($r)
+                    && ($r['fields'] ?? []) === ['headline']
+                    && ($r['dropped_fields'] ?? []) === ['text']);
+
+            $staleSave = $this->deepLTool->translatePageTree(id: $dlRootId, target_lang: 'EN-GB', save: true);
+            $staleResult = null;
+            foreach ($staleSave['records'] ?? [] as $written) {
+                if (($written['id'] ?? 0) === $staleId) {
+                    $staleResult = $written;
+                }
+            }
+
+            $expect('and the valid field is written instead of the record failing', $staleResult,
+                static fn ($r) => \is_array($r)
+                    && !isset($r['error'])
+                    && ($r['changed_fields'] ?? []) === ['headline']);
+
+            $staleHeadline = StringUtil::deserialize(
+                (string) $this->connection->fetchOne('SELECT headline FROM tl_content WHERE id = ?', [$staleId]),
+                true,
+            );
+            $expect('the headline really left the source language', $staleHeadline,
+                static fn (array $h) => ($h['value'] ?? '') !== 'Mehr als nur Rackspace'
+                    && trim((string) ($h['value'] ?? '')) !== '');
+            $expect('and the stale column was left untouched',
+                (string) $this->connection->fetchOne('SELECT text FROM tl_content WHERE id = ?', [$staleId]),
+                static fn (string $t) => str_contains($t, 'Altlast'));
 
             // Fixtures out: content and article first, Contao refuses to drop a
             // page that still has articles.

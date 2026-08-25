@@ -9,6 +9,7 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuditedUpdater;
+use Netzhirsch\ContaoMcpBundle\Service\TypePaletteFields;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 
@@ -50,6 +51,14 @@ use PhpMcp\Server\Attributes\Schema;
  * Because translations are cached for 30 days, looking before writing is close
  * to free: a dry run costs nothing at all, and a preview followed by a save
  * pays DeepL once.
+ *
+ * Fields are chosen per RECORD, not per table. tl_content, tl_module and
+ * tl_form_field keep one wide table and decide by the row's type which columns
+ * it has, so a column that is filled is not necessarily a column that can be
+ * written — a headline element carrying a leftover `text` value from an earlier
+ * type change is the ordinary case. Those columns are left out and listed as
+ * `dropped_fields`, because the alternative was the update refusing the whole
+ * record and the headline staying in the source language too.
  */
 final class Tool
 {
@@ -57,11 +66,17 @@ final class Tool
     private const MAX_TEXTS = 100;
 
     /**
-     * Records per call. A page tree of this size already costs a few DeepL
-     * requests and a few hundred writes; beyond it the caller should split the
-     * job so a failure is attributable.
+     * Records per call. Measured on a real site: one page carries roughly 46
+     * records, so this is about twenty pages — comfortably more than a branch,
+     * far less than a whole site.
+     *
+     * The ceiling is not squeamishness about size, it is about what happens at
+     * the far end. A run of several thousand records takes minutes of writes,
+     * and an HTTP transport that times out mid-run leaves a partially
+     * translated tree with no report of where it stopped. A refusal is
+     * recoverable; a truncated write is not.
      */
-    private const MAX_RECORDS = 300;
+    private const MAX_RECORDS = 1000;
 
     /**
      * Preview returns every source and translation, so it has a much lower
@@ -70,8 +85,12 @@ final class Tool
      */
     private const MAX_PREVIEW_RECORDS = 50;
 
-    /** Default per-call character budget; 0 disables the check. */
-    private const DEFAULT_MAX_CHARACTERS = 100000;
+    /**
+     * Default per-call character budget; 0 disables the check. Roughly 35 pages
+     * at the ~7,000 characters a real page was measured to hold — a guard
+     * against a runaway job, not against ordinary work.
+     */
+    private const DEFAULT_MAX_CHARACTERS = 250000;
 
     /** Columns tried, in order, when labelling a record in the answer. */
     private const LABEL_COLUMNS = ['title', 'headline', 'question', 'name', 'label'];
@@ -82,6 +101,7 @@ final class Tool
         private readonly Client $client,
         private readonly AuditedUpdater $saver,
         private readonly McpPermissionGuard $guard,
+        private readonly TypePaletteFields $typePalette,
     ) {
     }
 
@@ -245,7 +265,11 @@ final class Tool
                                 (default 100000). Pass 0 to disable.
 
             Per record you get either changed_fields (save) or field → {source, translation}
-            (preview). A record that fails is reported and the rest continue.
+            (preview). `dropped_fields` lists columns that were filled but do not belong to
+            THIS record's type — tl_content, tl_module and tl_form_field decide that per row,
+            so a leftover value from an earlier type change is left alone instead of taking
+            the whole record down with it. A record that fails is reported and the rest
+            continue.
             DESC,
     )]
     public function translateRecords(
@@ -279,7 +303,11 @@ final class Tool
         if (\count($ids) > self::MAX_RECORDS) {
             return [
                 'error' => 'too_many_records',
-                'message' => sprintf('At most %d records per call, got %d.', self::MAX_RECORDS, \count($ids)),
+                'message' => sprintf(
+                    'At most %d records per call, got %d. Split the job — the cap exists because a run that times out mid-way leaves a partly translated set with no report of where it stopped.',
+                    self::MAX_RECORDS,
+                    \count($ids),
+                ),
             ];
         }
         if (trim($target_lang) === '') {
@@ -330,7 +358,15 @@ final class Tool
               - max_records:      hard cap on the collected tree (default 300).
 
             A record that cannot be written — no permission, validation error — is reported
-            in the answer and the rest of the tree continues.
+            in the answer and the rest of the tree continues. `dropped_fields` per record
+            lists columns that were filled but do not belong to that record's type.
+
+            Real sizes: one page was measured at ~46 records and ~7,000 characters, so the
+            caps are roughly twenty pages of records and thirty-five of characters. A whole
+            site does not fit in one call ON PURPOSE — work branch by branch
+            (include_children=false, or start lower in the tree). A run long enough to time
+            out leaves a partly translated tree with no report of where it stopped, which is
+            far worse than a refusal.
             DESC,
     )]
     public function translatePageTree(
@@ -371,7 +407,7 @@ final class Tool
 
         if ($truncated) {
             $result['warnings'][] = sprintf(
-                'The tree is larger than max_records (%d) — only the first %d records were processed. Raise max_records or translate the remaining branches separately.',
+                'The tree is larger than max_records (%d) — only the first %d records were processed, depth-first from the starting page. The rest is NOT translated. Continue branch by branch (include_children=false per page, or start at a lower page), rather than raising the cap until it fits: a run long enough to time out leaves a partly translated tree with no report of where it stopped.',
                 $limit,
                 \count($targets),
             );
@@ -519,6 +555,16 @@ final class Tool
                 }
             }
 
+            // tl_content, tl_module and tl_form_field decide PER RECORD which
+            // of their columns exist for that row's type. Planning by table
+            // alone offers columns the row cannot take, and the update then
+            // refuses the WHOLE record — a headline element with a leftover
+            // `text` value from an earlier type change lost its headline
+            // translation as well. Narrowing here also stops us paying DeepL
+            // for text that could never have been stored.
+            $writable = $this->typePalette->writableFor($table, $row);
+            $dropped = [];
+
             $entry = [
                 'table' => $table,
                 'id' => $id,
@@ -530,6 +576,17 @@ final class Tool
             foreach ($resolved['fields'] as $field) {
                 $format = TranslatableFields::formatOf($table, $field);
                 if ($format === null) {
+                    continue;
+                }
+
+                if ($writable !== null && !\in_array($field, $writable, true)) {
+                    // Only worth reporting when the column actually holds
+                    // something — an empty one would not have been translated
+                    // either, and listing it every time is noise.
+                    $leftover = $this->valueOf($row, $field);
+                    if ($leftover !== null && trim((string) $leftover) !== '') {
+                        $dropped[] = $field;
+                    }
                     continue;
                 }
 
@@ -559,8 +616,16 @@ final class Tool
                 $entry['characters'] += array_sum(array_map(mb_strlen(...), $nonEmpty));
             }
 
+            if ($dropped !== []) {
+                $entry['dropped_fields'] = $dropped;
+            }
+
             if ($entry['fields'] === []) {
-                $skipped[] = ['table' => $table, 'id' => $id, 'reason' => 'no_text'];
+                $skipped[] = [
+                    'table' => $table,
+                    'id' => $id,
+                    'reason' => $dropped === [] ? 'no_text' : 'no_field_of_this_type_holds_text',
+                ] + ($dropped === [] ? [] : ['dropped_fields' => $dropped]);
                 continue;
             }
 
@@ -611,7 +676,7 @@ final class Tool
                         'label' => $e['label'],
                         'fields' => array_keys($e['fields']),
                         'characters' => $e['characters'],
-                    ],
+                    ] + (isset($e['dropped_fields']) ? ['dropped_fields' => $e['dropped_fields']] : []),
                     $plan,
                 ),
             ];
@@ -621,7 +686,7 @@ final class Tool
             return $common + [
                 'error' => 'character_budget_exceeded',
                 'message' => sprintf(
-                    'The run would submit %d characters, above max_characters=%d. Nothing was translated. Narrow the scope, or raise max_characters (0 disables the check).',
+                    'The run would submit %d characters, above max_characters=%d. Nothing was translated. Work through the tree branch by branch (include_children=false, one page at a time), or raise max_characters (0 disables the check).',
                     $charactersPlanned,
                     $maxCharacters,
                 ),
@@ -683,7 +748,7 @@ final class Tool
                 'id' => $entry['id'],
                 'label' => $entry['label'],
                 'characters' => $entry['characters'],
-            ];
+            ] + (isset($entry['dropped_fields']) ? ['dropped_fields' => $entry['dropped_fields']] : []);
 
             if (!$save) {
                 $records[] = $record + ['fields' => $preview];
