@@ -96,7 +96,7 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 - Smoke-Test: 339 Asserts (vorher 319), davon 20 für DeepL. Sechs davon prüfen
   Registrierung und Schema und laufen auch ohne das Host-Bundle — dort, wo es
   fehlt, wird stattdessen `extension_not_available` auf allen drei Tools
-  nachgewiesen. PHPUnit: 290 Tests.
+  nachgewiesen. PHPUnit: 296 Tests, 929 Asserts (vorher 259/682).
 
 
 ## [1.7.0] – 2026-08-20
