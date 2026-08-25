@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Module;
 
 use Contao\ModuleModel;
 use Contao\StringUtil;
+use Contao\Validator;
 
 /**
  * Renders ModuleModel rows. Headline tuple + serialised int/string lists are
@@ -60,12 +61,37 @@ final class Serializer
             return $value;
         }
 
+        // Binary UUIDs (fileTree columns) are not valid UTF-8 and would break the
+        // JSON response — hand back the readable string UUID instead.
+        if (\is_string($value) && Validator::isBinaryUuid($value)) {
+            return StringUtil::binToUuid($value);
+        }
+
         // Anything that looks like a PHP-serialized blob → decode.
         if (\is_string($value) && (str_starts_with($value, 'a:') || str_starts_with($value, 's:'))) {
             $decoded = StringUtil::deserialize($value, true);
-            return $decoded;
+
+            return self::readableUuids($decoded);
         }
 
         return $value;
+    }
+
+    /**
+     * Maps binary UUIDs inside a decoded blob (multiple fileTree) to string UUIDs.
+     */
+    private static function readableUuids(mixed $decoded): mixed
+    {
+        if (!\is_array($decoded)) {
+            return $decoded;
+        }
+
+        foreach ($decoded as $key => $item) {
+            if (\is_string($item) && Validator::isBinaryUuid($item)) {
+                $decoded[$key] = StringUtil::binToUuid($item);
+            }
+        }
+
+        return $decoded;
     }
 }

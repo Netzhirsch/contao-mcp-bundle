@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\FormField;
 use Contao\Controller;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\FormFieldModel;
+use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 
 /**
  * Field mapper for tl_form_field. The valid column set depends on the field
@@ -100,23 +101,36 @@ final class FieldMapper
      */
     public function allowedFieldsFor(string $type): array
     {
+        $fields = $this->resolvePalette($type)['fields'];
+
+        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+    }
+
+    /**
+     * The sub-palettes this type actually opens, as selector => child fields.
+     *
+     * Answers the question a caller otherwise has to reverse-engineer from a
+     * rejection: which of these fields only exist because a toggle is in the
+     * palette, and which toggle is it.
+     *
+     * @return array<string, list<string>>
+     */
+    public function subpalettesFor(string $type): array
+    {
+        return $this->resolvePalette($type)['subpalettes'];
+    }
+
+    /**
+     * @return array{fields: list<string>, subpalettes: array<string, list<string>>}
+     */
+    private function resolvePalette(string $type): array
+    {
         $this->framework->initialize();
 
         $adapter = $this->framework->getAdapter(Controller::class);
         $adapter->loadDataContainer('tl_form_field');
 
-        $dca = $GLOBALS['TL_DCA']['tl_form_field'] ?? [];
-        $palette = $dca['palettes'][$type] ?? '';
-        $subpalettes = $dca['subpalettes'] ?? [];
-
-        $fields = self::extractFields($palette);
-        foreach ($subpalettes as $subFields) {
-            foreach (self::extractFields((string) $subFields) as $f) {
-                $fields[] = $f;
-            }
-        }
-
-        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+        return DcaPalette::resolve($GLOBALS['TL_DCA']['tl_form_field'] ?? [], $type);
     }
 
     /**
@@ -152,25 +166,6 @@ final class FieldMapper
         return $current !== '' ? $current : 'text';
     }
 
-    /**
-     * @return list<string>
-     */
-    private static function extractFields(string $palette): array
-    {
-        if ($palette === '') {
-            return [];
-        }
-        $out = [];
-        foreach (preg_split('/[;,]/', $palette) ?: [] as $token) {
-            $token = trim($token);
-            if ($token === '' || str_starts_with($token, '{')) {
-                continue;
-            }
-            $out[] = $token;
-        }
-
-        return $out;
-    }
 
     private function castValue(string $field, mixed $value): mixed
     {

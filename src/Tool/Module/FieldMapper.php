@@ -8,6 +8,7 @@ use Contao\Controller;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\ModuleModel;
 use Contao\StringUtil;
+use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 
 /**
  * Field mapper for tl_module. tl_module is the type-driven sibling of tl_content:
@@ -35,7 +36,7 @@ final class FieldMapper
      *
      * @var list<string>
      */
-    private const INT_LIST_FIELDS = ['pages', 'rootPage', 'groups', 'reg_groups', 'newsArchives', 'cal_calendar', 'faq_categories'];
+    private const INT_LIST_FIELDS = ['pages', 'groups', 'reg_groups', 'newsArchives', 'cal_calendar', 'faq_categories'];
 
     /**
      * Serialised list<string> fields.
@@ -64,9 +65,13 @@ final class FieldMapper
     /**
      * Single int fields that point at a page id (pageTree, single-select).
      *
+     * rootPage belongs here, not in INT_LIST_FIELDS: it is a pageTree with
+     * eval.fieldType "radio" on an int column (quicknav, booknav, sitemap and
+     * the navigation modules of third-party bundles all use it that way).
+     *
      * @var list<string>
      */
-    private const SINGLE_PAGE_FIELDS = ['jumpTo', 'overviewPage'];
+    private const SINGLE_PAGE_FIELDS = ['jumpTo', 'overviewPage', 'rootPage'];
 
     public function __construct(private readonly ContaoFramework $framework)
     {
@@ -132,23 +137,36 @@ final class FieldMapper
      */
     public function allowedFieldsFor(string $type): array
     {
+        $fields = $this->resolvePalette($type)['fields'];
+
+        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+    }
+
+    /**
+     * The sub-palettes this type actually opens, as selector => child fields.
+     *
+     * Answers the question a caller otherwise has to reverse-engineer from a
+     * rejection: which of these fields only exist because a toggle is in the
+     * palette, and which toggle is it.
+     *
+     * @return array<string, list<string>>
+     */
+    public function subpalettesFor(string $type): array
+    {
+        return $this->resolvePalette($type)['subpalettes'];
+    }
+
+    /**
+     * @return array{fields: list<string>, subpalettes: array<string, list<string>>}
+     */
+    private function resolvePalette(string $type): array
+    {
         $this->framework->initialize();
 
         $adapter = $this->framework->getAdapter(Controller::class);
         $adapter->loadDataContainer('tl_module');
 
-        $dca = $GLOBALS['TL_DCA']['tl_module'] ?? [];
-        $palette = $dca['palettes'][$type] ?? '';
-        $subpalettes = $dca['subpalettes'] ?? [];
-
-        $fields = self::extractFields($palette);
-        foreach ($subpalettes as $subFields) {
-            foreach (self::extractFields((string) $subFields) as $f) {
-                $fields[] = $f;
-            }
-        }
-
-        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+        return DcaPalette::resolve($GLOBALS['TL_DCA']['tl_module'] ?? [], $type);
     }
 
     /**
@@ -201,26 +219,6 @@ final class FieldMapper
         $current = (string) $module->type;
 
         return $current !== '' ? $current : 'html';
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function extractFields(string $palette): array
-    {
-        if ($palette === '') {
-            return [];
-        }
-        $out = [];
-        foreach (preg_split('/[;,]/', $palette) ?: [] as $token) {
-            $token = trim($token);
-            if ($token === '' || str_starts_with($token, '{')) {
-                continue;
-            }
-            $out[] = $token;
-        }
-
-        return $out;
     }
 
     private function castValue(string $field, mixed $value): mixed

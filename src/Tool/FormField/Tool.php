@@ -298,7 +298,9 @@ final class Tool
      */
     #[McpTool(
         name: 'form_field_palette_get',
-        description: 'Returns the field set valid for a given form-field type (live tl_form_field DCA palette + common columns).',
+        description: 'Returns the field set valid for a given form-field type (live tl_form_field DCA palette + common columns).'
+            .' Sub-palette children are listed only when their toggle is part of the palette of THIS type — Contao keeps one wide table per DCA, so a column existing on the row does not mean the type has it.'
+            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.',
     )]
     public function paletteGet(string $type): array
     {
@@ -315,6 +317,7 @@ final class Tool
             'known' => $known,
             'fields' => $fields,
             'count' => \count($fields),
+            'subpalettes' => $this->mapper->subpalettesFor($type),
         ];
     }
 

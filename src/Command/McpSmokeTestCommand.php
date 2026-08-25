@@ -26,6 +26,7 @@ use Netzhirsch\ContaoMcpBundle\Tool\Form\Tool as FormTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FormField\Tool as FormFieldTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Layout\Tool as LayoutTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Member\Tool as MemberTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Module\Tool as ModuleTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Multilingual\Tool as MultilingualTool;
 use Netzhirsch\ContaoMcpBundle\Tool\News\Tool as NewsTool;
 use Netzhirsch\ContaoMcpBundle\Tool\NewsArchive\Tool as NewsArchiveTool;
@@ -101,6 +102,7 @@ final class McpSmokeTestCommand extends Command
         private readonly ArticleTool $articleTool,
         private readonly FaqTool $faqTool,
         private readonly DeepLTool $deepLTool,
+        private readonly ModuleTool $moduleTool,
         private readonly Connection $connection,
         private readonly RequestStack $requestStack,
         private readonly KeyManager $keyManager,
@@ -2555,6 +2557,78 @@ final class McpSmokeTestCommand extends Command
         $expect('post-call hook ran even though the call threw',
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
 
+
+
+        // ═══════════════════ Paletten pro Typ ═══════════════════
+        //
+        // Contao keeps one wide table per DCA, so every row carries every
+        // column and a read-back tells you nothing about which fields the type
+        // actually has. The palette tools are the only honest answer, and they
+        // used to merge EVERY sub-palette into EVERY type — offering columns
+        // that would be written and then never rendered.
+        $output->writeln("\n<comment>Paletten pro Typ</comment>");
+
+        $textPalette = $this->contentTool->paletteGet('text');
+        $downloadPalette = $this->contentTool->paletteGet('download');
+
+        // Nested: a text element reaches alt only through
+        // addImage → overwriteMeta → alt. Stopping one level short would drop
+        // fields the backend really shows.
+        $expect('a text element reaches image meta through the nested toggle', $textPalette,
+            static fn ($r) => \in_array('addImage', $r['fields'] ?? [], true)
+                && \in_array('overwriteMeta', $r['fields'] ?? [], true)
+                && \in_array('alt', $r['fields'] ?? [], true));
+        $expect('and says which toggle opens what', $textPalette,
+            static fn ($r) => ($r['subpalettes']['overwriteMeta'] ?? []) !== []
+                && \in_array('alt', $r['subpalettes']['overwriteMeta'] ?? [], true));
+
+        // …but not fields that belong to a different type's toggle.
+        $expect('a text element is not offered the download-only fields', $textPalette,
+            static fn ($r) => !\in_array('linkTitle', $r['fields'] ?? [], true)
+                && !\in_array('titleText', $r['fields'] ?? [], true));
+        $expect('while the download element has exactly those', $downloadPalette,
+            static fn ($r) => \in_array('linkTitle', $r['fields'] ?? [], true)
+                && \in_array('titleText', $r['fields'] ?? [], true));
+
+        $htmlModule = $this->moduleTool->paletteGet('html');
+        $expect('an html module is not offered the login sub-palette', $htmlModule,
+            static fn ($r) => !\in_array('reg_homeDir', $r['fields'] ?? [], true)
+                && !\in_array('reg_jumpTo', $r['fields'] ?? [], true));
+
+        // Raw markup is its own type, not a hidden field of the html type —
+        // the AL-07 report looked for it in the wrong palette.
+        $expect('unfiltered markup lives on its own module type',
+            $this->moduleTool->paletteGet('unfiltered_html'),
+            static fn ($r) => ($r['known'] ?? false) === true
+                && \in_array('unfilteredHtml', $r['fields'] ?? [], true));
+        $expect('and on its own content type',
+            $this->contentTool->paletteGet('unfiltered_html'),
+            static fn ($r) => ($r['known'] ?? false) === true
+                && \in_array('unfilteredHtml', $r['fields'] ?? [], true));
+
+        // The rejection has to name the type, otherwise the caller cannot tell
+        // "this field does not exist" from "wrong type".
+        $paletteStamp = $stamp.'_pal';
+        $paletteArticle = $this->articleTool->create(page_id: (int) $this->connection->fetchOne(
+            "SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 1",
+        ) ?: 0, title: $paletteStamp, sorting: 128, inColumn: 'main');
+
+        if (\is_int($paletteArticle['id'] ?? null)) {
+            $paletteElement = $this->contentTool->create(
+                ptable: 'tl_article', pid: (int) $paletteArticle['id'], type: 'text', sorting: 128,
+                fields: ['text' => '<p>x</p>'],
+            );
+
+            $expect('a field from another type is refused, naming the type',
+                $this->contentTool->update((int) $paletteElement['id'], ['linkTitle' => 'nope']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'linkTitle'));
+
+            $this->connection->executeStatement('DELETE FROM tl_content WHERE id = ?', [(int) $paletteElement['id']]);
+            $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [(int) $paletteArticle['id']]);
+        } else {
+            $output->writeln('  <comment>~ Ablehnungs-Test übersprungen — keine Seite zum Anlegen eines Artikels</comment>');
+        }
 
         // ═══════════════════ DeepL-Übersetzung ═══════════════════
         //

@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Content;
 use Contao\Controller;
 use Contao\ContentModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
+use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
 /**
@@ -194,30 +195,41 @@ final class FieldMapper
      */
     public function allowedFieldsFor(string $type): array
     {
-        $this->framework->initialize();
-
-        $adapter = $this->framework->getAdapter(Controller::class);
-        $adapter->loadDataContainer('tl_content');
-
-        $dca = $GLOBALS['TL_DCA']['tl_content'] ?? [];
-        $palette = $dca['palettes'][$type] ?? '';
-        $subpalettes = $dca['subpalettes'] ?? [];
-
-        $fields = self::extractFields($palette);
-        foreach ($subpalettes as $subFields) {
-            foreach (self::extractFields((string) $subFields) as $f) {
-                $fields[] = $f;
-            }
-        }
-
         return array_values(array_unique(array_merge(
             self::COMMON_FIELDS,
-            $fields,
+            $this->resolvePalette($type)['fields'],
             // Extension-owned columns are not in the DCA palette, so without
             // this the validation above rejects them before their provider is
             // ever asked.
             $this->providerFields->declaredFor('tl_content'),
         )));
+    }
+
+    /**
+     * The sub-palettes this type actually opens, as selector => child fields.
+     *
+     * Answers the question a caller otherwise has to reverse-engineer from a
+     * rejection: which of these fields only exist because a toggle is in the
+     * palette, and which toggle is it.
+     *
+     * @return array<string, list<string>>
+     */
+    public function subpalettesFor(string $type): array
+    {
+        return $this->resolvePalette($type)['subpalettes'];
+    }
+
+    /**
+     * @return array{fields: list<string>, subpalettes: array<string, list<string>>}
+     */
+    private function resolvePalette(string $type): array
+    {
+        $this->framework->initialize();
+
+        $adapter = $this->framework->getAdapter(Controller::class);
+        $adapter->loadDataContainer('tl_content');
+
+        return DcaPalette::resolve($GLOBALS['TL_DCA']['tl_content'] ?? [], $type);
     }
 
     /**
@@ -278,27 +290,6 @@ final class FieldMapper
         return $current !== '' ? $current : 'text';
     }
 
-    /**
-     * @return list<string>
-     */
-    private static function extractFields(string $palette): array
-    {
-        if ($palette === '') {
-            return [];
-        }
-
-        // Palette syntax: "{legend},field1,field2;{legend2},field3,field4"
-        $out = [];
-        foreach (preg_split('/[;,]/', $palette) ?: [] as $token) {
-            $token = trim($token);
-            if ($token === '' || str_starts_with($token, '{')) {
-                continue;
-            }
-            $out[] = $token;
-        }
-
-        return $out;
-    }
 
     private function castValue(string $field, mixed $value): mixed
     {
