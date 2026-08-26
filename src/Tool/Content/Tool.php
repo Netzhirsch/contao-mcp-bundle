@@ -639,11 +639,33 @@ final class Tool
         }
 
         if ($fields === FieldMapper::COMMON_FIELDS) {
+            // Two very different situations produce the same short field list,
+            // and answering both with "call content_types_list" sends a caller
+            // in a circle when the type is listed there: unknown type, versus a
+            // registered type whose palette is assembled at edit time.
+            $known = \in_array($type, $this->mapper->allKnownTypes(), true);
+
+            if (!$known) {
+                return [
+                    'type' => $type,
+                    'known' => false,
+                    'message' => sprintf('Type "%s" is not registered in this installation — call content_types_list for the types that exist.', $type),
+                    'fields' => $fields,
+                ];
+            }
+
             return [
                 'type' => $type,
-                'known' => false,
-                'message' => sprintf('Type "%s" has no DCA palette in this installation. It may not be a valid content type — call content_types_list.', $type),
+                'known' => true,
+                'dynamic_palette' => true,
+                'message' => sprintf(
+                    'Type "%s" exists but has no STATIC palette: it is assembled at edit time (an onload callback, or virtual fields backed by a serialised column), so it cannot be read here. '
+                    .'Through content_create / content_update only the fields below plus any extension-declared fields are writable. '
+                    .'The extension providing this type usually ships its own tools for it — check installed_bundles (mcp_entity_extensions) and the tool panel under MCP-Server → Tools, where extension tools have to be enabled before they appear.',
+                    $type,
+                ),
                 'fields' => $fields,
+                'count' => \count($fields),
             ];
         }
 

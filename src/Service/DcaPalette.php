@@ -117,10 +117,14 @@ final class DcaPalette
      * Selector fields that are part of this type's palette.
      *
      * `__selector__` is the declared list, but an extension can register a
-     * sub-palette without adding to it (the backend toggle then does not work,
-     * yet the fields are real). A `subpalettes` key that IS a field of this
-     * palette is therefore treated as a selector too — that widens the result
-     * for a sloppy DCA rather than silently dropping its fields.
+     * sub-palette without adding to it — sometimes by accident, sometimes on
+     * purpose. Two more ways a selector is recognised, both widening the result
+     * rather than silently dropping real fields:
+     *
+     *   - a `subpalettes` key that IS a field of this palette (checkbox style);
+     *   - a prefix of a `subpalettes` key that is a field of this palette
+     *     (select style, where the key is `<selector>_<value>` and only the
+     *     selector ever appears in a palette).
      *
      * @param array<string, mixed> $palettes
      * @param array<string, mixed> $subpalettes
@@ -133,15 +137,29 @@ final class DcaPalette
         $declared = \is_array($palettes['__selector__'] ?? null) ? $palettes['__selector__'] : [];
 
         $candidates = array_map(strval(...), $declared);
+
         foreach (array_keys($subpalettes) as $key) {
-            $candidates[] = (string) $key;
+            $key = (string) $key;
+            $candidates[] = $key;
+
+            // A select-style key is "<selector>_<value>", and only the SELECTOR
+            // appears in the palette — the key itself never does. Without
+            // walking back over the underscores, such a sub-palette is
+            // unreachable whenever its selector is not in `__selector__`, which
+            // a DCA may leave out on purpose (netzhirsch/contao-bootstrap-bundle
+            // omits it so the backend does not render the group twice, and
+            // declares the sub-palettes purely so a write tool accepts the
+            // fields). Every prefix is offered as a candidate; the palette
+            // membership check below is what makes one of them count.
+            $parts = explode('_', $key);
+            while (\count($parts) > 1) {
+                array_pop($parts);
+                $candidates[] = implode('_', $parts);
+            }
         }
 
         $selectors = [];
         foreach (array_unique($candidates) as $candidate) {
-            // A select-style key ("type_navigation") is not itself a field; its
-            // selector is the part before the underscore, which the loop finds
-            // via the __selector__ list.
             if (\in_array($candidate, $paletteFields, true) && !\in_array($candidate, $selectors, true)) {
                 $selectors[] = $candidate;
             }

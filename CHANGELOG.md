@@ -6,6 +6,40 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Fixed
+- **Select-Subpaletten ohne `__selector__`-Eintrag waren seit 1.8.0
+  unerreichbar.** Contao benennt sie `<selektor>_<wert>`, und **nur der
+  Selektor** taucht je in einer Palette auf — der Schlüssel selbst nie. Die
+  Zuordnung aus 1.8.0 suchte Selektoren aber ausschließlich in `__selector__`
+  oder unter Schlüsseln, die selbst Palettenfelder sind. Beides trifft auf die
+  Grid-Felder von `netzhirsch/contao-bootstrap-bundle` nicht zu: Der Selektor
+  `netzhirsch_grid_element` steht in der Palette von `element_group`, ist aber
+  **absichtlich nicht** in `__selector__` (sonst rendert das Backend die Gruppe
+  doppelt), und die Subpaletten heißen `netzhirsch_grid_element_row` /`_col`.
+
+  Die DCA dort schreibt ausdrücklich, sie deklariere diese Subpaletten nur,
+  damit das MCP-Content-Tool die Felder in einem Aufruf annimmt — genau das ging
+  seit 1.8.0 nicht mehr. Die Auflösung läuft jetzt die Unterstrich-Präfixe eines
+  Subpaletten-Schlüssels rückwärts ab und nimmt das erste, das ein Feld **dieser**
+  Palette ist. Ein Präfix, das zufällig passt, aber kein Palettenfeld ist, bleibt
+  weiterhin draußen.
+
+- **`content_palette_get` schickte im Kreis.** Ein registrierter Typ ohne
+  statische Palette und ein gar nicht existierender Typ lieferten dieselbe
+  Antwort: die zwölf Basisfelder und „call content_types_list" — wo der Typ dann
+  wieder auftauchte. Drei Aufrufe, um nicht weiterzukommen.
+
+  Beide Fälle werden jetzt unterschieden. Ist der Typ registriert, hat aber keine
+  statische Palette (Palette entsteht im `onload_callback`, oder die Felder sind
+  virtuell über einer serialisierten Spalte), sagt die Antwort genau das,
+  markiert `dynamic_palette: true` und verweist darauf, dass die Erweiterung für
+  diesen Typ in aller Regel **eigene Tools** mitbringt — samt Hinweis, dass
+  Extension-Tools unter *MCP-Server → Tools* erst freigeschaltet werden müssen,
+  bevor sie überhaupt erscheinen. Die Ablehnung in `content_update` nennt
+  denselben Grund, statt auf `content_palette_get` zu verweisen, das nur dieselbe
+  Liste wiederholt.
+
+
 ## [1.8.0] – 2026-08-25
 
 > **Eine Verhaltensänderung, die eine Automatisierung merken kann:** Die

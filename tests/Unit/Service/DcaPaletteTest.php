@@ -256,6 +256,66 @@ final class DcaPaletteTest extends TestCase
         self::assertContains('b', $fields);
     }
 
+    /**
+     * The exact shape netzhirsch/contao-bootstrap-bundle ships for the grid
+     * fields, and a regression 1.8.0 introduced: the sub-palette keys are
+     * select-style (`netzhirsch_grid_element_row`), the selector
+     * `netzhirsch_grid_element` sits in the palette — and it is deliberately
+     * NOT in `__selector__`, so the backend does not render the group twice.
+     *
+     * Looking only at `__selector__` and at keys that are themselves palette
+     * fields misses both, and the fields become unwritable on every type. The
+     * DCA even documents that it declares these sub-palettes purely so a write
+     * tool accepts the fields, which is exactly what stopped working.
+     */
+    public function testASelectStyleKeyFindsItsSelectorByPrefix(): void
+    {
+        $dca = [
+            'palettes' => [
+                // No __selector__ entry for netzhirsch_grid_element, on purpose.
+                '__selector__' => ['type'],
+                'element_group' => '{type_legend},type,netzhirsch_grid_element;{expert_legend},cssID',
+                'text' => '{type_legend},type,text',
+            ],
+            'subpalettes' => [
+                'netzhirsch_grid_element_row' => 'netzhirsch_grid_rowcols,netzhirsch_grid_gx',
+                'netzhirsch_grid_element_col' => 'netzhirsch_grid_col,netzhirsch_grid_offset',
+            ],
+        ];
+
+        $group = DcaPalette::resolve($dca, 'element_group');
+
+        // Both variants, because which one is open depends on the stored value.
+        self::assertContains('netzhirsch_grid_rowcols', $group['fields']);
+        self::assertContains('netzhirsch_grid_gx', $group['fields']);
+        self::assertContains('netzhirsch_grid_col', $group['fields']);
+        self::assertContains('netzhirsch_grid_offset', $group['fields']);
+        self::assertArrayHasKey('netzhirsch_grid_element', $group['subpalettes']);
+
+        // …and still only for the type that carries the selector.
+        $text = DcaPalette::resolve($dca, 'text')['fields'];
+        self::assertNotContains('netzhirsch_grid_col', $text);
+        self::assertNotContains('netzhirsch_grid_rowcols', $text);
+    }
+
+    /**
+     * The prefix walk must not invent a selector out of a coincidence: a
+     * sub-palette key whose prefix is not a field of THIS palette stays out.
+     */
+    public function testAPrefixThatIsNotAPaletteFieldIsNoSelector(): void
+    {
+        $dca = [
+            'palettes' => [
+                'thing' => '{title_legend},type,name',
+            ],
+            'subpalettes' => [
+                'some_toggle_on' => 'secretField',
+            ],
+        ];
+
+        self::assertNotContains('secretField', DcaPalette::resolve($dca, 'thing')['fields']);
+    }
+
     public function testAMissingPalettesSectionDoesNotCrash(): void
     {
         self::assertSame(['fields' => [], 'subpalettes' => []], DcaPalette::resolve([], 'anything'));

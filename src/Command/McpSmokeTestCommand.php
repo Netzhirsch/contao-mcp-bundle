@@ -2951,6 +2951,24 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => \in_array('linkTitle', $r['fields'] ?? [], true)
                 && \in_array('titleText', $r['fields'] ?? [], true));
 
+        // A registered type whose palette is built at edit time (onload callback,
+        // virtual fields over a serialised column) and a type that does not
+        // exist both come back with nothing but the base fields. Answering both
+        // with "call content_types_list" sent callers in a circle: the type IS
+        // listed there.
+        $GLOBALS['TL_CTE']['texts']['smoke_dynamic_palette'] = 'stdClass';
+
+        $expect('a registered type without a static palette says so', $this->contentTool->paletteGet('smoke_dynamic_palette'),
+            static fn ($r) => ($r['known'] ?? false) === true
+                && ($r['dynamic_palette'] ?? false) === true
+                && str_contains((string) ($r['message'] ?? ''), 'no STATIC palette'));
+        $expect('while an unregistered type is named as unregistered', $this->contentTool->paletteGet('smoke_no_such_type'),
+            static fn ($r) => ($r['known'] ?? true) === false
+                && str_contains((string) ($r['message'] ?? ''), 'not registered')
+                && !isset($r['dynamic_palette']));
+
+        unset($GLOBALS['TL_CTE']['texts']['smoke_dynamic_palette']);
+
         $htmlModule = $this->moduleTool->paletteGet('html');
         $expect('an html module is not offered the login sub-palette', $htmlModule,
             static fn ($r) => !\in_array('reg_homeDir', $r['fields'] ?? [], true)

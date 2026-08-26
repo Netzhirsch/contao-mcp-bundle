@@ -143,11 +143,22 @@ final class FieldMapper
         // ─── Validate ───
         foreach (array_keys($input) as $field) {
             if (!\in_array($field, $allowed, true)) {
+                // A type whose palette is built at edit time resolves to
+                // nothing here, and the base list is all that is left. Saying
+                // "see content_palette_get" would then send the caller to an
+                // answer that repeats this same list — the field is not missing
+                // from a palette, there IS no readable palette.
+                $dynamic = $this->resolvePalette($type)['fields'] === [];
+
                 throw new \InvalidArgumentException(sprintf(
-                    'Field "%s" is not valid for content type "%s". Use content_palette_get("%s") to see allowed fields. Currently allowed: %s.',
+                    $dynamic
+                        ? 'Field "%s" cannot be written on content type "%s": that type has no static palette (it is assembled at edit time), so only the base fields and extension-declared fields are writable here — %5$s. '
+                            .'The extension providing this type usually ships its own tools; see installed_bundles and enable them under MCP-Server → Tools.'
+                        : 'Field "%1$s" is not valid for content type "%2$s". Use content_palette_get("%3$s") to see allowed fields. Currently allowed: %4$s.',
                     $field,
                     $type,
                     $type,
+                    implode(', ', $allowed),
                     implode(', ', $allowed),
                 ));
             }
