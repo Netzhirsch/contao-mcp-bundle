@@ -6,6 +6,17 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.8.1] – 2026-08-26
+
+> **Patch für eine Regression aus 1.8.0.** Die Subpaletten-Zuordnung, die in
+> 1.8.0 eingeführt wurde, erreichte Select-Subpaletten nicht mehr, deren
+> Selektor bewusst nicht in `__selector__` steht — konkret die Grid-Felder von
+> `netzhirsch/contao-bootstrap-bundle`, die seit 1.8.0 auf keinem Inhaltstyp
+> mehr schreibbar waren. Wer 1.8.0 installiert hat und diese Felder nutzt,
+> sollte aktualisieren.
+>
+> Schemafrei, keine Migration.
+
 ### Fixed
 - **Select-Subpaletten ohne `__selector__`-Eintrag waren seit 1.8.0
   unerreichbar.** Contao benennt sie `<selektor>_<wert>`, und **nur der
