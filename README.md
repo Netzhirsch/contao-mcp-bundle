@@ -573,6 +573,35 @@ entfernen:
 Danach `composer update netzhirsch/contao-mcp-bundle`. Ein Tag kommt dann als
 Archiv, und der `GitDownloader` ist gar nicht mehr beteiligt.
 
+### Wenn Composer über `psr/http-message` stolpert
+
+Die Meldung sieht so aus:
+
+```
+- php-mcp/server 3.3.0 requires react/http ^1.11 -> satisfiable by react/http[v1.11.0].
+- react/http v1.11.0 requires psr/http-message ^1.0 -> found psr/http-message[1.0, 1.0.1, 1.1]
+  but these were not loaded, likely because it conflicts with another require.
+```
+
+**Ab Version 1.9.0 tritt das nicht mehr auf**: das Bundle installiert
+`react/http` nicht mehr mit (siehe CHANGELOG). Auf einer Installation ≤ 1.8.x
+ist ein Update auf `^1.9` die Lösung.
+
+Falls die Meldung trotzdem auftaucht, ist der Hintergrund immer derselbe:
+irgendein Paket im Projekt verlangt `psr/http-message ^2.0`, ein anderes
+besteht auf `^1.0`. Wer das ist, zeigt die `composer.lock`:
+
+```bash
+php -r '$l=json_decode(file_get_contents("composer.lock"),true); foreach($l["packages"] as $p){$c=$p["require"]["psr/http-message"]??null; if($c)printf("%-42s %s\n",$p["name"],$c);}'
+```
+
+Gesucht ist die Zeile, in der **kein** `^1.` vorkommt — das ist der Blockierer.
+
+Eine Falle beim Beheben: `composer update <paket> --with-all-dependencies`
+hilft hier **nicht**. Ein Teil-Update darf nur Abhängigkeiten der genannten
+Pakete bewegen — der Blockierer ist aber meist ein Geschwister, kein Kind.
+Er muss mit auf die Kommandozeile, sonst bleibt `-W` wirkungslos.
+
 ### Console-Kommandos
 
 | Kommando | Zweck | Empfohlener Rhythmus |

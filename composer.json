@@ -57,6 +57,9 @@
         "terminal42/contao-leads": "^3.3",
         "terminal42/contao-url-rewrite": "^1.8"
     },
+    "replace": {
+        "react/http": "*"
+    },
     "suggest": {
         "contao/calendar-bundle": "Required for calendar_* and calendar_event_* tools.",
         "contao/comments-bundle": "Required for comment_* tools.",

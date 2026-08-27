@@ -404,6 +404,35 @@ archive and `GitDownloader` is out of the picture entirely.
 The Contao cron must be running (`contao:cron` or the web cron) — automatic
 license renewal depends on it.
 
+### When Composer trips over `psr/http-message`
+
+The message looks like this:
+
+```
+- php-mcp/server 3.3.0 requires react/http ^1.11 -> satisfiable by react/http[v1.11.0].
+- react/http v1.11.0 requires psr/http-message ^1.0 -> found psr/http-message[1.0, 1.0.1, 1.1]
+  but these were not loaded, likely because it conflicts with another require.
+```
+
+**As of version 1.9.0 this no longer happens**: the bundle does not pull in
+`react/http` any more (see the CHANGELOG). On an installation running ≤ 1.8.x,
+updating to `^1.9` is the fix.
+
+If the message shows up anyway, the cause is always the same: some package in
+the project requires `psr/http-message ^2.0` while another insists on `^1.0`.
+The lock file names the culprit:
+
+```bash
+php -r '$l=json_decode(file_get_contents("composer.lock"),true); foreach($l["packages"] as $p){$c=$p["require"]["psr/http-message"]??null; if($c)printf("%-42s %s\n",$p["name"],$c);}'
+```
+
+Look for the line without a `^1.` in it — that is the blocker.
+
+One trap while fixing it: `composer update <package> --with-all-dependencies`
+does **not** help here. A partial update may only move dependencies *of the
+listed packages*, and the blocker is usually a sibling, not a child. It has to
+be named on the command line too, or `-W` changes nothing.
+
 ## Translating with DeepL
 
 Needs [`numero2/contao-deepl`](https://github.com/numero2/contao-deepl) and a

@@ -6,6 +6,35 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.9.0] – 2026-08-27
+
+> Nur die Abhängigkeiten betroffen: kein Schemawechsel, keine Migration, keine
+> Änderung an Tools oder Konfiguration.
+
+### Changed
+- **`react/http` wird nicht mehr mitinstalliert.** `php-mcp/server` verlangt
+  `react/http ^1.11` für seine beiden eigenen HTTP-Transports
+  (`HttpServerTransport`, `StreamableHttpServerTransport`). Dieses Bundle
+  spricht MCP über einen Symfony-Controller und lädt jene Klassen nie —
+  `react/http` war reines Beiwerk. Es besteht aber auf `psr/http-message ^1.0`
+  und blockierte damit jede Installation, auf der ein anderes Paket
+  `psr/http-message ^2.0` fordert. Beobachtet auf einer Kundeninstanz mit
+  `alnv/prosearch-indexer-contao-adapter-bundle`, das
+  `opensearch-project/opensearch-php` mitbringt — ab dessen Version 2.4.6
+  gilt dort `psr/http-message ^2.0`, und die Installation war nicht mehr
+  auflösbar (auch nicht mit `--with-all-dependencies`).
+
+  Ein `replace`-Eintrag hält `react/http` und `react/socket` draußen.
+  `react/event-loop`, `react/promise` und `react/stream` bleiben installiert —
+  die benutzt der Kern von `php-mcp/server` (Protocol, ServerBuilder,
+  SessionManager) tatsächlich.
+
+  **Nebenwirkung, die man kennen sollte:** `replace` sagt Composer, dieses
+  Bundle liefere `react/http`. Braucht in einem Projekt ein anderes Paket
+  `react/http` transitiv, wird es künftig nicht mehr installiert und fällt
+  erst zur Laufzeit auf. In einem Contao-Projekt ist das unwahrscheinlich,
+  aber es ist kein Nullrisiko.
+
 ## [1.8.2] – 2026-08-26
 
 > **Sicherheitsrelevanter Fix.** Bei der dynamischen Client-Registrierung
