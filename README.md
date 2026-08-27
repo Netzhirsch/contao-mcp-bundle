@@ -4,7 +4,7 @@
 
 *🇬🇧 [English version](README.en.md) — diese deutsche Fassung ist die Referenz.*
 
-**Status:** Stable — `v1.8.1`
+**Status:** Stable — `v1.8.2`
 **Lizenz:** proprietär, kommerziell lizenziert — 30 Tage kostenlos testen,
 danach 49 €/Monat je Contao-Instanz (siehe [Lizenz & Testphase](#lizenz--testphase)
 und [LICENSE](LICENSE))
@@ -383,7 +383,7 @@ erzeugt ihn dann über den Slug-Service aus dem neuen Titel neu.
 
 ## Bekannte Einschränkungen
 
-Stand `v1.8.1`:
+Stand `v1.8.2`:
 
 - **PHPUnit-Coverage** deckt OAuth-Crypto, die Permission-Map und den
   Usage-Scanner ab. Der Tool-Layer wird stattdessen end-to-end vom Smoke-Test

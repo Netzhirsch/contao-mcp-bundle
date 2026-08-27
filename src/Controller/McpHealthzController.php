@@ -179,6 +179,24 @@ final class McpHealthzController
     }
 
     /**
+     * An absolute path, cut down to what is inside the project.
+     *
+     * This endpoint answers without authentication, so every string in it is
+     * public. A path like `var/mcp/oauth/private.pem` is in the README anyway
+     * and tells the operator which file to look at; the absolute form would
+     * hand out the server's directory structure and account name for free.
+     */
+    private function relativePath(string $absolute): string
+    {
+        $project = rtrim(str_replace(DIRECTORY_SEPARATOR, '/', $this->projectDir), '/').'/';
+        $normalised = str_replace(DIRECTORY_SEPARATOR, '/', $absolute);
+
+        return str_starts_with($normalised, $project)
+            ? substr($normalised, \strlen($project))
+            : basename($normalised);
+    }
+
+    /**
      * @return array{name: string, ok: bool, status?: string, private_key_age_days?: float, error?: string}
      */
     private function checkOAuthKeys(): array
@@ -186,7 +204,12 @@ final class McpHealthzController
         try {
             $config = $this->configStorage->load();
         } catch (\Throwable $e) {
-            return ['name' => 'oauth_keys', 'ok' => false, 'error' => 'config load failed: '.$e->getMessage()];
+            // Public endpoint: a raw exception message here has carried file
+            // paths and JSON fragments of the config itself. The detail belongs
+            // in the log, where the operator can read it and a stranger cannot.
+            $this->logger->error('MCP healthz: could not load the server config.', ['exception' => $e]);
+
+            return ['name' => 'oauth_keys', 'ok' => false, 'error' => 'config could not be loaded — see the application log'];
         }
 
         $authMode = (string) ($config['auth_mode'] ?? 'none');
@@ -199,18 +222,21 @@ final class McpHealthzController
         $privatePath = $this->keyManager->privateKeyPath();
         $publicPath = $this->keyManager->publicKeyPath();
 
+        // Project-relative, never absolute — same reason as checkVarMcpDir():
+        // the operator still learns WHICH key is missing, a stranger learns
+        // nothing about the server's filesystem layout or account name.
         if (!is_file($privatePath) || !is_readable($privatePath)) {
             return [
                 'name' => 'oauth_keys',
                 'ok' => false,
-                'error' => 'private key missing or unreadable: '.$privatePath,
+                'error' => 'private key missing or unreadable: '.$this->relativePath($privatePath),
             ];
         }
         if (!is_file($publicPath) || !is_readable($publicPath)) {
             return [
                 'name' => 'oauth_keys',
                 'ok' => false,
-                'error' => 'public key missing or unreadable: '.$publicPath,
+                'error' => 'public key missing or unreadable: '.$this->relativePath($publicPath),
             ];
         }
 
@@ -244,7 +270,7 @@ final class McpHealthzController
                 'name' => 'disk_free',
                 'ok' => false,
                 'threshold_mb' => $threshold,
-                'error' => 'disk_free_space() returned false for '.$path,
+                'error' => 'disk_free_space() returned false for '.$this->relativePath($path),
             ];
         }
 

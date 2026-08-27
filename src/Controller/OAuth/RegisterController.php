@@ -103,13 +103,30 @@ final class RegisterController
         }
         $redirectUris = array_values(array_map('strval', $redirectUris));
         $authMethod = (string) ($body['token_endpoint_auth_method'] ?? 'none');
-        // We support `none` (public clients with PKCE) + `client_secret_post`
-        // / `client_secret_basic` (confidential clients). MCP Inspector
-        // typically uses `none`.
+        // Exactly the three the authorization-server metadata advertises. The
+        // value used to be taken as given, so ANY string other than "none"
+        // turned the client confidential — a security property decided by the
+        // registering party.
+        if (!\in_array($authMethod, self::SUPPORTED_AUTH_METHODS, true)) {
+            return $this->refuse(
+                $request,
+                'invalid_client_metadata',
+                sprintf(
+                    'Unsupported token_endpoint_auth_method "%s". Supported: %s.',
+                    $authMethod,
+                    implode(', ', self::SUPPORTED_AUTH_METHODS),
+                ),
+                400,
+            );
+        }
+        // `none` = public client with PKCE (what MCP Inspector and Claude use);
+        // the other two get a client secret. This decides whether a secret is
+        // issued — and NOTHING else. In particular it must not relax redirect
+        // URI validation, see isValidRedirectUri().
         $isConfidential = $authMethod !== 'none';
 
         foreach ($redirectUris as $uri) {
-            if (!self::isValidRedirectUri($uri, $isConfidential)) {
+            if (!self::isValidRedirectUri($uri)) {
                 return $this->refuse(
                     $request,
                     'invalid_redirect_uri',
@@ -222,12 +239,21 @@ final class RegisterController
      *   - http://127.0.0.1    OK (loopback, RFC 8252)
      *   - http://[::1]        OK (IPv6 loopback)
      *   - <custom-scheme>://  OK (mobile / desktop apps, e.g. claude://, mcp-inspector://)
-     *   - http://example.com  REJECTED — open redirect risk
+     *   - http://example.com  REJECTED — the code would travel in clear text
      *
-     * `$confidential = true` (registered with a client_secret) relaxes the
-     * loopback restriction because confidential clients are server-side and
-     * can hold cookies / secrets safely.
+     * The rules are the same for every client. There used to be an exemption
+     * for confidential ones, which a registering party could claim for itself
+     * simply by sending a token_endpoint_auth_method other than "none".
      */
+    /**
+     * The client authentication methods this server accepts, identical to what
+     * the authorization-server metadata advertises. A registration naming
+     * anything else is refused rather than quietly treated as confidential.
+     *
+     * @var list<string>
+     */
+    private const SUPPORTED_AUTH_METHODS = ['none', 'client_secret_post', 'client_secret_basic'];
+
     /**
      * Schemes that can execute script or read local resources in a browser
      * context. Never acceptable as redirect targets, even via DCR.
@@ -237,7 +263,7 @@ final class RegisterController
         'chrome', 'chrome-extension', 'ms-appx', 'res',
     ];
 
-    private static function isValidRedirectUri(string $uri, bool $confidential = false): bool
+    private static function isValidRedirectUri(string $uri): bool
     {
         $parts = parse_url($uri);
         if ($parts === false || !isset($parts['scheme'])) {
@@ -265,11 +291,17 @@ final class RegisterController
         if ($scheme === 'https') {
             return true;
         }
-        // http only for loopback (RFC 8252 §7.3) — unless confidential.
+        // http only for loopback (RFC 8252 §7.3), for EVERY client.
+        //
+        // This used to wave confidential clients through to any http host, on
+        // the reasoning that they are server-side. But whether a client is
+        // confidential came from the registration body — so a registering party
+        // could declare itself confidential and then point a redirect URI at
+        // http://its-own-host/. An authorization code would travel there in
+        // clear text, and the client secret to redeem it is the one it just
+        // received. OAuth 2.1 requires https for redirect URIs anyway, loopback
+        // excepted.
         if ($scheme === 'http') {
-            if ($confidential) {
-                return true;
-            }
             return \in_array($host, ['localhost', '127.0.0.1', '[::1]', '::1'], true);
         }
         // Custom URI schemes for native apps (RFC 8252 §7.1).

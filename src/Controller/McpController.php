@@ -188,7 +188,11 @@ final class McpController
         try {
             $message = Parser::parseRequestMessage($raw);
         } catch (\Throwable $e) {
-            return $this->errorResponse(null, McpServerException::parseError($e->getMessage()));
+            // The catch is deliberately broad, so the message is not
+            // necessarily about the caller's JSON — it can be anything the
+            // parser chose to throw. The caller already holds the body it
+            // sent; naming the fault is enough.
+            return $this->errorResponse(null, McpServerException::parseError('Malformed JSON-RPC request body.'));
         }
 
         // 3. Dispatch via php-mcp.
@@ -449,11 +453,9 @@ final class McpController
         // Every attempt failed — nothing was deleted.
         $this->undoRecorder->discard($undoId);
 
-        $this->logger->error('MCP dispatch failed after DCA-cache retries.', ['exception' => $lastError]);
-
         return McpServerException::internalError(
-            'Transient filesystem error (DCA cache busy) persisted after '.self::DCA_CACHE_RACE_RETRIES.' attempts: '
-            .$lastError->getMessage(),
+            'Transient filesystem error (DCA cache busy) persisted after '.self::DCA_CACHE_RACE_RETRIES.' attempts. '
+            .$this->opaqueError($lastError, 'MCP dispatch failed after DCA-cache retries.'),
         )->toJsonRpcError($id);
     }
 

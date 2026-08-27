@@ -6,6 +6,72 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.8.2] – 2026-08-26
+
+> **Sicherheitsrelevanter Fix.** Bei der dynamischen Client-Registrierung
+> konnte ein Client bestimmen, ob er als „confidential" gilt — und damit die
+> Prüfung seiner Redirect-URIs lockern. Instanzen mit
+> `oauth_registration_mode: open`, oder mit einem offenen Pairing-Fenster,
+> sollten aktualisieren. Gemeldet von **Sebastian Zoglowek**.
+>
+> Schemafrei, keine Migration.
+
+### Security
+- **Ein Client konnte seine eigene Vertrauensstufe setzen.**
+  `token_endpoint_auth_method` kommt aus dem Registrierungs-Body, und jeder Wert
+  außer `none` machte den Client „confidential". Für confidential-Clients ließ
+  die Redirect-URI-Prüfung **jeden** `http://`-Host durch — die
+  Loopback-Beschränkung aus RFC 8252 galt dann nicht.
+
+  In Kombination heißt das: Wer sich registrieren darf, konnte sich als
+  confidential ausgeben und eine Redirect-URI auf `http://eigener-host/` legen.
+  Ein Authorization Code wäre dort im Klartext angekommen, und das Client-Secret
+  zum Einlösen hat derselbe Vorgang gerade ausgegeben.
+
+  Zwei Änderungen: `token_endpoint_auth_method` wird jetzt gegen die drei
+  Verfahren geprüft, die die Authorization-Server-Metadata ausweist —
+  alles andere wird mit `invalid_client_metadata` abgelehnt statt stillschweigend
+  als confidential gewertet. Und `http://` ist wieder für **alle** Clients auf
+  Loopback beschränkt; der Parameter, über den die Ausnahme lief, ist ersatzlos
+  aus dem Validator entfernt, damit sie nicht zurückkommen kann.
+
+  **Verhaltensänderung:** Eine Registrierung mit einer `http://`-Redirect-URI auf
+  einen Nicht-Loopback-Host wird jetzt abgelehnt. OAuth 2.1 verlangt dort
+  ohnehin `https`.
+
+### Fixed
+- **`/mcp/healthz` gab absolute Pfade und rohe Ausnahmetexte heraus.** Der
+  Endpunkt antwortet ohne Authentifizierung, sein gesamter Inhalt ist also
+  öffentlich. Drei Stellen lieferten mehr, als sie mussten: der Pfad des
+  privaten und des öffentlichen OAuth-Schlüssels, der Projektpfad bei einem
+  fehlgeschlagenen `disk_free_space()`, und der komplette Ausnahmetext, wenn die
+  Server-Konfiguration nicht geladen werden konnte.
+
+  Pfade werden jetzt projektrelativ gemeldet (`var/mcp/oauth/private.pem`) —
+  genau das, was `checkVarMcpDir()` im selben File schon vorgemacht hat. Der
+  Betreiber sieht weiterhin, welcher Schlüssel fehlt; die Verzeichnisstruktur des
+  Servers samt Account-Name bleibt drin. Der Konfigurationsfehler landet im
+  Anwendungslog und die Antwort verweist darauf.
+
+  Ein Smoke-Assert prüft jetzt die **Klasse**: Die Healthz-Antwort darf das
+  Projektverzeichnis nirgends enthalten. Damit fällt eine künftige Prüfung, die
+  wieder mit absoluten Pfaden formuliert wird, im Test auf statt in einem
+  Bericht.
+
+- **Zwei Fehlerpfade umgingen die Opaque-Fehlermeldung.** Der Retry-Pfad für
+  DCA-Cache-Rennen hängte `$e->getMessage()` an die Antwort an, und ein
+  fehlgeschlagenes Parsen des JSON-RPC-Bodys gab weiter, was der Parser warf —
+  bei einem `catch (\Throwable)` ist das nicht zwangsläufig etwas über das JSON
+  des Aufrufers. Beide laufen jetzt über `opaqueError()` bzw. eine feste
+  Meldung; die Einzelheiten stehen mit Referenznummer im Log.
+
+  Nicht geändert: `AuthorizeController` und `TokenController` geben weiterhin
+  `OAuthServerException::getMessage()` als `error_description` aus. Diese Texte
+  sind von league/oauth2-server als clientseitig lesbar vorgesehen und von
+  RFC 6749 §5.2 so verlangt — sie zu verschleiern würde die Spezifikation
+  brechen und die Fehlersuche in Clients unmöglich machen.
+
+
 ## [1.8.1] – 2026-08-26
 
 > **Patch für eine Regression aus 1.8.0.** Die Subpaletten-Zuordnung, die in

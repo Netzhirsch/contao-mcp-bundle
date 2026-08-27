@@ -767,14 +767,36 @@ final class McpSmokeTestCommand extends Command
         $validate->setAccessible(true);
         foreach (['javascript:alert(1)', 'data:text/html,<script>x</script>', 'vbscript:msgbox', 'file:///etc/passwd'] as $bad) {
             $expect("redirect_uri allowlist rejects: $bad",
-                $validate->invoke(null, $bad, false),
+                $validate->invoke(null, $bad),
                 fn ($r) => $r === false);
         }
         foreach (['https://example.com/cb', 'http://localhost:1234/cb', 'claude://oauth/callback'] as $good) {
             $expect("redirect_uri allowlist accepts: $good",
-                $validate->invoke(null, $good, false),
+                $validate->invoke(null, $good),
                 fn ($r) => $r === true);
         }
+
+        // Reported by Sebastian Zoglowek: the validator used to take a
+        // "confidential" flag that waved any http host through — and whether a
+        // client was confidential came from its own registration body. So a
+        // registering party could claim it and point the redirect at
+        // http://its-own-host/, where an authorization code would arrive in
+        // clear text. There is no exemption any more, for anyone.
+        foreach (['http://attacker.example/cb', 'http://192.0.2.10/cb', 'http://sub.localhost.attacker.example/cb'] as $bad) {
+            $expect("non-loopback http is refused whatever the client claims: $bad",
+                $validate->invoke(null, $bad),
+                fn ($r) => $r === false);
+        }
+        $expect('and the validator no longer accepts a trust flag at all',
+            $validate->getNumberOfParameters(),
+            fn ($n) => $n === 1);
+
+        // The declared auth method must be one the metadata advertises;
+        // anything else used to mean "confidential".
+        $expect('only the advertised client auth methods are accepted',
+            (new \ReflectionClass(\Netzhirsch\ContaoMcpBundle\Controller\OAuth\RegisterController::class))
+                ->getConstant('SUPPORTED_AUTH_METHODS'),
+            fn ($m) => $m === ['none', 'client_secret_post', 'client_secret_basic']);
 
         // OAuth key rotation — exercise the rotate + prune cycle through
         // KeyManager directly. We don't rely on a real OAuth token here
@@ -1518,7 +1540,8 @@ final class McpSmokeTestCommand extends Command
         $expect('healthz Cache-Control is no-store (avoid CDN caching probe results)',
             (string) $healthzResponse->headers->get('Cache-Control'),
             fn ($r) => str_contains((string) $r, 'no-store'));
-        $healthzBody = json_decode((string) $healthzResponse->getContent(), true);
+        $healthzRaw = (string) $healthzResponse->getContent();
+        $healthzBody = json_decode($healthzRaw, true);
         $expect('healthz body parses as JSON',
             $healthzBody,
             fn ($r) => \is_array($r) && isset($r['status'], $r['checks'], $r['bundle_version']));
@@ -1532,6 +1555,15 @@ final class McpSmokeTestCommand extends Command
         $expect('healthz database check ok=true',
             $healthzBody['checks'][0] ?? null,
             fn ($r) => ($r['ok'] ?? null) === true);
+
+        // The endpoint answers without authentication, so its whole body is
+        // public. Checking for the project directory covers the class rather
+        // than the three places that leaked it — a future check that builds a
+        // message from an absolute path fails here instead of in a report.
+        $expect('healthz never hands out an absolute path',
+            $healthzRaw,
+            fn (string $body) => !str_contains($body, str_replace(DIRECTORY_SEPARATOR, '/', $this->projectDir))
+                && !str_contains($body, $this->projectDir));
 
         // Backend-permission parity. Proves the guard maps MCP access to the
         // caller's real Contao rights via Contao's own voters. Uses a throwaway
