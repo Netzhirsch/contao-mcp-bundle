@@ -118,6 +118,7 @@ final class McpSmokeTestCommand extends Command
         private readonly \Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer $permissionEnforcer,
         private readonly McpCallContext $mcpCallContext,
         private readonly HttpDispatcherFactory $dispatcherFactory,
+        private readonly \Netzhirsch\ContaoMcpBundle\Tool\Discovery\Tool $discoveryTool,
         private readonly ToolFilter $toolFilter,
         private readonly RegistryAccessor $registryAccessor,
         private readonly McpController $mcpController,
@@ -2624,6 +2625,57 @@ final class McpSmokeTestCommand extends Command
         $expect('an unknown tool still raises', $threw, static fn ($t) => $t === true);
         $expect('post-call hook ran even though the call threw',
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
+
+
+        // ── Unbekannte Parameter ───────────────────────────────────────────
+        //
+        // php-mcp generates no `additionalProperties`, so schema validation
+        // waves an unknown key through, and prepareArguments() then reads only
+        // the parameters the method declares — the key vanished and the call
+        // reported success. One transposed letter in `pageTitle` was enough to
+        // make page_update a no-op that looked like a write.
+        $argGuardPageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 1");
+
+        $decodeResult = static function (CallToolResult $r): array {
+            $text = '';
+            foreach ($r->content as $item) {
+                $text .= $item->text ?? '';
+            }
+            $decoded = json_decode($text, true);
+
+            return \is_array($decoded) ? $decoded : [];
+        };
+
+        $bogus = $dispatcher->handleToolCall(new CallToolRequest(
+            4,
+            'page_update',
+            ['id' => $argGuardPageId, 'pageTitel' => 'typo '.$stamp],
+        ));
+        $bogusBody = $decodeResult($bogus);
+
+        $expect('an unknown parameter is refused instead of dropped',
+            $bogus, static fn ($r) => $r instanceof CallToolResult && $r->isError);
+        $expect('the refusal names the parameter and suggests the real one',
+            (string) ($bogusBody['message'] ?? ''),
+            static fn (string $m) => str_contains($m, 'pageTitel') && str_contains($m, 'did you mean "pageTitle"'));
+        $expect('the refused call changed nothing',
+            (int) $this->connection->fetchOne(
+                'SELECT COUNT(*) FROM tl_page WHERE id = ? AND pageTitle LIKE ?',
+                [$argGuardPageId, 'typo %'],
+            ),
+            static fn (int $n) => $n === 0);
+
+        // The lazy-mode proxy invokes tools itself and never reaches the
+        // dispatcher's validation, so it needs the same guard — on those
+        // instances EVERY call arrives through it.
+        $proxied = $this->discoveryTool->call('page_update', ['id' => $argGuardPageId, 'pageTitel' => 'typo '.$stamp]);
+
+        $expect('contao_call refuses an unknown parameter too',
+            $proxied,
+            static fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'invalid_input');
+        $expect('contao_call still accepts a correct call',
+            $this->discoveryTool->call('page_get', ['id' => $argGuardPageId]),
+            static fn ($r) => \is_array($r) && !isset($r['error']));
 
 
 

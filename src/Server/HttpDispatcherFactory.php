@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Server;
 
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\ContaoMcpBundle;
+use Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard;
 use PhpMcp\Server\Server;
 use PhpMcp\Server\Dispatcher;
 use PhpMcp\Server\Session\SubscriptionManager;
@@ -53,6 +54,7 @@ final class HttpDispatcherFactory
         private readonly RegistryAccessor $registryAccessor,
         private readonly ToolFilter $toolFilter,
         private readonly PostCallHook $postCallHook,
+        private readonly UnknownArgumentGuard $unknownArgumentGuard,
         private readonly ExtensionToolRegistrar $extensionToolRegistrar,
         private readonly RequestStack $requestStack,
         private readonly string $serverName,
@@ -100,6 +102,7 @@ final class HttpDispatcherFactory
             new ObjectAwareSchemaValidator($this->logger),
             $this->toolFilter,
             $this->postCallHook,
+            $this->unknownArgumentGuard,
             $this->logger,
         );
 

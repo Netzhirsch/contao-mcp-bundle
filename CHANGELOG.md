@@ -6,6 +6,51 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.10.0] – 2026-08-28
+
+> Verhaltensänderung an jedem Tool mit benannten Parametern: ein Parameter, den
+> es nicht gibt, führt jetzt zu einem Fehler statt zu einem stillen No-Op.
+> Schemafrei, keine Migration.
+
+### Fixed
+- **Unbekannte Parameter wurden stillschweigend verworfen.** `page_update(id: 7,
+  pageTitel: "…")` — ein vertauschter Buchstabe — lieferte die
+  Seiten-Zusammenfassung zurück und `applied: 0`, ohne ein Wort. Wer `applied`
+  nicht prüfte, hielt den Aufruf für erfolgreich. Gemeldet von **Jan-Philipp
+  Kalus**.
+
+  Zwei Schichten mussten das übersehen, und beide taten es. Der
+  `SchemaGenerator` von `php-mcp/server` setzt nie `additionalProperties`, und
+  in JSON Schema heißt dessen Abwesenheit „alles Weitere erlaubt" — die
+  Validierung im Dispatcher winkt den unbekannten Schlüssel also durch.
+  Danach läuft `RegisteredElement::prepareArguments()` über die **Parameter der
+  Methode** und pickt sich passende Einträge heraus; was zu keinem Parameter
+  gehört, wird nie angesehen.
+
+  Neu ist `Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard`. Er
+  vergleicht die übergebenen Schlüssel mit den Properties des Tool-Schemas,
+  verweigert den Aufruf, nennt den unbekannten Parameter und schlägt bei einem
+  Tippfehler den gemeinten vor:
+
+  ```
+  Tool "page_update" has no parameter "pageTitel" (did you mean "pageTitle"?).
+  Nothing was changed. Allowed parameters: id, pid, title, type, sorting, …
+  ```
+
+  Geprüft wird an **zwei** Stellen, weil es zwei Wege in ein Tool gibt: im
+  `ContaoDispatcher` für direkte `tools/call`, und im `contao_call`-Proxy, der
+  Tools selbst aufruft und die Schema-Validierung damit komplett umgeht. Auf
+  Lazy-Mode-Instanzen kommt **jeder** Aufruf über diesen Proxy — dort war die
+  Lücke am größten.
+
+  Nur die oberste Ebene wird geprüft. Ein `fields`-Objekt trägt legitim
+  beliebige DCA-Spaltennamen, und das besitzende Tool validiert die ohnehin
+  gründlicher (`content_update` tat das schon immer — es war das Vorbild für
+  diesen Fix).
+
+- **Tools ohne Parameter nehmen jetzt auch keine mehr an.** `ping` schluckte
+  bisher alles, was man ihm mitgab.
+
 ## [1.9.1] – 2026-08-28
 
 > Behebt einen Gateway Timeout (504) auf Installationen, deren `var/mcp/` auf

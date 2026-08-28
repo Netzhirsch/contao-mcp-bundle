@@ -8,6 +8,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
 use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
+use Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Server\ToolGroups;
@@ -45,6 +46,7 @@ final class Tool
         private readonly McpPermissionEnforcer $permissionEnforcer,
         private readonly UndoRecorder $undoRecorder,
         private readonly DeletionGuard $deletionGuard,
+        private readonly UnknownArgumentGuard $unknownArgumentGuard,
     ) {
     }
 
@@ -218,6 +220,14 @@ final class Tool
         // controller applies to direct tools/call requests.
         if ($denial = $this->permissionEnforcer->check($name, $arguments)) {
             return $denial;
+        }
+
+        // This proxy calls $tool->call() itself, so the dispatcher's schema
+        // validation never runs for it. Without this check a lazy-mode
+        // instance -- where EVERY call arrives here -- would keep dropping
+        // unknown parameters without a word.
+        if ($unknownArgs = $this->unknownArgumentGuard->check($name, $arguments)) {
+            return $unknownArgs;
         }
 
         // Same reasoning as the permission check above: without these, deleting

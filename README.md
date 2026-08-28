@@ -386,6 +386,31 @@ Kopie übersetzen:
 übersetzen und danach einen **leeren** Alias an `page_update` schicken — Contao
 erzeugt ihn dann über den Slug-Service aus dem neuen Titel neu.
 
+## Wie Tools Fehler melden
+
+Ein Tool, das nicht tun kann, was es soll, gibt ein strukturiertes Ergebnis
+zurück statt einer Ausnahme — mit `error`, einer `message` im Klartext und,
+wo es hilft, der Liste des Erlaubten. Zwei Fälle, die man kennen sollte:
+
+**Ein Feld, das der Datensatztyp nicht hat**, wird abgelehnt und nennt den Typ:
+
+```
+Field "gibtsNicht" is not valid for content type "text".
+Use content_palette_get("text") to see allowed fields. Currently allowed: pid, ptable, …
+```
+
+**Ein Parameter, den das Tool nicht hat**, ebenso — mit Vorschlag bei einem
+Tippfehler (seit 1.10.0; davor wurde er stillschweigend verworfen und der
+Aufruf meldete Erfolg, ohne etwas zu ändern):
+
+```
+Tool "page_update" has no parameter "pageTitel" (did you mean "pageTitle"?).
+Nothing was changed. Allowed parameters: id, pid, title, type, sorting, …
+```
+
+Beides gilt für direkte `tools/call` **und** für den `contao_call`-Proxy im
+Lazy-Mode.
+
 ## Bekannte Einschränkungen
 
 Stand `v1.8.2`:

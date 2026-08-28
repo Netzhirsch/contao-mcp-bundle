@@ -522,6 +522,30 @@ For a second language, copy first and translate the copy:
 first and then send an **empty** alias to `page_update` — Contao regenerates it
 from the new title through the Slug service.
 
+## How tools report errors
+
+A tool that cannot do what it was asked returns a structured result rather than
+throwing — with `error`, a plain-language `message` and, where it helps, the
+list of what is allowed. Two cases worth knowing:
+
+**A field the record type does not have** is refused, naming the type:
+
+```
+Field "gibtsNicht" is not valid for content type "text".
+Use content_palette_get("text") to see allowed fields. Currently allowed: pid, ptable, …
+```
+
+**A parameter the tool does not have** likewise — with a suggestion on a typo
+(since 1.10.0; before that it was dropped in silence and the call reported
+success while changing nothing):
+
+```
+Tool "page_update" has no parameter "pageTitel" (did you mean "pageTitle"?).
+Nothing was changed. Allowed parameters: id, pid, title, type, sorting, …
+```
+
+Both apply to direct `tools/call` **and** to the lazy-mode `contao_call` proxy.
+
 ## Known limitations
 
 As of `v1.8.2`:

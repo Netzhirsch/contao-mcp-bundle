@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
+use Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard;
+use PhpMcp\Schema\Content\TextContent;
 use PhpMcp\Schema\Request\CallToolRequest;
 use PhpMcp\Schema\Request\ListToolsRequest;
 use PhpMcp\Schema\Result\CallToolResult;
@@ -38,6 +40,7 @@ final class ContaoDispatcher extends Dispatcher
         ?SchemaValidator $schemaValidator,
         private readonly ToolFilter $toolFilter,
         private readonly PostCallHook $postCallHook,
+        private readonly UnknownArgumentGuard $unknownArgumentGuard,
         private readonly LoggerInterface $mcpLogger,
     ) {
         parent::__construct($configuration, $registry, $subscriptionManager, $schemaValidator);
@@ -78,6 +81,20 @@ final class ContaoDispatcher extends Dispatcher
      */
     public function handleToolCall(CallToolRequest $request): CallToolResult
     {
+        // A parameter the tool does not have used to be dropped without a
+        // word, so the call reported success while changing nothing.
+        // php-mcp's generated schema never sets `additionalProperties`,
+        // so the validation pass in the parent waves it through. Refuse
+        // here instead -- before the parent runs, and therefore before
+        // McpController takes its undo snapshot for a delete.
+        $arguments = \is_array($request->arguments) ? $request->arguments : [];
+        if ($unknownArgs = $this->unknownArgumentGuard->check($request->name, $arguments)) {
+            return new CallToolResult(
+                [new TextContent((string) json_encode($unknownArgs))],
+                true,
+            );
+        }
+
         try {
             return parent::handleToolCall($request);
         } finally {
