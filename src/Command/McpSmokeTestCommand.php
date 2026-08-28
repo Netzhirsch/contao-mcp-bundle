@@ -2673,8 +2673,12 @@ final class McpSmokeTestCommand extends Command
         $expect('contao_call refuses an unknown parameter too',
             $proxied,
             static fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'invalid_input');
+        // A known parameter must still pass. Deliberately a tool that needs
+        // no fixture: a bare CI install has no page below the root, and an
+        // earlier version of this assert used page_get and failed there
+        // with "Page 0 not found" -- testing the fixture, not the guard.
         $expect('contao_call still accepts a correct call',
-            $this->discoveryTool->call('page_get', ['id' => $argGuardPageId]),
+            $this->discoveryTool->call('pages_list', ['limit' => 1]),
             static fn ($r) => \is_array($r) && !isset($r['error']));
 
 
