@@ -237,6 +237,26 @@ services:
             - { id: 'mcp_oauth_authorize', policy: 'sliding_window', limit: 30, interval: '1 minute' }
             - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
 
+    # Dereferencing a Client ID Metadata Document means this server makes an
+    # outbound request to a host the caller named. The SSRF guard decides WHERE
+    # we may connect; this decides HOW OFTEN, so the endpoint cannot be used to
+    # point our bandwidth at a third party. Keyed per client_id host, and only
+    # consumed on a cache miss — a client reconnecting all day never reaches it.
+    netzhirsch_contao_mcp.rate_limiter.cimd_fetch:
+        class: Symfony\Component\RateLimiter\RateLimiterFactory
+        arguments:
+            - { id: 'mcp_cimd_fetch', policy: 'sliding_window', limit: 30, interval: '1 hour' }
+            - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
+
+    Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver:
+        arguments:
+            $cimdFetchLimiter: '@netzhirsch_contao_mcp.rate_limiter.cimd_fetch'
+
+    # The name lookup is a seam so the SSRF decision can be tested against
+    # crafted answer sets. Production always gets the system resolver.
+    Netzhirsch\ContaoMcpBundle\OAuth\Cimd\HostResolverInterface:
+        alias: Netzhirsch\ContaoMcpBundle\OAuth\Cimd\DnsHostResolver
+
     # Per-client throttling on the /mcp tool-call endpoint. A well-behaved
     # agent stays nowhere near 600/min; this is a backstop against a bug
     # loop or a runaway client, not a workflow throttle. See

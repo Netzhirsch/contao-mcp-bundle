@@ -6,6 +6,99 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.11.0] – 2026-08-28
+
+> **Schemaänderung: `contao:migrate` ausführen.** `tl_mcp_oauth_client.client_id`
+> wird von 64 auf 255 Zeichen verbreitert. Keine Datenmigration, nur ein ALTER.
+>
+> Standardmäßig aktiv: Instanzen mit `auth_mode: oauth` kündigen nach dem
+> Update CIMD an, und Claude wählt es dann gegenüber der Registrierung
+> bevorzugt. Wer das nicht will, stellt im Backend unter **MCP-Server →
+> Konfiguration** „Client-ID-Metadatendokumente" auf **Aus**; dann bleibt alles
+> wie bisher.
+
+### Added
+- **Client ID Metadata Documents (CIMD).** Ein Client kann sich mit einer
+  HTTPS-URL ausweisen, statt sich zu registrieren — der Server liest die
+  Client-Daten von dieser URL. Für den Kunden heißt das: **kein Pairing-Fenster
+  mehr**, keine geöffnete Registrierung, Claude verbindet sich ohne
+  Vorbereitung im Backend. Umgesetzt nach
+  [draft-ietf-oauth-client-id-metadata-document-00](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00)
+  und dem MCP-Autorisierungsprofil vom 2025-11-25.
+
+  Angekündigt wird es über `client_id_metadata_document_supported: true`
+  zusammen mit `none` in `token_endpoint_auth_methods_supported` — Claude
+  wählt CIMD nur, wenn **beides** dasteht. Fehlt eines, fällt jeder Client
+  stillschweigend auf Dynamic Client Registration zurück, die unverändert
+  bestehen bleibt.
+
+  **Drei Betriebsarten**, im Backend umschaltbar:
+  - `trusted` (Standard) — nur `client_id`-Hosts aus der Liste
+    (`claude.ai`, `claude.com`) und deren Subdomains. Der Abgleich läuft auf
+    Label-Grenzen, `notclaude.ai` fällt also durch.
+  - `open` — jede HTTPS-URL, die offene Haltung aus der Spezifikation.
+  - `off` — die Fähigkeit wird nicht angekündigt.
+
+  Der Standard ist bewusst `trusted`: „jede HTTPS-URL akzeptieren" heißt
+  „jede HTTPS-URL abrufen, die ein Aufrufer nennt", und das ist auf dem
+  Produktivsystem eines Kunden ein größeres Versprechen, als der Nutzen
+  hergibt — die Clients, mit denen Contao hier spricht, sind bekannt.
+
+### Security
+- **Der Abruf des Metadatendokuments ist gegen SSRF gehärtet, über die
+  Vorgaben des Drafts hinaus.** Der Draft verlangt zwei Dinge — private
+  Adressen meiden und bei 5 KB abschneiden — und lässt Timeouts,
+  DNS-Rebinding, Rate-Limiting und Content-Type ausdrücklich offen. Genau
+  diese vier Lücken sind hier geschlossen:
+
+  - **Erst auflösen, dann festnageln.** Jede A/AAAA-Antwort wird geprüft, und
+    die Verbindung wird auf die geprüfte Adresse gepinnt. Ohne das Pinning ist
+    die Prüfung Theater: Ein Name kann unserem Lookup `1.2.3.4` antworten und
+    dem HTTP-Client eine Sekunde später `127.0.0.1`.
+  - **Jede Antwort muss öffentlich sein**, nicht nur die benutzte.
+  - **Keine Weiterleitungen.** Ein 302 auf `http://169.254.169.254/` ist der
+    kürzeste Weg um jede Adressprüfung herum.
+  - **Die Größengrenze greift während des Streamens**, nicht danach.
+  - Geblockt werden neben RFC-1918 und Loopback auch **CGNAT (100.64/10)**,
+    die **Cloud-Metadaten-Adresse 169.254.169.254**, **NAT64 (64:ff9b::/96)**
+    und **IPv4-in-IPv6** (`::ffff:127.0.0.1`) — die vier Fälle, die eine nach
+    dem Wortlaut des Drafts gebaute Prüfung durchlässt.
+  - **Rate-Limit** auf Abrufe pro `client_id`-Host, nur bei Cache-Miss, damit
+    der Endpunkt nicht als Verstärker für fremde Bandbreite taugt.
+  - `logo_uri` wird **ignoriert**: Ein entferntes Bild auf der
+    Zustimmungsseite wäre ein Tracking- und Abrufvektor ohne Gegenwert.
+
+- **Das Dokument muss für sich selbst sprechen.** Das `client_id`-Feld im
+  Dokument muss exakt der abgerufenen URL entsprechen. Ohne diese Prüfung
+  könnte ein Dokument von irgendwoher `client_id: https://claude.ai/…`
+  behaupten, und die Zustimmungsseite zeigte Claudes Namen über der
+  Redirect-URI eines Fremden.
+
+- **Ein `token_endpoint_auth_method`, den wir nicht umsetzen, wird abgelehnt.**
+  Ein Client, der `private_key_jwt` verlangt, erwartet die Prüfung seiner
+  Signatur; ihn stillschweigend als Public Client zu behandeln, würde genau
+  den Schutz entfernen, um den er gebeten hat.
+
+- **Redirect-URI-Prüfung bleibt exakt**, mit der einen dokumentierten Ausnahme
+  aus RFC 8252 §7.3: Bei Loopback-Adressen wird der **Port** ignoriert, weil
+  ein nativer Client seinen Port nicht vorher kennt (Claude Code meldet
+  `http://localhost/callback` und kommt auf `http://localhost:3118/callback`
+  an). Schema, Host, Pfad und Query müssen weiterhin exakt passen, und der
+  Host muss auf **beiden** Seiten ein echter Loopback-Name sein —
+  `http://localhost.attacker.example/callback` fällt durch.
+
+- **Die Zustimmungsseite** nennt jetzt den Host, der die Client-Angaben
+  geliefert hat, und das Ziel der Weiterleitung. Sind alle Redirect-URIs
+  Loopback-Adressen, erscheint zusätzlich ein Warnhinweis: Ein
+  Metadatendokument kann nicht verhindern, dass ein anderes Programm auf
+  demselben Rechner einen Port belegt und den Namen des echten Clients für
+  sich beansprucht. Beides verlangt die MCP-Spezifikation.
+
+- **Fehlermeldungen bleiben unspezifisch.** Der Aufrufer bekommt
+  `invalid_client`; ob es „geblockte private Adresse" oder
+  „Zeitüberschreitung" war, steht ausschließlich im Contao-Log. Der
+  Unterschied wäre ein Scanner für alles, was der Server erreichen kann.
+
 ## [1.10.0] – 2026-08-28
 
 > Verhaltensänderung an jedem Tool mit benannten Parametern: ein Parameter, den

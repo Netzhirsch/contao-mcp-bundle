@@ -68,6 +68,21 @@ $config = $this->config;
                 <p class="tl_help tl_tip"><?= $t('config_reg_mode_help') ?></p>
             </div>
 
+            <div class="widget widget-select w50 clr">
+                <h3><label for="ctrl_cimd_mode"><?= $t('config_cimd_mode_label', 'Client ID Metadata Documents (CIMD)') ?></label></h3>
+                <select name="cimd_mode" id="ctrl_cimd_mode" class="tl_select">
+                    <?php $cimdMode = (string) ($config['cimd_mode'] ?? 'trusted'); ?>
+                    <option value="trusted" <?= $cimdMode === 'trusted' ? 'selected' : '' ?>><?= $t('config_cimd_mode_trusted', 'Trusted hosts only (recommended) — no setup needed for Claude') ?></option>
+                    <option value="open" <?= $cimdMode === 'open' ? 'selected' : '' ?>><?= $t('config_cimd_mode_open', 'Open — accept any HTTPS client ID') ?></option>
+                    <option value="off" <?= $cimdMode === 'off' ? 'selected' : '' ?>><?= $t('config_cimd_mode_off', 'Off — clients must register (DCR)') ?></option>
+                </select>
+                <p class="tl_help tl_tip"><?= $t('config_cimd_mode_help') ?></p>
+                <?php if ($cimdMode !== 'off'): ?>
+                    <p class="tl_help"><?= $t('config_cimd_hosts_label', 'Trusted hosts') ?>:
+                        <code><?= htmlspecialchars(implode(', ', (array) ($config['cimd_trusted_hosts'] ?? []))) ?></code></p>
+                <?php endif; ?>
+            </div>
+
             <div class="widget widget-checkbox w50 clr">
                 <h3><?= $t('config_lazy_mode_label', 'Lazy-Mode (Recommended for Claude)') ?></h3>
                 <input type="hidden" name="lazy_mode" value="0">

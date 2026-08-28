@@ -38,6 +38,11 @@ class ModuleMcpConfig extends AbstractMcpModule
             'auth_mode' => (string) Input::post('auth_mode'),
             'backend_url' => (string) Input::post('backend_url'),
             'oauth_registration_mode' => (string) Input::post('oauth_registration_mode'),
+            'cimd_mode' => (string) Input::post('cimd_mode'),
+            // The allowlist has no form field yet — carry the stored value
+            // through, or saving any other setting would empty it and turn
+            // 'trusted' into "trust nobody" behind the operator's back.
+            'cimd_trusted_hosts' => $configStorage->load()['cimd_trusted_hosts'],
             // Checkbox: hidden field carries '0', checked override sends '1'.
             'lazy_mode' => (bool) Input::post('lazy_mode'),
             // No longer a form field (the production URL is baked into the

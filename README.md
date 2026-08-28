@@ -33,9 +33,12 @@ System-Einstellungen.
   `contao_describe_tool`, `contao_call`) verstecken die übrigen vor
   `tools/list` — spart bei Claude Desktop ~12 KB System-Prompt-Overhead pro
   Turn.
-- **OAuth 2.1** mit PKCE, Dynamic Client Registration (RFC 7591) und
-  Protected-Resource-Metadata (RFC 9728). Im Default-Modus `restricted`
-  registriert sich ein Client ausschließlich im 15-Minuten-Pairing-Fenster.
+- **OAuth 2.1** mit PKCE, Client-ID-Metadatendokumenten (CIMD),
+  Dynamic Client Registration (RFC 7591) und Protected-Resource-Metadata
+  (RFC 9728). Mit CIMD verbindet sich Claude **ohne jede Vorbereitung im
+  Backend** — kein Pairing-Fenster, keine geöffnete Registrierung. Wer
+  registrieren will, kann es weiterhin: im Default-Modus `restricted`
+  ausschließlich im 15-Minuten-Pairing-Fenster.
 - **Volltextsuche über die Website**: `search_query` durchsucht Contaos
   Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
   oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.
@@ -254,6 +257,53 @@ siehe **[docs/lokales-https.md](docs/lokales-https.md)**.
 Returnt eine strukturierte Liste über PHP-Setup, `var/mcp/`-Permissions,
 OAuth-Konfig + `warnings: [...]` mit konkreten Fix-Befehlen. Vor jedem
 Site-Move oder Server-Wechsel laufen lassen.
+
+## Verbinden ohne Pairing: CIMD
+
+Seit 1.11.0 kann ein Client sich mit einer HTTPS-URL ausweisen, statt sich zu
+registrieren — der Server liest die Client-Daten von dieser URL
+([Client ID Metadata Document](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00)).
+Für den Kunden heißt das: **kein Pairing-Fenster öffnen, nichts vorbereiten.**
+Claude wählt diesen Weg von selbst, wenn die Instanz ihn ankündigt.
+
+Umschaltbar im Backend unter **MCP-Server → Konfiguration**:
+
+| Modus | Bedeutung |
+|---|---|
+| `trusted` *(Standard)* | nur `claude.ai`, `claude.com` und deren Subdomains |
+| `open` | jede HTTPS-`client_id`, die offene Haltung der Spezifikation |
+| `off` | nicht angekündigt, Clients registrieren sich wie bisher (DCR) |
+
+Der Standard ist `trusted`, weil „jede HTTPS-URL akzeptieren" gleichbedeutend
+ist mit „jede HTTPS-URL abrufen, die ein Aufrufer nennt". Auf dem
+Produktivsystem eines Kunden ist das ein größeres Versprechen, als der Nutzen
+hergibt — die Clients, mit denen Contao hier spricht, sind bekannt.
+
+**Was beim Abruf passiert.** Das Dokument wird geholt, bevor irgendjemand
+angemeldet ist, von einer URL, die der Aufrufer bestimmt. Entsprechend eng ist
+der Rahmen:
+
+- nur `https`, mit Pfad, ohne Fragment, ohne Zugangsdaten, ohne `.`/`..`, keine
+  IP-Literale
+- der Host wird aufgelöst, **jede** Antwort muss öffentlich routbar sein, und
+  die Verbindung wird auf die geprüfte Adresse gepinnt (gegen DNS-Rebinding)
+- geblockt sind neben RFC 1918 und Loopback auch CGNAT, `169.254.169.254`,
+  NAT64 und IPv4-in-IPv6
+- keine Weiterleitungen, 5 Sekunden Zeitlimit, 5 KB Größengrenze beim Streamen,
+  `Content-Type` muss JSON sein
+- Rate-Limit pro `client_id`-Host, nur bei Cache-Miss
+- das `client_id`-Feld im Dokument muss exakt der abgerufenen URL entsprechen
+- `logo_uri` wird ignoriert
+
+**Redirect-URIs** werden exakt geprüft. Die einzige Ausnahme ist RFC 8252 §7.3:
+Bei Loopback-Adressen wird der Port ignoriert, weil ein nativer Client seinen
+Port nicht vorher kennt. Alles andere — Schema, Host, Pfad, Query — muss
+stimmen, und `http://localhost.attacker.example/callback` fällt durch.
+
+Sind alle Redirect-URIs eines Clients Loopback-Adressen, warnt die
+Zustimmungsseite zusätzlich: Ein Metadatendokument kann nicht verhindern, dass
+ein anderes Programm auf demselben Rechner einen Port belegt und den Namen des
+echten Clients für sich beansprucht.
 
 ## Konfiguration
 

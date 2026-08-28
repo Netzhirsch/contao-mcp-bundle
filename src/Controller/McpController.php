@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Controller;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseGate;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
@@ -74,6 +75,7 @@ final class McpController
         private readonly McpPermissionEnforcer $permissionEnforcer,
         private readonly UndoRecorder $undoRecorder,
         private readonly DeletionGuard $deletionGuard,
+        private readonly CimdResolver $cimdResolver,
         private readonly LicenseGate $licenseGate,
         private readonly LoggerInterface $logger,
     ) {
@@ -283,7 +285,7 @@ final class McpController
             ], 503);
         }
 
-        return new JsonResponse([
+        $metadata = [
             'issuer' => $backendUrl,
             'authorization_endpoint' => $backendUrl.'/_mcp_oauth/authorize',
             'token_endpoint' => $backendUrl.'/_mcp_oauth/token',
@@ -293,7 +295,17 @@ final class McpController
             'grant_types_supported' => ['authorization_code', 'refresh_token'],
             'token_endpoint_auth_methods_supported' => ['client_secret_post', 'client_secret_basic', 'none'],
             'code_challenge_methods_supported' => ['S256'],
-        ], 200, ['Access-Control-Allow-Origin' => '*']);
+        ];
+
+        // This is the document a real client reads — the protected-resource
+        // metadata points here. The standalone MetadataController serves the
+        // same information at the bundle's own route; the two must not drift
+        // apart, and the smoke test asserts they don't.
+        if ($this->cimdResolver->isEnabled()) {
+            $metadata['client_id_metadata_document_supported'] = true;
+        }
+
+        return new JsonResponse($metadata, 200, ['Access-Control-Allow-Origin' => '*']);
     }
 
     /**

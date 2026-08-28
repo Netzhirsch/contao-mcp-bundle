@@ -32,9 +32,12 @@ URL rewrites, form leads, maintenance and system settings.
 - **Lazy-mode discovery**: three meta tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) hide the rest from `tools/list` — worth
   roughly 12 KB of system-prompt overhead per turn in Claude Desktop.
-- **OAuth 2.1** with PKCE, Dynamic Client Registration (RFC 7591) and Protected
-  Resource Metadata (RFC 9728). In the default `restricted` mode a client can
-  only register while the 15-minute pairing window is open.
+- **OAuth 2.1** with PKCE, Client ID Metadata Documents (CIMD), Dynamic Client
+  Registration (RFC 7591) and Protected Resource Metadata (RFC 9728). With CIMD
+  Claude connects **with no preparation in the backend at all** — no pairing
+  window, no open registration. Registration is still there for clients that
+  want it: in the default `restricted` mode only while the 15-minute pairing
+  window is open.
 - **Permission parity**: every backend user's rights apply to the AI 1:1 —
   enforced through Contao's own voters, not reimplemented. Writing a DCA field
   marked `excluded` additionally requires the `alexf` right for that field.
@@ -223,6 +226,51 @@ no GET stream and no server-initiated messages, just request/response JSON.
 Protocol revision **2025-03-26**; clients speaking **2024-11-05** are accepted as
 well. Any MCP client that speaks Streamable HTTP with OAuth should work; Claude
 is what we test against.
+
+## Connecting without pairing: CIMD
+
+Since 1.11.0 a client may identify itself with an HTTPS URL instead of
+registering — the server reads the client's details from that URL
+([Client ID Metadata Document](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00)).
+For the customer that means **no pairing window, nothing to prepare**. Claude
+picks this route by itself when the instance advertises it.
+
+Switchable in the backend under **MCP server → Configuration**:
+
+| Mode | Meaning |
+|---|---|
+| `trusted` *(default)* | only `claude.ai`, `claude.com` and their subdomains |
+| `open` | any HTTPS `client_id`, the specification's open-server posture |
+| `off` | not advertised; clients register as before (DCR) |
+
+The default is `trusted` because "accept any HTTPS URL" means "fetch any HTTPS
+URL a caller names". On a customer's production CMS that is a bigger promise
+than the feature is worth — the clients Contao talks to here are known ones.
+
+**What the fetch does.** The document is retrieved before anyone is
+authenticated, from a URL the caller chose. The rules are correspondingly
+narrow:
+
+- `https` only, with a path, no fragment, no credentials, no `.`/`..` segments,
+  no IP literals
+- the host is resolved, **every** answer must be publicly routable, and the
+  connection is pinned to the address that was checked (DNS rebinding)
+- blocked alongside RFC 1918 and loopback: CGNAT, `169.254.169.254`, NAT64 and
+  IPv4-in-IPv6
+- no redirects, a 5-second limit, a 5 KB cap enforced while streaming, and the
+  `Content-Type` must be JSON
+- rate limited per `client_id` host, on cache misses only
+- the document's `client_id` field must equal the fetched URL exactly
+- `logo_uri` is ignored
+
+**Redirect URIs** are matched exactly. The single exception is RFC 8252 §7.3:
+for loopback addresses the port is ignored, because a native client cannot know
+its port in advance. Everything else — scheme, host, path, query — must match,
+and `http://localhost.attacker.example/callback` does not.
+
+When every redirect URI a client declares is a loopback address, the consent
+screen warns as well: a metadata document cannot stop another program on the
+same machine from binding a port and claiming the real client's name.
 
 ## Configuration
 

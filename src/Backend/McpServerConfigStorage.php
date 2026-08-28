@@ -28,7 +28,9 @@ final class McpServerConfigStorage
      *     extension_tools_enabled: list<string>,
      *     disabled_tools: list<string>,
      *     registration_open_until: int,
-     *     license_server_url: string
+     *     license_server_url: string,
+     *     cimd_mode: string,
+     *     cimd_trusted_hosts: list<string>
      * }
      */
     public function defaults(): array
@@ -51,6 +53,22 @@ final class McpServerConfigStorage
             // request must carry `Authorization: Bearer iat_…` with a
             // valid Initial Access Token generated in the Backend.
             'oauth_registration_mode' => 'restricted',
+            // Client ID Metadata Documents (CIMD). A URL-shaped client_id
+            // is dereferenced and the client's metadata read from it, so no
+            // registration step is needed at all.
+            //   'trusted' = only client_id hosts on cimd_trusted_hosts (default)
+            //   'open'    = any HTTPS client_id, the spec's open-server posture
+            //   'off'     = disabled; the capability is not advertised and
+            //               clients fall back to Dynamic Client Registration
+            // 'trusted' is the default because accepting any HTTPS URL means
+            // this server will fetch any HTTPS URL a caller names, and a
+            // customer's production CMS is a poor place to make that promise
+            // for no gain: the clients Contao is connected to live here.
+            'cimd_mode' => 'trusted',
+            // Host suffixes trusted in 'trusted' mode. Matched on label
+            // boundaries, so 'claude.ai' covers 'claude.ai' and any
+            // subdomain of it, but never 'notclaude.ai'.
+            'cimd_trusted_hosts' => ['claude.ai', 'claude.com'],
             // Lazy-Mode: when true, the server exposes only the 3 discovery
             // tools (contao_search_tools, contao_describe_tool, contao_call)
             // plus a tiny health-check set in `tools/list`. The other ~150
@@ -99,7 +117,9 @@ final class McpServerConfigStorage
      *     extension_tools_enabled: list<string>,
      *     disabled_tools: list<string>,
      *     registration_open_until: int,
-     *     license_server_url: string
+     *     license_server_url: string,
+     *     cimd_mode: string,
+     *     cimd_trusted_hosts: list<string>
      * }
      */
     public function load(): array
@@ -136,6 +156,8 @@ final class McpServerConfigStorage
             'disabled_tools' => self::stringList($decoded['disabled_tools'] ?? null),
             'registration_open_until' => self::clampInt($decoded['registration_open_until'] ?? null, 0, PHP_INT_MAX, 0),
             'license_server_url' => rtrim(self::trimString($decoded['license_server_url'] ?? null, ''), '/'),
+            'cimd_mode' => self::clampEnum($decoded['cimd_mode'] ?? null, ['off', 'trusted', 'open'], $defaults['cimd_mode']),
+            'cimd_trusted_hosts' => self::hostList($decoded['cimd_trusted_hosts'] ?? null, $defaults['cimd_trusted_hosts']),
         ];
     }
 
@@ -187,6 +209,13 @@ final class McpServerConfigStorage
             }
         }
 
+        $cimdMode = self::clampEnum($input['cimd_mode'] ?? null, ['off', 'trusted', 'open'], $defaults['cimd_mode']);
+        // Same pass-through contract as the tool lists: a caller that does
+        // not manage the allowlist must hand the current value through, or
+        // saving an unrelated setting would silently widen the trust policy
+        // to nothing at all.
+        $cimdTrustedHosts = self::hostList($input['cimd_trusted_hosts'] ?? null, $defaults['cimd_trusted_hosts']);
+
         $values = [
             'path' => $path,
             'pagination_limit' => $paginationLimit,
@@ -198,6 +227,8 @@ final class McpServerConfigStorage
             'disabled_tools' => $disabledTools,
             'registration_open_until' => $registrationOpenUntil,
             'license_server_url' => $licenseServerUrl,
+            'cimd_mode' => $cimdMode,
+            'cimd_trusted_hosts' => $cimdTrustedHosts,
         ];
 
         if ($errors !== []) {
@@ -245,6 +276,54 @@ final class McpServerConfigStorage
                     $out[$trimmed] = true;
                 }
             }
+        }
+
+        return array_keys($out);
+    }
+
+    /**
+     * Hostnames for the CIMD trust policy.
+     *
+     * Absent input falls back to the defaults — the same pass-through contract
+     * the tool lists have, and here it matters more: a form that forgets to
+     * submit the field would otherwise empty the allowlist, which in 'trusted'
+     * mode silently turns CIMD off for everyone.
+     *
+     * An explicitly empty array is honoured, because "trust nobody" is a
+     * legitimate thing for an operator to mean.
+     *
+     * Entries are validated as hostnames. A stray scheme, port or path in here
+     * would never match the host comparison and would look like a working
+     * allowlist entry that quietly does nothing.
+     *
+     * @param list<string> $fallback
+     *
+     * @return list<string>
+     */
+    private static function hostList(mixed $value, array $fallback): array
+    {
+        if (!\is_array($value)) {
+            return $fallback;
+        }
+
+        $out = [];
+
+        foreach ($value as $entry) {
+            if (!\is_string($entry)) {
+                continue;
+            }
+
+            $host = strtolower(trim($entry));
+
+            if ($host === '') {
+                continue;
+            }
+
+            if (preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/', $host) !== 1) {
+                continue;
+            }
+
+            $out[$host] = true;
         }
 
         return array_keys($out);

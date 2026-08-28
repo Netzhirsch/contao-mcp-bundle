@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\OAuth\Repository;
 
 use Doctrine\DBAL\Connection;
 use League\OAuth2\Server\Repositories\ClientRepositoryInterface;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdClientProvider;
 use Netzhirsch\ContaoMcpBundle\OAuth\Entity\ClientEntity;
 
 /**
@@ -16,11 +17,21 @@ final class ClientRepository implements ClientRepositoryInterface
 {
     public function __construct(
         private readonly Connection $connection,
+        private readonly CimdClientProvider $cimdClientProvider,
     ) {
     }
 
     public function getClientEntity($clientIdentifier)
     {
+        // A CIMD client prepared earlier in THIS request wins over the stored
+        // row, because it may carry the concrete loopback redirect URI of the
+        // request in progress — the port a native client binds per session and
+        // that must never be persisted. See CimdClientProvider.
+        $pending = $this->cimdClientProvider->pending((string) $clientIdentifier);
+        if ($pending !== null) {
+            return $pending;
+        }
+
         $row = $this->connection->fetchAssociative(
             'SELECT * FROM tl_mcp_oauth_client WHERE client_id = ?',
             [(string) $clientIdentifier],

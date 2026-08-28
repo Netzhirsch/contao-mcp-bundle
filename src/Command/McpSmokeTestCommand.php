@@ -58,6 +58,10 @@ use PhpMcp\Schema\Request\CallToolRequest;
 use PhpMcp\Schema\Request\ListToolsRequest;
 use PhpMcp\Schema\Result\CallToolResult;
 use Netzhirsch\ContaoMcpBundle\Controller\McpController;
+use Netzhirsch\ContaoMcpBundle\Controller\OAuth\MetadataController;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdException;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\RedirectUriMatcher;
 use Netzhirsch\ContaoMcpBundle\Controller\OAuth\RegisterController;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
@@ -119,6 +123,8 @@ final class McpSmokeTestCommand extends Command
         private readonly McpCallContext $mcpCallContext,
         private readonly HttpDispatcherFactory $dispatcherFactory,
         private readonly \Netzhirsch\ContaoMcpBundle\Tool\Discovery\Tool $discoveryTool,
+        private readonly CimdResolver $cimdResolver,
+        private readonly MetadataController $oauthMetadataController,
         private readonly ToolFilter $toolFilter,
         private readonly RegistryAccessor $registryAccessor,
         private readonly McpController $mcpController,
@@ -2502,6 +2508,82 @@ final class McpSmokeTestCommand extends Command
         $expect('both documents agree on the issuer',
             [$prm, $asMeta],
             static fn (array $d) => ($d[0]['authorization_servers'][0] ?? 'a') === ($d[1]['issuer'] ?? 'b'));
+
+        // ── Client ID Metadata Documents ───────────────────────────────
+        //
+        // Deliberately offline. Everything asserted here is decided before
+        // anything touches the network; the live fetch against Claude's real
+        // document is covered by the unit tests with a stubbed resolver.
+        // Hanging CI on a third party's uptime is how a suite starts getting
+        // ignored.
+        $expect('the metadata clients actually read advertises CIMD',
+            $asMeta, static fn ($d) => ($d['client_id_metadata_document_supported'] ?? null) === true);
+
+        // Claude selects CIMD only when BOTH are present. Dropping `none`
+        // sends every client back to registration, silently.
+        $expect('...alongside the public-client auth method CIMD needs',
+            $asMeta,
+            static fn ($d) => \in_array('none', $d['token_endpoint_auth_methods_supported'] ?? [], true));
+
+        // Two controllers serve this document. They must not drift apart — the
+        // flag first existed on only one of them, and the one clients read was
+        // the other.
+        $standaloneMeta = json_decode((string) ($this->oauthMetadataController)(
+            Request::create('https://smoke.example/x'),
+        )->getContent(), true);
+        $expect('both metadata documents agree on the CIMD capability',
+            [$asMeta, $standaloneMeta],
+            static fn (array $d) => ($d[0]['client_id_metadata_document_supported'] ?? null)
+                === ($d[1]['client_id_metadata_document_supported'] ?? null));
+
+        $refuse = function (string $clientId): string {
+            try {
+                $this->cimdResolver->resolve($clientId);
+
+                return 'accepted';
+            } catch (CimdException $e) {
+                return $e->reason;
+            } catch (\Throwable $e) {
+                return 'other: '.$e->getMessage();
+            }
+        };
+
+        $expect('a plaintext client id is refused before any lookup',
+            $refuse('http://claude.ai/client.json'), static fn ($r) => $r === 'not_https');
+        $expect('a client id without a path is refused',
+            $refuse('https://claude.ai'), static fn ($r) => $r === 'no_path');
+        $expect('an ip literal is never a client id',
+            $refuse('https://127.0.0.1/client.json'), static fn ($r) => $r === 'ip_literal');
+        $expect('a header-smuggling client id is refused',
+            $refuse("https://claude.ai/x.json\r\nHost: evil"), static fn ($r) => $r === 'illegal_characters');
+        $expect('an untrusted host is refused by default',
+            $refuse('https://evil.example/client.json'), static fn ($r) => $r === 'host_not_trusted');
+        $expect('a lookalike of a trusted host is refused',
+            $refuse('https://notclaude.ai/client.json'), static fn ($r) => $r === 'host_not_trusted');
+
+        // Claude Code declares these two and then arrives on an ephemeral port.
+        $claudeCodeUris = ['http://localhost/callback', 'http://127.0.0.1/callback'];
+
+        $expect('an ephemeral loopback port matches the declared callback',
+            RedirectUriMatcher::matches($claudeCodeUris, 'http://localhost:3118/callback'),
+            static fn ($r) => $r === true);
+        $expect('a different path on the same port does not',
+            RedirectUriMatcher::matches($claudeCodeUris, 'http://localhost:3118/evil'),
+            static fn ($r) => $r === false);
+        $expect('a host that merely starts with localhost does not',
+            RedirectUriMatcher::matches($claudeCodeUris, 'http://localhost.attacker.example/callback'),
+            static fn ($r) => $r === false);
+
+        // Switching the feature off must withdraw the advertisement, or clients
+        // keep choosing a mechanism this instance will then refuse.
+        $this->configStorage->save([...$this->configStorage->load(), 'cimd_mode' => 'off']);
+        $offMeta = json_decode((string) $this->mcpController->oauthMetadata()->getContent(), true);
+        $expect('switching CIMD off withdraws the advertisement',
+            $offMeta, static fn ($d) => !isset($d['client_id_metadata_document_supported']));
+        $expect('...and the resolver then refuses even a trusted host',
+            $refuse('https://claude.ai/oauth/claude-code-client-metadata'),
+            static fn ($r) => $r === 'disabled');
+        $this->configStorage->save([...$this->configStorage->load(), 'cimd_mode' => 'trusted']);
 
         // The resource identifier must be the MCP endpoint itself, not the
         // host — a client compares it against the URL it is talking to.

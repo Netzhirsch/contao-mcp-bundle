@@ -7,6 +7,8 @@ namespace Netzhirsch\ContaoMcpBundle\Controller\OAuth;
 use Contao\BackendUser;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use Netzhirsch\ContaoMcpBundle\OAuth\AuthorizationServerFactory;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdClientProvider;
+use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdException;
 use Netzhirsch\ContaoMcpBundle\OAuth\Entity\UserEntity;
 use Netzhirsch\ContaoMcpBundle\OAuth\OAuthClientAdministration;
 use Nyholm\Psr7\Factory\Psr17Factory;
@@ -54,6 +56,7 @@ final class AuthorizeController
         private readonly Environment $twig,
         private readonly CsrfTokenManagerInterface $csrf,
         private readonly OAuthClientAdministration $clientAdministration,
+        private readonly CimdClientProvider $cimdClientProvider,
     ) {
     }
 
@@ -64,6 +67,32 @@ final class AuthorizeController
         $psrRequest = $psrFactory->createRequest($request);
 
         $server = $this->serverFactory->createAuthorizationServer();
+
+        // A URL-shaped client_id is a Client ID Metadata Document (CIMD): the
+        // client has no registration here, and its metadata is fetched from the
+        // URL it identifies itself with. This has to run BEFORE league
+        // validates the request, because league resolves the client through the
+        // repository and would otherwise find nothing.
+        //
+        // Note the parameters come from the raw request rather than from the
+        // validated one — that ordering is unavoidable, and it is why
+        // CimdResolver checks the URL's shape and the trust policy before
+        // anything reaches the network.
+        $clientId = (string) $request->query->get('client_id', '');
+        if ($clientId !== '') {
+            try {
+                $this->cimdClientProvider->prepare(
+                    $clientId,
+                    $request->query->has('redirect_uri') ? (string) $request->query->get('redirect_uri') : null,
+                );
+            } catch (CimdException) {
+                // Generic on purpose: the specific reason is in the Contao log.
+                // Telling an unauthenticated caller "blocked private address"
+                // versus "connection timed out" turns this endpoint into a
+                // scanner for whatever the server can reach.
+                return $this->renderOAuthError(OAuthServerException::invalidClient($psrRequest));
+            }
+        }
 
         // Validate query params (client_id, redirect_uri, scope, PKCE, …).
         try {
@@ -124,11 +153,19 @@ final class AuthorizeController
         }
 
         // GET = render consent page.
+        $redirectUri = (string) $authRequest->getRedirectUri();
+
         return new Response($this->twig->render('@ContaoMcp/oauth/authorize.html.twig', [
             'client_name' => $authRequest->getClient()->getName() ?: $authRequest->getClient()->getIdentifier(),
             'scopes' => array_map(static fn ($s) => $s->getIdentifier(), $authRequest->getScopes()),
             'username' => (string) $user->username,
-            'redirect_uri' => $authRequest->getRedirectUri(),
+            'redirect_uri' => $redirectUri,
+            // Required by the MCP specification: the user must be able to see
+            // WHERE approval sends the code, not just which name asked for it.
+            'redirect_host' => (string) (parse_url($redirectUri, \PHP_URL_HOST) ?: $redirectUri),
+            // Present only for a CIMD client: the host that vouched for this
+            // client's metadata, plus the loopback warning the spec asks for.
+            'cimd' => $this->cimdClientProvider->consentDetails($clientId),
             'csrf_token' => $this->csrf->getToken(self::CSRF_INTENT)->getValue(),
         ]));
     }

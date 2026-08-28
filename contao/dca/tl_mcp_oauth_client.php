@@ -22,7 +22,14 @@ $GLOBALS['TL_DCA']['tl_mcp_oauth_client'] = [
     'fields' => [
         'id' => ['sql' => ['type' => 'integer', 'unsigned' => true, 'autoincrement' => true]],
         'tstamp' => ['sql' => ['type' => 'integer', 'default' => 0, 'unsigned' => true]],
-        'client_id' => ['sql' => ['type' => 'string', 'length' => 64, 'default' => '']],
+        // 255 rather than 64 since v1.11.0: a Client ID Metadata Document
+        // identifies itself with an HTTPS URL, and that URL IS the client_id
+        // (e.g. https://claude.ai/oauth/claude-code-client-metadata). The
+        // column carries a unique index, and 255 utf8mb4 characters stay well
+        // inside the 3072-byte InnoDB key limit on the MySQL 8 / MariaDB 10.6
+        // baseline this bundle requires. ClientIdUrl refuses anything longer,
+        // so the value can never be silently truncated into a different id.
+        'client_id' => ['sql' => ['type' => 'string', 'length' => 255, 'default' => '']],
         'client_secret_hash' => ['sql' => ['type' => 'string', 'length' => 255, 'default' => '']],
         'name' => ['sql' => ['type' => 'string', 'length' => 255, 'default' => '']],
         'redirect_uris' => ['sql' => ['type' => 'text', 'notnull' => false]],
