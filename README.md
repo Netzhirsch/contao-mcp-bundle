@@ -209,6 +209,11 @@ Ein Ausfall des Lizenzservers sperrt daher niemanden aus — zusätzlich gelten
 - **Contao** ≥ 5.3 (Smoke-Test läuft gegen 5.3 **und** 5.7)
 - **Symfony** ≥ 6.4 oder 7.x
 - **MySQL** ≥ 8.0 oder MariaDB ≥ 10.6 (strict mode unterstützt)
+- **Speicher für `var/mcp/`**: schreibbar, mehr nicht. Seit 1.9.1 schreibt das
+  Bundle seine Zustandsdateien atomar per `rename()` und braucht **kein
+  funktionierendes Datei-Locking** — NFS-Mounts ohne `lockd`/`statd` sind damit
+  unproblematisch. Auf ≤ 1.9.0 konnte `flock()` dort unbegrenzt hängen und einen
+  Gateway Timeout auslösen (siehe CHANGELOG 1.9.1).
 
 ## Smoke-Test
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\OAuth;
 
 use League\OAuth2\Server\CryptKey;
+use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
 
 /**
  * Auto-provisions an RSA-2048 keypair on first use, stored as PEM files
@@ -127,35 +128,31 @@ final class KeyManager
             $details = openssl_pkey_get_details($res);
             $publicPem = (string) ($details['key'] ?? '');
 
-            if (@file_put_contents($this->privateKeyPath(), $privatePem, \LOCK_EX) === false) {
+            if (!AtomicFile::write($this->privateKeyPath(), $privatePem, 0o600)) {
                 throw new \RuntimeException(sprintf(
                     'Could not write private key to %s — check permissions.',
                     $this->privateKeyPath(),
                 ));
             }
-            if (@file_put_contents($this->publicKeyPath(), $publicPem, \LOCK_EX) === false) {
+            if (!AtomicFile::write($this->publicKeyPath(), $publicPem, 0o644)) {
                 throw new \RuntimeException(sprintf(
                     'Could not write public key to %s — check permissions.',
                     $this->publicKeyPath(),
                 ));
             }
-
-            @chmod($this->privateKeyPath(), 0o600);
-            @chmod($this->publicKeyPath(), 0o644);
         }
 
         if (!is_file($this->encryptionKeyPath())) {
-            if (@file_put_contents(
+            if (!AtomicFile::write(
                 $this->encryptionKeyPath(),
                 base64_encode(random_bytes(32)),
-                \LOCK_EX,
-            ) === false) {
+                0o600,
+            )) {
                 throw new \RuntimeException(sprintf(
                     'Could not write encryption key to %s — check permissions.',
                     $this->encryptionKeyPath(),
                 ));
             }
-            @chmod($this->encryptionKeyPath(), 0o600);
         }
     }
 
@@ -283,15 +280,13 @@ final class KeyManager
         $details = openssl_pkey_get_details($res);
         $publicPem = (string) ($details['key'] ?? '');
 
-        if (@file_put_contents($tmpPrivate, $privatePem, \LOCK_EX) === false) {
+        if (!AtomicFile::write($tmpPrivate, $privatePem, 0o600)) {
             throw new \RuntimeException(sprintf('Could not write temp private key %s', $tmpPrivate));
         }
-        if (@file_put_contents($tmpPublic, $publicPem, \LOCK_EX) === false) {
+        if (!AtomicFile::write($tmpPublic, $publicPem, 0o644)) {
             @unlink($tmpPrivate);
             throw new \RuntimeException(sprintf('Could not write temp public key %s', $tmpPublic));
         }
-        @chmod($tmpPrivate, 0o600);
-        @chmod($tmpPublic, 0o644);
 
         // Demote current → previous. rename() is atomic on POSIX; on
         // Windows it's also a single syscall. If either rename fails

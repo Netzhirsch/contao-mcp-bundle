@@ -6,6 +6,41 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.9.1] – 2026-08-28
+
+> Behebt einen Gateway Timeout (504) auf Installationen, deren `var/mcp/` auf
+> einem NFS-Mount ohne funktionierenden Lock-Manager liegt. Schemafrei, keine
+> Migration, keine Änderung an Tools oder Konfiguration.
+
+### Fixed
+- **Kein `flock()` mehr beim Schreiben der Zustandsdateien.** Das Bundle schrieb
+  `var/mcp/license.json`, `var/mcp/config.json` und die OAuth-Schlüssel mit
+  `file_put_contents(…, LOCK_EX)`. `LOCK_EX` lässt PHP `flock()` aufrufen, und
+  auf einem NFSv3-Mount ohne `lockd`/`statd` — etwa `local_lock=none` —
+  schlägt dieser Aufruf weder fehl noch greift er: er blockiert unbegrenzt.
+  PHP-FPM hängt dann bis zum Timeout des vorgeschalteten Proxys, der Client
+  sieht einen 504. Beobachtet auf einer akquinet-Installation, bei der
+  `var/mcp/` per Symlink auf NFS liegt, damit Lizenzdaten Deployments
+  überleben; der Fehler trat reproduzierbar beim ersten Aufruf von
+  „MCP-Server → Status" nach der Installation auf und hinterließ eine
+  0-Byte-`license.json` mit `ctime > mtime`. Gemeldet und analysiert von
+  **Niklas Hack**.
+
+  Diese Dateien brauchen gar keine Sperre — sie sind Buchführung mit einem
+  Schreiber, „last write wins" war immer die akzeptierte Semantik. Gebraucht
+  wird nur, dass ein Leser nie eine halbe Datei sieht, und genau das leistet
+  `rename()`: atomar, auch über NFS, ohne blockierenden Syscall. Neu ist
+  `Netzhirsch\ContaoMcpBundle\Service\AtomicFile`, das in eine
+  Geschwister-Temp-Datei im selben Verzeichnis schreibt und darüber
+  umbenennt. Alle sieben Schreibstellen in `LicenseStore`,
+  `McpServerConfigStorage` und `KeyManager` nutzen es.
+
+  Nebenbei behoben: der `KeyManager` setzte die Dateirechte des privaten
+  Schlüssels erst **nach** dem Schreiben. Zwischen `file_put_contents()` und
+  `chmod()` lag der Schlüssel für einen Moment mit Umask-Rechten auf der
+  Platte. `AtomicFile` setzt den Modus auf der Temp-Datei, bevor sie unter
+  ihrem endgültigen Namen erscheint.
+
 ## [1.9.0] – 2026-08-27
 
 > Nur die Abhängigkeiten betroffen: kein Schemawechsel, keine Migration, keine

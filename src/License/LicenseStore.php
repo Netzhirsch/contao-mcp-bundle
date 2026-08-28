@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\License;
 
+use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
+
 /**
  * Persists the license token + runtime bookkeeping in `var/mcp/license.json`
  * (separate from the operator-editable config.json — this file rotates and is
@@ -144,10 +146,9 @@ final class LicenseStore
             return false;
         }
 
-        return false !== @file_put_contents(
+        return AtomicFile::write(
             $this->filePath(),
             json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}',
-            LOCK_EX,
         );
     }
 

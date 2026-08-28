@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Backend;
 
+use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
+
 /**
  * Reads / writes the editable MCP-server configuration as JSON under
  * `var/mcp/config.json`. We deliberately avoid a DB table here because the
@@ -207,15 +209,14 @@ final class McpServerConfigStorage
             return ['saved' => false, 'errors' => ['dir_unwritable'], 'values' => $values];
         }
 
-        $written = @file_put_contents(
+        $written = AtomicFile::write(
             $this->filePath(),
             json_encode($values, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}',
-            LOCK_EX,
         );
 
         return [
-            'saved' => $written !== false,
-            'errors' => $written === false ? ['file_unwritable'] : [],
+            'saved' => $written,
+            'errors' => $written ? [] : ['file_unwritable'],
             'values' => $values,
         ];
     }

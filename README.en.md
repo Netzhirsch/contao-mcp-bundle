@@ -206,6 +206,11 @@ grace after expiry on top. A running Contao cron is the prerequisite.
 - **Contao** ≥ 5.3. Contao 4.13 is not supported.
 - **Symfony** ≥ 6.4 or 7.x
 - **MySQL** ≥ 8.0 or MariaDB ≥ 10.6 (strict mode supported)
+- **Storage for `var/mcp/`**: writable, nothing more. Since 1.9.1 the bundle
+  writes its state files atomically via `rename()` and needs **no working file
+  locking** — NFS mounts without `lockd`/`statd` are fine. On ≤ 1.9.0 `flock()`
+  could block there indefinitely and cause a gateway timeout (see CHANGELOG
+  1.9.1).
 - **HTTPS** in production — required in practice by OAuth 2.1.
 
 Shared hosting is fine: the bundle is HTTP-only, needs no daemon, no open port
