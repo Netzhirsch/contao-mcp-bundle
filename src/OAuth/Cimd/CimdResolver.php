@@ -42,6 +42,7 @@ final class CimdResolver
         private readonly SafeUrlFetcher $fetcher,
         private readonly CacheItemPoolInterface $cache,
         private readonly RateLimiterFactory $cimdFetchLimiter,
+        private readonly RateLimiterFactory $cimdFetchTotalLimiter,
     ) {
     }
 
@@ -85,9 +86,20 @@ final class CimdResolver
             }
         }
 
-        // Only a cache MISS costs a request, so the limiter sits here rather
+        // Only a cache MISS costs a request, so the limiters sit here rather
         // than at the entrance: a legitimate client reconnecting all day never
-        // touches it, while someone feeding us a fresh URL each time does.
+        // touches them, while someone feeding us a fresh URL each time does.
+        //
+        // TWO limiters, because one is not enough. The per-host bucket keeps a
+        // single noisy client in check, but in `open` mode an attacker simply
+        // uses a fresh subdomain each time and gets a fresh bucket with it —
+        // and /authorize is reachable before anyone has logged in. The total
+        // limiter is what actually bounds how many outbound requests this
+        // endpoint can be made to issue.
+        if (!$this->cimdFetchTotalLimiter->create('cimd')->consume()->isAccepted()) {
+            throw new CimdException('rate_limited');
+        }
+
         if (!$this->cimdFetchLimiter->create(ClientIdUrl::host($clientId))->consume()->isAccepted()) {
             throw new CimdException('rate_limited');
         }
@@ -125,7 +137,19 @@ final class CimdResolver
         }
 
         $name = $decoded['client_name'] ?? null;
-        if (!\is_string($name) || trim($name) === '' || mb_strlen($name) > self::MAX_CLIENT_NAME_LENGTH) {
+        if (!\is_string($name) || mb_strlen($name) > self::MAX_CLIENT_NAME_LENGTH) {
+            throw new CimdException('client_name');
+        }
+
+        // This name is shown to a human who is about to grant access, so it
+        // has to be safe to LOOK at, not just safe to store. HTML escaping
+        // does not help here: U+202E and friends are legitimate characters
+        // that reorder the text around them, so "Contao Backend <RLO>…" can
+        // render as something else entirely. Control characters do the same
+        // to layout. Both are stripped before the name goes anywhere.
+        $name = trim(self::stripDisplayControls($name));
+
+        if ($name === '') {
             throw new CimdException('client_name');
         }
 
@@ -164,9 +188,30 @@ final class CimdResolver
 
         return [
             'client_id' => $clientId,
-            'client_name' => trim($name),
+            'client_name' => $name,
             'redirect_uris' => array_values(array_unique($redirectUris)),
         ];
+    }
+
+    /**
+     * Removes C0/C1 control characters and the Unicode formatting characters
+     * that reorder surrounding text — the bidirectional overrides and isolates
+     * (U+200E/200F, U+202A–U+202E, U+2066–U+2069).
+     *
+     * Escaping is not a substitute: these survive `htmlspecialchars` intact
+     * and do their work in the renderer, not in the markup.
+     */
+    private static function stripDisplayControls(string $value): string
+    {
+        $cleaned = preg_replace(
+            '/[\x00-\x1F\x7F]|\x{200E}|\x{200F}|[\x{202A}-\x{202E}]|[\x{2066}-\x{2069}]/u',
+            '',
+            $value,
+        );
+
+        // preg_replace returns null on malformed UTF-8 — a name we cannot even
+        // scan is not one to display.
+        return \is_string($cleaned) ? $cleaned : '';
     }
 
     /**

@@ -6,6 +6,41 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.11.1] – 2026-08-28
+
+> Nachschärfung an CIMD aus einem gezielten Selbst-Audit direkt nach 1.11.0.
+> Keine Schemaänderung, keine Konfigurationsänderung.
+
+### Security
+- **Ein zweites, globales Rate-Limit auf CIMD-Abrufe.** Das Limit aus 1.11.0
+  zählt pro `client_id`-Host — im Modus `open` nimmt ein Angreifer einfach eine
+  neue Subdomain und bekommt einen frischen Eimer dazu. Da `/authorize` vor
+  jeder Anmeldung erreichbar ist, war die Gesamtzahl ausgehender Anfragen damit
+  unbegrenzt. Zusätzlich gilt jetzt eine Obergrenze über **alle** Hosts
+  (120/Stunde). Betraf nur `open`; im Standard `trusted` war die Menge über die
+  Hostliste ohnehin begrenzt.
+
+- **Steuerzeichen und Bidi-Overrides werden aus `client_name` entfernt.** Der
+  Name steht auf der Zustimmungsseite. `U+202E` und Verwandte überleben
+  HTML-Escaping unbeschadet und drehen den Text im Renderer um — aus
+  „Contao Backend …" lässt sich damit optisch etwas anderes machen. Entfernt
+  werden C0/C1-Steuerzeichen sowie `U+200E/200F`, `U+202A–202E` und
+  `U+2066–2069`; bleibt danach nichts übrig, wird das Dokument abgelehnt.
+
+### Fixed
+- **`?client_id[]=x` erzeugte eine nackte 400.** `InputBag::get()` wirft bei
+  einem nicht-skalaren Wert, und zwar an unserer Aufrufstelle, bevor
+  league/oauth2-server den Request mit einem regulären OAuth-Fehler
+  beantworten konnte. Wird jetzt defensiv gelesen.
+
+### Changed
+- **CIMD holt sein Dokument über einen eigenen HTTP-Client.** Symfony legt die
+  `resolve`-Pins in einem Cache pro Client-Instanz ab; auf dem geteilten
+  Service standen unsere Pins damit vor jedem anderen Nutzer davon (Lizenz-
+  Renew, Datei-Tools). Ein Sicherheitsproblem war das nicht — gepinnt werden
+  nur geprüfte öffentliche Adressen —, aber die Kopplung gibt es jetzt nicht
+  mehr.
+
 ## [1.11.0] – 2026-08-28
 
 > **Schemaänderung: `contao:migrate` ausführen.** `tl_mcp_oauth_client.client_id`

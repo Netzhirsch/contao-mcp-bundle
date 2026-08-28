@@ -78,12 +78,19 @@ final class AuthorizeController
         // validated one — that ordering is unavoidable, and it is why
         // CimdResolver checks the URL's shape and the trust policy before
         // anything reaches the network.
-        $clientId = (string) $request->query->get('client_id', '');
+        // Read through all() rather than get(): InputBag::get() throws a
+        // BadRequestException for `?client_id[]=x`, which would turn a
+        // malformed request into a bare 400 before league ever gets to answer
+        // it with a proper OAuth error.
+        $rawClientId = $request->query->all()['client_id'] ?? null;
+        $rawRedirectUri = $request->query->all()['redirect_uri'] ?? null;
+
+        $clientId = \is_string($rawClientId) ? $rawClientId : '';
         if ($clientId !== '') {
             try {
                 $this->cimdClientProvider->prepare(
                     $clientId,
-                    $request->query->has('redirect_uri') ? (string) $request->query->get('redirect_uri') : null,
+                    \is_string($rawRedirectUri) ? $rawRedirectUri : null,
                 );
             } catch (CimdException) {
                 // Generic on purpose: the specific reason is in the Contao log.

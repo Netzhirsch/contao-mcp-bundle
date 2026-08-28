@@ -77,7 +77,7 @@ final class CimdResolverTest extends TestCase
     /**
      * @param list<MockResponse> $responses
      */
-    private function resolver(array $responses, int $rateLimit = 100): CimdResolver
+    private function resolver(array $responses, int $rateLimit = 100, int $totalLimit = 100): CimdResolver
     {
         $fetcher = new SafeUrlFetcher(
             new MockHttpClient($responses),
@@ -95,6 +95,10 @@ final class CimdResolverTest extends TestCase
             new ArrayAdapter(),
             new RateLimiterFactory(
                 ['id' => 'test_cimd', 'policy' => 'sliding_window', 'limit' => $rateLimit, 'interval' => '1 hour'],
+                new InMemoryStorage(),
+            ),
+            new RateLimiterFactory(
+                ['id' => 'test_cimd_total', 'policy' => 'sliding_window', 'limit' => $totalLimit, 'interval' => '1 hour'],
                 new InMemoryStorage(),
             ),
         );
@@ -362,6 +366,69 @@ final class CimdResolverTest extends TestCase
 
         $this->expectExceptionMessage('rate_limited');
         $resolver->resolve($second);
+    }
+
+    /**
+     * The per-host bucket does not bound the total: in `open` mode a fresh
+     * subdomain buys a fresh bucket, and /authorize is reachable before anyone
+     * has logged in. Without a ceiling across all hosts, this endpoint is an
+     * outbound-request generator for whoever asks.
+     */
+    public function testRefusesOnceTheTotalFetchBudgetIsSpentAcrossDifferentHosts(): void
+    {
+        $this->writeConfig(['cimd_mode' => 'open']);
+
+        $first = 'https://a.example/client.json';
+        $second = 'https://b.example/client.json';
+
+        $docA = self::CLAUDE_CODE;
+        $docA['client_id'] = $first;
+        $docB = self::CLAUDE_CODE;
+        $docB['client_id'] = $second;
+
+        // Generous per-host budget, tight total: only the total can stop this.
+        $resolver = $this->resolver([self::json($docA), self::json($docB)], rateLimit: 100, totalLimit: 1);
+
+        $resolver->resolve($first);
+
+        $this->expectExceptionMessage('rate_limited');
+        $resolver->resolve($second);
+    }
+
+    /**
+     * The name is shown to a human about to grant access, so it has to be safe
+     * to LOOK at. HTML escaping does not help: a right-to-left override is a
+     * legitimate character that survives escaping and reorders the text around
+     * it in the renderer.
+     */
+    public function testStripsCharactersThatCanReorderTheConsentScreen(): void
+    {
+        $document = self::CLAUDE_CODE;
+        $document['client_name'] = "Contao \u{202E}Backend\u{202C} \u{2066}Sync\u{2069}";
+
+        $result = $this->resolver([self::json($document)])->resolve(self::URL);
+
+        self::assertSame('Contao Backend Sync', $result['client_name']);
+    }
+
+    public function testStripsControlCharactersFromTheName(): void
+    {
+        $document = self::CLAUDE_CODE;
+        $document['client_name'] = "Claude\r\n\tCode";
+
+        $result = $this->resolver([self::json($document)])->resolve(self::URL);
+
+        self::assertSame('ClaudeCode', $result['client_name']);
+    }
+
+    public function testRefusesANameThatIsNothingButControlCharacters(): void
+    {
+        $document = self::CLAUDE_CODE;
+        $document['client_name'] = "\u{202E}\u{202C}";
+
+        $this->expectExceptionMessage('client_name');
+
+        $this->resolver([self::json($document)])->resolve(self::URL);
     }
 
     /**

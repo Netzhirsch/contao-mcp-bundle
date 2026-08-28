@@ -248,9 +248,37 @@ services:
             - { id: 'mcp_cimd_fetch', policy: 'sliding_window', limit: 30, interval: '1 hour' }
             - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
 
+    # The per-host bucket above keeps one noisy client in check. It does NOT
+    # bound the total: in `open` mode an attacker uses a fresh subdomain each
+    # time and gets a fresh bucket with it, and /authorize is reachable before
+    # anyone has logged in. This one is the ceiling on outbound requests the
+    # endpoint can be made to issue, whatever hostnames are thrown at it.
+    netzhirsch_contao_mcp.rate_limiter.cimd_fetch_total:
+        class: Symfony\Component\RateLimiter\RateLimiterFactory
+        arguments:
+            - { id: 'mcp_cimd_fetch_total', policy: 'sliding_window', limit: 120, interval: '1 hour' }
+            - '@Netzhirsch\ContaoMcpBundle\OAuth\RateLimit\Storage'
+
+    # A dedicated HTTP client rather than the shared one. Symfony keeps its
+    # `resolve` pins in a per-instance DNS cache, so pinning on the shared
+    # client would leave our entries in front of every other consumer of it
+    # (the licence renewal call, the file tools). The pins are verified public
+    # addresses and could not cause an SSRF, but there is no reason for that
+    # coupling to exist at all.
+    netzhirsch_contao_mcp.cimd_http_client:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
+        arguments:
+            - { max_redirects: 0, timeout: 5, max_duration: 5 }
+
+    Netzhirsch\ContaoMcpBundle\OAuth\Cimd\SafeUrlFetcher:
+        arguments:
+            $httpClient: '@netzhirsch_contao_mcp.cimd_http_client'
+
     Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver:
         arguments:
             $cimdFetchLimiter: '@netzhirsch_contao_mcp.rate_limiter.cimd_fetch'
+            $cimdFetchTotalLimiter: '@netzhirsch_contao_mcp.rate_limiter.cimd_fetch_total'
 
     # The name lookup is a seam so the SSRF decision can be tested against
     # crafted answer sets. Production always gets the system resolver.
