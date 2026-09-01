@@ -209,8 +209,28 @@ Ein Ausfall des Lizenzservers sperrt daher niemanden aus — zusätzlich gelten
   `intl` (`sodium` ist für die Lizenzprüfung zwingend — fehlt es, bleiben alle
   Tools gesperrt; der Code ist 8.1-sauber, die 8.1-Untergrenze deckt
   Contao-5.3-Installationen ab)
-- **Contao** ≥ 5.3 (Smoke-Test läuft gegen 5.3 **und** 5.7)
-- **Symfony** ≥ 6.4 oder 7.x
+- **Contao** 5.3 bis 6.0 (die CI fährt den Smoke-Test gegen 5.3, 5.7 **und** 6.0)
+- **Symfony** ≥ 6.4, 7.x oder 8.x
+
+### Contao 6
+
+Läuft ohne Anpassung. Zwei Dinge sind beim Installieren zu beachten:
+
+**Contao 6 verlangt PHP ≥ 8.4.** Die PHP-Untergrenze des Bundles bleibt bei 8.1,
+damit Contao-5.3-Instanzen weiterlaufen — auf PHP 8.1 ist schlicht nur die
+5er-Linie installierbar.
+
+**Der Installationsbefehl braucht `-W`:**
+
+```bash
+composer require netzhirsch/contao-mcp-bundle -W
+```
+
+Grund ist nicht das Bundle, sondern `php-mcp/server`: es pinnt
+`phpdocumentor/reflection-docblock` auf `^5.6` und `symfony/finder` auf `^7.2`,
+während eine Contao-6-Installation beide höher auflöst. `-W` erlaubt Composer,
+sie zurückzustufen. Beide Pakete vertragen das; ohne `-W` bricht die Auflösung
+ab. Auf Contao 5 ist das Flag überflüssig.
 - **MySQL** ≥ 8.0 oder MariaDB ≥ 10.6 (strict mode unterstützt)
 - **Speicher für `var/mcp/`**: schreibbar, mehr nicht. Seit 1.9.1 schreibt das
   Bundle seine Zustandsdateien atomar per `rename()` und braucht **kein

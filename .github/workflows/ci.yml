@@ -156,6 +156,12 @@ jobs:
             contao: '^5.7'
           - php: '8.4'
             contao: '^5.7'
+          #   - Contao 6.0 on PHP 8.4 — the next major. Contao 6 requires PHP ^8.4
+          #     and Symfony ^7.4/^8.0, stores input RAW instead of encoding it, and
+          #     dropped .html5 templates. This leg is what tells us whether the
+          #     bundle actually runs there rather than merely resolving.
+          - php: '8.4'
+            contao: '^6.0'
 
     # MariaDB as a docker sidecar. The MCP bundle's schema-migrations
     # exercise plenty of MySQL-specific behaviour (strict mode, reserved
@@ -218,10 +224,36 @@ jobs:
           # (bin/console, public/, var/, etc.). --no-install lets us
           # configure repos + patches first, then composer install once.
           # The constraint comes from the matrix (e.g. "5.3.*" or "^5.7").
-          composer create-project --no-install --no-scripts --remove-vcs \
-              "contao/managed-edition:${{ matrix.contao }}" app
-
-          cd app
+          # Contao 6 has no contao/managed-edition release — the skeleton
+          # package stops at 5.7. The Managed Edition IS essentially
+          # contao/manager-bundle plus a build script, so the 6.x leg assembles
+          # that directly and adds the optional bundles the Managed Edition
+          # would have brought along. Everything after this point is identical
+          # for both legs, which is the point: the bundle must not be able to
+          # tell how the app around it was built.
+          if [[ "${{ matrix.contao }}" == ^6* ]]; then
+              mkdir -p app && cd app
+              cat > composer.json <<JSON
+          {
+              "require": { "contao/manager-bundle": "${{ matrix.contao }}" },
+              "extra": { "contao-component-dir": "assets" },
+              "scripts": {
+                  "post-install-cmd": ["@php vendor/bin/contao-setup"],
+                  "post-update-cmd": ["@php vendor/bin/contao-setup"]
+              }
+          }
+          JSON
+              composer require --no-update \
+                  "contao/calendar-bundle:${{ matrix.contao }}" \
+                  "contao/comments-bundle:${{ matrix.contao }}" \
+                  "contao/faq-bundle:${{ matrix.contao }}" \
+                  "contao/news-bundle:${{ matrix.contao }}" \
+                  "contao/newsletter-bundle:${{ matrix.contao }}"
+          else
+              composer create-project --no-install --no-scripts --remove-vcs \
+                  "contao/managed-edition:${{ matrix.contao }}" app
+              cd app
+          fi
 
           # Path-repo: bundle lives one level up, no-symlink so the test
           # really exercises the install layout (vendor/ paths) and patches
@@ -254,7 +286,11 @@ jobs:
           # runs Contao's manager-plugin auto-discovery. -v lifts the
           # log level just enough to surface real solver / patch errors
           # without flooding logs the way -vvv would.
-          composer install --no-interaction --prefer-dist --no-progress -v
+          # php-mcp/server pins phpdocumentor/reflection-docblock ^5.6 and
+          # symfony/finder ^7.2 || lower; a Contao 6 app resolves both higher,
+          # so the resolver has to be allowed to move them back down. On the 5.x
+          # legs nothing needs moving and this behaves like a plain install.
+          composer update --no-interaction --prefer-dist --no-progress -v -W
 
       # CI-specific env. DATABASE_URL points at the MariaDB sidecar
       # exposed on localhost:3306. APP_SECRET is irrelevant for the
