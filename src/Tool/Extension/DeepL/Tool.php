@@ -355,11 +355,18 @@ final class Tool
                                   snapshot, a tl_log entry and its own permission check.
               - max_characters:   refuses before spending anything if the plan exceeds this
                                   (default 100000). Pass 0 to disable.
-              - max_records:      hard cap on the collected tree (default 300).
+              - max_records:      cap on the collected tree. Default AND hard ceiling is
+                                  1000 — a higher value is silently reduced to it, so plan
+                                  larger trees branch by branch rather than in one call.
 
             A record that cannot be written — no permission, validation error — is reported
             in the answer and the rest of the tree continues. `dropped_fields` per record
             lists columns that were filled but do not belong to that record's type.
+
+            `dry_run: true` is also the fastest way to READ a tree: it returns, per page,
+            every collected record with its id and its current field values in document
+            order, and spends nothing. Mapping 86 headlines across 26 pages takes one call
+            here instead of hundreds of content_list calls.
 
             Real sizes: one page was measured at ~46 records and ~7,000 characters, so the
             caps are roughly twenty pages of records and thirty-five of characters. A whole
@@ -406,9 +413,16 @@ final class Tool
         $result = ['root_page' => $id] + $result;
 
         if ($truncated) {
+            // Naming only the effective cap reads as if the parameter had been
+            // misunderstood: pass max_records=4000 and the answer says "larger
+            // than max_records (1000)". Say both numbers when they differ, so
+            // it is clear the request was capped rather than ignored.
             $result['warnings'][] = sprintf(
-                'The tree is larger than max_records (%d) — only the first %d records were processed, depth-first from the starting page. The rest is NOT translated. Continue branch by branch (include_children=false per page, or start at a lower page), rather than raising the cap until it fits: a run long enough to time out leaves a partly translated tree with no report of where it stopped.',
+                'The tree is larger than the effective cap of %d record(s)%s — only the first %d were processed, depth-first from the starting page. The rest is NOT translated. Continue branch by branch (include_children=false per page, or start at a lower page), rather than raising the cap until it fits: a run long enough to time out leaves a partly translated tree with no report of where it stopped.',
                 $limit,
+                $max_records > self::MAX_RECORDS
+                    ? sprintf(' (you asked for %d; %d is the hard ceiling)', $max_records, self::MAX_RECORDS)
+                    : '',
                 \count($targets),
             );
         }

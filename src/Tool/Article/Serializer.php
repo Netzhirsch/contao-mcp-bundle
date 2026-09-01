@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Article;
 
 use Contao\ArticleModel;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\ForeignFieldReader;
 
 /**
  * Flattens an ArticleModel into a JSON-friendly array. Output is symmetric with what
@@ -63,7 +64,9 @@ final class Serializer
             $core = array_merge($core, $provider->serialize($a));
         }
 
-        return $core;
+        // …and every other field the tl_article palette declares that
+        // article_update accepts — see the same merge in Page\Serializer.
+        return array_merge($core, ForeignFieldReader::extra('tl_article', $a, 'default', $core));
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Page;
 
 use Contao\PageModel;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\ForeignFieldReader;
 
 /**
  * Flattens a PageModel into a JSON-friendly array. Output is symmetric with what
@@ -146,7 +147,11 @@ final class Serializer
             $core = array_merge($core, $provider->serialize($p));
         }
 
-        return $core;
+        // …and every other field this page type declares that page_update
+        // accepts. Without this the two sides disagree: a value could be
+        // written through `extras` and then not read back, so a caller could
+        // neither prepare a change nor check one afterwards.
+        return array_merge($core, ForeignFieldReader::extra('tl_page', $p, (string) $p->type, $core));
     }
 
     /**

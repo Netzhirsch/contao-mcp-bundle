@@ -85,6 +85,8 @@ final class DcaScalarWriter
             ));
         }
 
+        self::assertValueIsAllowed($table, $field, (string) $value);
+
         $new = match ($shape) {
             'boolean' => $value ? 1 : 0,
             'integer' => (int) $value,
@@ -105,6 +107,124 @@ final class DcaScalarWriter
         $model->$field = $new;
 
         return true;
+    }
+
+    /**
+     * A column can have the right SHAPE and still be the wrong thing to write
+     * a free value into. This is the check that was missing when foreign fields
+     * first became writable, and its absence corrupted a live page:
+     *
+     *     page_update(id: 129, extras: {netzhirschPageState: "__probe_invalid__"})
+     *     → updated: true, applied: 1
+     *
+     * `netzhirschPageState` is a foreign key into another table. A 17-character
+     * string is not an invalid option there — it is a dangling reference, and
+     * it also went around `pagestate_assign`, the tool that owns that field and
+     * knows to take a version snapshot.
+     *
+     * So: a reference is refused outright and points at its target, and an
+     * enumeration is checked against its options. Where the options cannot be
+     * evaluated from here, the write is refused rather than waved through —
+     * "we could not check" must not read as "it is fine".
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertValueIsAllowed(string $table, string $field, string $value): void
+    {
+        $definition = $GLOBALS['TL_DCA'][$table]['fields'][$field] ?? [];
+
+        if (!\is_array($definition)) {
+            return;
+        }
+
+        // ── References ────────────────────────────────────────────────────
+        $foreignKey = (string) ($definition['foreignKey'] ?? '');
+        $target = $foreignKey !== '' ? explode('.', $foreignKey)[0] : '';
+
+        if ($target !== '' || isset($definition['relation'])) {
+            throw new \InvalidArgumentException(sprintf(
+                'Field "%s" on %s is a reference%s, not a plain value. Writing it here would '
+                .'store whatever it is given, including an id that points at nothing, and would '
+                .'skip the tool that owns this relation (which also records the change). '
+                .'Look for that tool with contao_search_tools("%s") — for example a *_assign or '
+                .'*_list pair — and use it instead.',
+                $field,
+                $table,
+                $target !== '' ? sprintf(' into %s', $target) : '',
+                $field,
+            ));
+        }
+
+        // ── Enumerations ──────────────────────────────────────────────────
+        $options = $definition['options'] ?? null;
+
+        if (\is_array($options) && $options !== []) {
+            $allowed = self::flattenOptions($options);
+
+            if ($allowed !== [] && !\in_array($value, $allowed, true)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Field "%s" on %s only accepts one of: %s. Got "%s".',
+                    $field,
+                    $table,
+                    implode(', ', \array_slice($allowed, 0, 30)),
+                    $value,
+                ));
+            }
+
+            return;
+        }
+
+        if (isset($definition['options_callback'])) {
+            throw new \InvalidArgumentException(sprintf(
+                'Field "%s" on %s takes one of a set of options that is built at edit time, '
+                .'so the value cannot be checked from here. It is not written rather than '
+                .'written unchecked. Use the tool that owns this field, or set it in the backend.',
+                $field,
+                $table,
+            ));
+        }
+
+        // ── Length ────────────────────────────────────────────────────────
+        $eval = \is_array($definition['eval'] ?? null) ? $definition['eval'] : [];
+        $maxLength = (int) ($eval['maxlength'] ?? 0);
+
+        if ($maxLength > 0 && mb_strlen($value) > $maxLength) {
+            throw new \InvalidArgumentException(sprintf(
+                'Field "%s" on %s holds at most %d characters, got %d. MySQL would truncate it.',
+                $field,
+                $table,
+                $maxLength,
+                mb_strlen($value),
+            ));
+        }
+    }
+
+    /**
+     * Contao writes `options` as a plain list, as value => label, or grouped
+     * into optgroups. Only the VALUES matter here.
+     *
+     * @param array<int|string, mixed> $options
+     *
+     * @return list<string>
+     */
+    private static function flattenOptions(array $options): array
+    {
+        $out = [];
+
+        foreach ($options as $key => $entry) {
+            if (\is_array($entry)) {
+                foreach (self::flattenOptions($entry) as $nested) {
+                    $out[] = $nested;
+                }
+
+                continue;
+            }
+
+            // A list gives us values as entries; a map gives them as keys.
+            $out[] = \is_int($key) ? (string) $entry : (string) $key;
+        }
+
+        return array_values(array_unique($out));
     }
 
     /**

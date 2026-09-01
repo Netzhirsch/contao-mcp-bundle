@@ -6,6 +6,75 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.13.0] – 2026-09-01
+
+> Zweite Runde des grass-merkur-Berichts, nach dem Deployment von 1.12.0.
+> Keine Schemaänderung, keine Migration.
+>
+> **Der erste Punkt ist eine Regression aus 1.12.0.** Wer 1.12.0 einsetzt und
+> `extras` benutzt, sollte auf 1.13.0 gehen.
+
+### Fixed
+- **`extras` schrieb ungeprüfte Werte in Referenz- und Auswahlfelder.** Mit
+  1.12.0 wurden Fremdfelder schreibbar — dabei ist die semantische Prüfung
+  entfallen, die im vorherigen „geht gar nicht" implizit steckte. Der Effekt
+  auf einer Live-Instanz:
+
+  ```
+  page_update(id: 129, extras: { "netzhirschPageState": "__probe_invalid__" })
+  → updated: true, applied: 1
+  ```
+
+  `netzhirschPageState` ist ein **Fremdschlüssel**. Ein 17-Zeichen-Freitext ist
+  dort kein ungültiger Optionswert, sondern eine ins Leere zeigende Referenz —
+  und der Aufruf ging zusätzlich an `pagestate_assign` vorbei, dem Werkzeug,
+  das diese Beziehung besitzt und den Versions-Snapshot setzt.
+
+  Der generische Schreiber prüft jetzt vor dem Schreiben:
+  - **Referenz** (`foreignKey` oder `relation` im DCA) → abgelehnt, mit Nennung
+    der Zieltabelle und dem Hinweis, das zuständige Werkzeug über
+    `contao_search_tools` zu suchen.
+  - **Auswahlliste** (statische `options`) → Wert muss darin vorkommen.
+  - **`options_callback`** → nicht auswertbar, also abgelehnt statt ungeprüft
+    geschrieben. „Konnten wir nicht prüfen" darf nicht wie „ist in Ordnung"
+    aussehen.
+  - **`eval.maxlength`** → abgelehnt, statt MySQL abschneiden zu lassen.
+
+- **Die Leseseite folgt der Schreibseite.** Nach 1.12.0 war die Asymmetrie
+  umgedreht: ein Fremdfeld liess sich schreiben, kam aber weder aus `page_get`
+  zurück noch war es über `pages_list(q:)` zu finden. Zum Gegenlesen blieb nur
+  der Dry-Run des Patch-Werkzeugs oder das Frontend. Für einen Agenten, der
+  erst den Bestand erfassen und dann gezielt ändern will, ist das der
+  Unterschied zwischen sicher und blind.
+
+  `page_get` und `article_get` liefern jetzt genau die Felder mit, die
+  `page_update`/`article_update` annehmen — die Regel ist als **eine**
+  Bedingung formuliert (`DcaScalarWriter::supports()`), nicht als zweite
+  Liste, damit die Seiten nicht wieder auseinanderlaufen können.
+
+- **`contao_search_tools` sucht wortweise.** Bisher wurde die Anfrage als ein
+  zusammenhängender Teilstring gesucht: „version undo history revert" traf
+  nichts, obwohl es die passende Werkzeuggruppe gab. Für einen Agenten ist eine
+  nicht gefundene Fähigkeit dasselbe wie eine fehlende — mit dem Unterschied,
+  dass er dann Umwege sucht, die schlechter sind. Genau so ist der Fehlgriff
+  oben entstanden.
+
+  Jedes Wort wird jetzt einzeln geprüft, und bei **null Treffern** liefert die
+  Antwort einen `hint` samt vollständiger Gruppenliste.
+
+- **`deepl_translate_page_tree`:** Die Beschreibung nannte „default 300",
+  tatsächlich sind Vorgabe und Obergrenze **1000**. Und die Kappungswarnung
+  nennt jetzt beide Zahlen, wenn der übergebene Wert reduziert wurde — bei
+  `max_records: 4000` las sich „larger than max_records (1000)" so, als sei der
+  Parameter missverstanden worden.
+
+### Added
+- **Hinweis auf den Dry-Run als Lesewerkzeug** in der Beschreibung von
+  `deepl_translate_page_tree`: Er liefert pro Seite alle Datensätze mit ihren
+  aktuellen Feldwerten in Dokumentreihenfolge und kostet nichts. 86
+  Überschriften über 26 Seiten sind damit ein Aufruf statt hunderter
+  `content_list`-Aufrufe.
+
 ## [1.12.0] – 2026-09-01
 
 > Befund 1 aus dem grass-merkur-Bericht. Keine Schemaänderung, keine Migration.

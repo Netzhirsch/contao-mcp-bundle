@@ -2682,6 +2682,25 @@ final class McpSmokeTestCommand extends Command
             $this->registryAccessor->get()->getTool('pages_list'),
             static fn ($t) => $t !== null);
 
+        // A caller reaching for a capability types a phrase of near-synonyms.
+        // Matching only the contiguous string answered 0, which reads as "this
+        // does not exist" — and a whole tool group stayed invisible that way
+        // until someone went and corrupted a field by hand instead.
+        $expect('a multi-word query is matched word by word',
+            $this->discoveryTool->searchTools('bilder hochladen oder loeschen'),
+            static fn ($r) => \is_array($r) && ($r['count'] ?? 0) > 0);
+        $expect('the single phrase on its own would have found nothing',
+            $this->discoveryTool->searchTools('bilder hochladen oder loeschen'),
+            static fn ($r) => !str_contains(
+                mb_strtolower(implode(' ', array_column($r['matches'] ?? [], 'name'))),
+                'bilder hochladen',
+            ));
+        $expect('a genuine zero result names the groups that do exist',
+            $this->discoveryTool->searchTools('xyzzy_'.$stamp),
+            static fn ($r) => ($r['count'] ?? -1) === 0
+                && isset($r['hint'])
+                && \in_array('page', $r['available_groups'] ?? [], true));
+
         // Post-call hook — the second half of the old patch. Observable side
         // effect: it clears the per-call identity context.
         $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
@@ -3025,6 +3044,8 @@ final class McpSmokeTestCommand extends Command
             ] as [$foreignTable, $plainCol, $complexCol]) {
                 $this->connection->executeStatement("ALTER TABLE {$foreignTable} ADD COLUMN {$plainCol} varchar(255) NOT NULL DEFAULT ''");
                 $this->connection->executeStatement("ALTER TABLE {$foreignTable} ADD COLUMN {$complexCol} blob NULL");
+                $this->connection->executeStatement("ALTER TABLE {$foreignTable} ADD COLUMN nh_smoke_ref int(10) unsigned NOT NULL DEFAULT 0");
+                $this->connection->executeStatement("ALTER TABLE {$foreignTable} ADD COLUMN nh_smoke_choice varchar(16) NOT NULL DEFAULT ''");
 
                 // Contao caches a table's column list per process, and
                 // Model::save() filters the SET clause against it — so a column
@@ -3053,9 +3074,24 @@ final class McpSmokeTestCommand extends Command
                         'eval' => ['multiple' => true],
                         'sql' => ['type' => 'blob', 'notnull' => false],
                     ];
+                    // A reference and an enumeration: right SHAPE, wrong thing
+                    // to write a free value into. Making foreign fields
+                    // writable without this check put a dangling reference on a
+                    // live page — see Service\DcaScalarWriter.
+                    $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_ref'] = [
+                        'inputType' => 'select',
+                        'foreignKey' => 'tl_user.name',
+                        'relation' => ['type' => 'hasOne', 'load' => 'lazy'],
+                        'sql' => ['type' => 'integer', 'unsigned' => true, 'default' => 0],
+                    ];
+                    $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_choice'] = [
+                        'inputType' => 'select',
+                        'options' => ['rot', 'gruen', 'blau'],
+                        'sql' => ['type' => 'string', 'length' => 16, 'default' => ''],
+                    ];
                     $GLOBALS['TL_DCA'][$foreignTable]['palettes'][$paletteKey] =
                         ($GLOBALS['TL_DCA'][$foreignTable]['palettes'][$paletteKey] ?? '')
-                        .';{nh_smoke_legend},nh_smoke_foreign,nh_smoke_complex';
+                        .';{nh_smoke_legend},nh_smoke_foreign,nh_smoke_complex,nh_smoke_ref,nh_smoke_choice';
                 }
 
                 \Contao\Model\Registry::getInstance()->reset();
@@ -3094,14 +3130,61 @@ final class McpSmokeTestCommand extends Command
                 $expect('a field that is in no palette is still refused',
                     $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_gibt_es_nicht' => 'x']),
                     static fn ($r) => \is_array($r) && ($r['error'] ?? '') === 'invalid_input');
+
+                // ── Der Wert, nicht nur der Feldname ───────────────────────
+                //
+                // Making foreign fields writable without checking the VALUE put
+                // a 17-character free text into a foreign-key column on a live
+                // page, and went around the tool that owns that relation.
+                $expect('a reference field is refused, naming its target',
+                    $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_ref' => '__probe_invalid__']),
+                    static fn ($r) => \is_array($r)
+                        && ($r['error'] ?? '') === 'invalid_input'
+                        && str_contains((string) ($r['message'] ?? ''), 'tl_user')
+                        && str_contains((string) ($r['message'] ?? ''), 'contao_search_tools'));
+                $expect('...and nothing was written to it',
+                    (int) $this->connection->fetchOne('SELECT nh_smoke_ref FROM tl_page WHERE id = ?', [$patchPageId]),
+                    static fn (int $v) => $v === 0);
+
+                $expect('a value outside the option list is refused',
+                    $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_choice' => 'lila']),
+                    static fn ($r) => \is_array($r)
+                        && ($r['error'] ?? '') === 'invalid_input'
+                        && str_contains((string) ($r['message'] ?? ''), 'rot, gruen, blau'));
+
+                $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_choice' => 'gruen']);
+                \Contao\Model\Registry::getInstance()->reset();
+                $expect('...while a listed value goes through',
+                    (string) $this->connection->fetchOne('SELECT nh_smoke_choice FROM tl_page WHERE id = ?', [$patchPageId]),
+                    static fn (string $v) => $v === 'gruen');
+
+                // ── Lesen und Schreiben decken sich ───────────────────────
+                //
+                // Round one: readable, not writable. After the first fix the
+                // asymmetry had simply flipped — written and then not readable,
+                // so a change could neither be prepared nor checked.
+                $readBack = $this->pageTool->get($patchPageId);
+                $expect('a foreign field comes back from page_get',
+                    $readBack,
+                    static fn ($r) => \is_array($r) && ($r['nh_smoke_foreign'] ?? null) === 'Fremdtext Seite');
+                $expect('...including one written through an option list',
+                    $readBack,
+                    static fn ($r) => ($r['nh_smoke_choice'] ?? null) === 'gruen');
+                $expect('a column the writer refuses is not offered for reading either',
+                    $readBack,
+                    static fn ($r) => !\array_key_exists('nh_smoke_complex', $r));
             } finally {
                 foreach (['tl_page', 'tl_article'] as $foreignTable) {
                     unset(
                         $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_foreign'],
                         $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_complex'],
+                        $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_ref'],
+                        $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_choice'],
                     );
                     $this->connection->executeStatement("ALTER TABLE {$foreignTable} DROP COLUMN nh_smoke_foreign");
                     $this->connection->executeStatement("ALTER TABLE {$foreignTable} DROP COLUMN nh_smoke_complex");
+                    $this->connection->executeStatement("ALTER TABLE {$foreignTable} DROP COLUMN nh_smoke_ref");
+                    $this->connection->executeStatement("ALTER TABLE {$foreignTable} DROP COLUMN nh_smoke_choice");
                 }
             }
 

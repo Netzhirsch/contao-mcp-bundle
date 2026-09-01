@@ -101,17 +101,29 @@ final class Tool
             $lcName = mb_strtolower((string) $name);
             $lcDesc = mb_strtolower($description);
 
+            // The whole query first, then each word on its own. A caller
+            // reaching for a capability types a phrase of near-synonyms
+            // ("version undo history revert"), and matching only the contiguous
+            // string answers 0 — which reads as "the feature does not exist"
+            // and sends them looking for a worse detour. Reported after exactly
+            // that happened: a tool group was there and stayed invisible.
             $rank = -1;
-            if ($needle === '') {
-                $rank = 0;
-            } elseif ($lcName === $needle) {
-                $rank = 3;
-            } elseif (str_starts_with($lcName, $needle)) {
-                $rank = 2;
-            } elseif (str_contains($lcName, $needle)) {
-                $rank = 1;
-            } elseif (str_contains($lcDesc, $needle)) {
-                $rank = 0;
+            $hits = 0;
+
+            foreach (self::needles($needle) as $token) {
+                $tokenRank = match (true) {
+                    $token === '' => 0,
+                    $lcName === $token => 3,
+                    str_starts_with($lcName, $token) => 2,
+                    str_contains($lcName, $token) => 1,
+                    str_contains($lcDesc, $token) => 0,
+                    default => -1,
+                };
+
+                if ($tokenRank >= 0) {
+                    ++$hits;
+                    $rank = max($rank, $tokenRank);
+                }
             }
 
             if ($rank < 0) {
@@ -120,15 +132,21 @@ final class Tool
 
             $scored[] = [
                 'rank' => $rank,
+                // More of the caller's words matched — a better answer to what
+                // they actually asked, at the same rank.
+                'hits' => $hits,
                 'name' => (string) $name,
                 'group' => $toolGroup,
                 'description' => $description,
             ];
         }
 
-        // Sort: higher rank first, then alphabetical for stable output.
+        // Sort: higher rank first, then how many of the query's words matched,
+        // then alphabetical for stable output.
         usort($scored, static function (array $a, array $b): int {
-            return $b['rank'] <=> $a['rank'] ?: strcmp($a['name'], $b['name']);
+            return $b['rank'] <=> $a['rank']
+                ?: $b['hits'] <=> $a['hits']
+                ?: strcmp($a['name'], $b['name']);
         });
 
         $matches = array_map(static fn (array $s): array => [
@@ -137,7 +155,7 @@ final class Tool
             'description_excerpt' => self::excerpt($s['description'], 200),
         ], \array_slice($scored, 0, $limit));
 
-        return [
+        $result = [
             'matches' => $matches,
             'count' => \count($matches),
             'total_tools' => \count($allTools),
@@ -145,6 +163,64 @@ final class Tool
             'query' => $query,
             'group' => $group,
         ];
+
+        // An empty answer is indistinguishable from "there is no such
+        // capability", and that conclusion is expensive: the caller goes off
+        // and builds a worse route by hand. Hand back the groups that DO exist
+        // so the next search has something to aim at.
+        if ($matches === []) {
+            $result['hint'] = 'No tool matched. Every word of the query was tried on its own, '
+                .'so the capability is probably named differently here — the groups below are '
+                .'the complete list; search again with one of those words, or pass it as `group`.';
+            $result['available_groups'] = $this->visibleGroups($allTools);
+        }
+
+        return $result;
+    }
+
+    /**
+     * The query as a whole, then each of its words. Duplicates removed, and
+     * one-character words dropped: they match nearly everything and would push
+     * the real answer down the list.
+     *
+     * @return list<string>
+     */
+    private static function needles(string $needle): array
+    {
+        if ($needle === '') {
+            return [''];
+        }
+
+        $tokens = [$needle];
+
+        foreach (preg_split('/[\s,;]+/u', $needle) ?: [] as $word) {
+            if (mb_strlen($word) > 1) {
+                $tokens[] = $word;
+            }
+        }
+
+        return array_values(array_unique($tokens));
+    }
+
+    /**
+     * @param array<string, mixed> $allTools
+     *
+     * @return list<string>
+     */
+    private function visibleGroups(array $allTools): array
+    {
+        $groups = [];
+
+        foreach (array_keys($allTools) as $name) {
+            if ($this->permissionEnforcer->isToolVisible((string) $name)) {
+                $groups[ToolGroups::groupOf((string) $name)] = true;
+            }
+        }
+
+        $names = array_keys($groups);
+        sort($names);
+
+        return array_values(array_map(strval(...), $names));
     }
 
     /**
