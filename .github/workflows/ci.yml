@@ -156,6 +156,12 @@ jobs:
             contao: '^5.7'
           - php: '8.4'
             contao: '^5.7'
+          #   - Contao 6.0 on PHP 8.4 — the next major. Contao 6 requires PHP ^8.4
+          #     and Symfony ^7.4/^8.0, stores input RAW instead of encoding it, and
+          #     dropped .html5 templates. This leg is what tells us whether the
+          #     bundle actually runs there rather than merely resolving.
+          - php: '8.4'
+            contao: '^6.0'
 
     # MariaDB as a docker sidecar. The MCP bundle's schema-migrations
     # exercise plenty of MySQL-specific behaviour (strict mode, reserved
