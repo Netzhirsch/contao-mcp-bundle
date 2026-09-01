@@ -6,6 +6,43 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.12.0] – 2026-09-01
+
+> Befund 1 aus dem grass-merkur-Bericht. Keine Schemaänderung, keine Migration.
+
+### Added
+- **Fremd-DCA-Felder an `tl_page` und `tl_article` sind schreibbar.** Ein Feld,
+  das ein anderes Bundle an eine Kerntabelle hängt, war bisher **lesbar, aber
+  über keinen Weg schreibbar**: `page_get` liess es kommentarlos weg,
+  `page_update` wies es als unbekannt zurück, und `entity_field_patch` las es
+  bereitwillig und scheiterte dann beim Speichern mit „Unknown named
+  parameter". Auf grass-merkur mussten deshalb 35 Menü-Untertitel von Hand
+  übersetzt werden, während der Rest der Site vollautomatisch lief.
+
+  Die erlaubten Felder kommen jetzt aus der **echten DCA-Palette** statt aus
+  einer gepflegten Liste. Ein neues Bundle funktioniert damit an dem Tag, an
+  dem es installiert wird — ohne Release hier und ohne Registry fremder Felder
+  bei uns.
+
+  Geschrieben wird über `Service\DcaScalarWriter`, und der **rät nicht**: Er
+  behandelt die drei Formen, deren Speicherung eindeutig ist (String, Integer,
+  Boolean), und lehnt alles andere unter Nennung des Widgets ab. Ein
+  serialisiertes Feld aus einer Vermutung heraus zu schreiben ist genau das,
+  was `headline` seinen Text gekostet hat (siehe 1.11.2).
+
+- **`entity_field_patch` speichert Fremdfelder mit.** `AuditedUpdater`
+  spreizte bislang benannte Argumente in `page_update(...)`; ein Feld, das die
+  Signatur nicht kennt, hatte dort keinen Platz. Was die Signatur nicht
+  deklariert, geht jetzt über den `extras`-Beutel — geprüft wird es dort
+  weiterhin gegen die DCA-Palette. Fehlt einer Tabelle beides, kommt
+  `field_not_writable` mit dem Hinweis, dass Lesen per Dry-Run trotzdem geht,
+  statt einer TypeError-Meldung nach getaner Arbeit.
+
+### Notes
+- Die Prüfung bleibt streng: Ein Feld, das in **keiner** Palette des
+  Datensatztyps steht, wird weiterhin abgelehnt und die erlaubten Felder
+  aufgezählt. Neu ist nur, woher die Liste kommt.
+
 ## [1.11.2] – 2026-09-01
 
 > Aus dem Befund-Bericht zum EN-Rollout von grass-merkur.de. Keine

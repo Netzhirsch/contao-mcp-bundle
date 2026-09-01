@@ -3009,6 +3009,102 @@ final class McpSmokeTestCommand extends Command
                     && substr_count($t, '1.375rem') === 2
                     && str_contains($t, 'Zeile eins'));
 
+            // ── Fremdfelder an tl_page / tl_article ────────────────────────
+            //
+            // A field another bundle hangs on a core table used to be readable
+            // and unwritable: page_get omitted it, page_update rejected it as
+            // unknown, and entity_field_patch read it happily and then failed
+            // at save time with "Unknown named parameter". 35 menu subtitles on
+            // grass-merkur were translated by hand because of it.
+            //
+            // The fixture is a real column plus a real DCA declaration, because
+            // anything less would test the mock rather than the mechanism.
+            foreach ([
+                ['tl_page', 'nh_smoke_foreign', 'nh_smoke_complex'],
+                ['tl_article', 'nh_smoke_foreign', 'nh_smoke_complex'],
+            ] as [$foreignTable, $plainCol, $complexCol]) {
+                $this->connection->executeStatement("ALTER TABLE {$foreignTable} ADD COLUMN {$plainCol} varchar(255) NOT NULL DEFAULT ''");
+                $this->connection->executeStatement("ALTER TABLE {$foreignTable} ADD COLUMN {$complexCol} blob NULL");
+
+                // Contao caches a table's column list per process, and
+                // Model::save() filters the SET clause against it — so a column
+                // added mid-process is dropped silently on write. Production
+                // never sees this (the column exists before PHP starts); this
+                // fixture does, and without the refresh the test would report a
+                // bug that is not there.
+                \Contao\Database::getInstance()->getFieldNames($foreignTable, true);
+            }
+
+            try {
+                \Contao\Controller::loadDataContainer('tl_page');
+                \Contao\Controller::loadDataContainer('tl_article');
+
+                // The fixture page is whatever the instance happens to have, so
+                // the field goes into ITS palette rather than a guessed one.
+                $foreignPageType = (string) $this->connection->fetchOne('SELECT type FROM tl_page WHERE id = ?', [$patchPageId]);
+
+                foreach (['tl_page' => $foreignPageType, 'tl_article' => 'default'] as $foreignTable => $paletteKey) {
+                    $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_foreign'] = [
+                        'inputType' => 'text',
+                        'sql' => ['type' => 'string', 'length' => 255, 'default' => ''],
+                    ];
+                    $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_complex'] = [
+                        'inputType' => 'fileTree',
+                        'eval' => ['multiple' => true],
+                        'sql' => ['type' => 'blob', 'notnull' => false],
+                    ];
+                    $GLOBALS['TL_DCA'][$foreignTable]['palettes'][$paletteKey] =
+                        ($GLOBALS['TL_DCA'][$foreignTable]['palettes'][$paletteKey] ?? '')
+                        .';{nh_smoke_legend},nh_smoke_foreign,nh_smoke_complex';
+                }
+
+                \Contao\Model\Registry::getInstance()->reset();
+
+                $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_foreign' => 'Fremdwert Seite']);
+                \Contao\Model\Registry::getInstance()->reset();
+                $expect('a foreign field on tl_page is writable',
+                    (string) $this->connection->fetchOne('SELECT nh_smoke_foreign FROM tl_page WHERE id = ?', [$patchPageId]),
+                    static fn (string $v) => $v === 'Fremdwert Seite');
+
+                $this->articleTool->update($patchArticleId, extras: ['nh_smoke_foreign' => 'Fremdwert Artikel']);
+                \Contao\Model\Registry::getInstance()->reset();
+                $expect('...and on tl_article',
+                    (string) $this->connection->fetchOne('SELECT nh_smoke_foreign FROM tl_article WHERE id = ?', [$patchArticleId]),
+                    static fn (string $v) => $v === 'Fremdwert Artikel');
+
+                // The patch tool reads any column and used to die at save time
+                // because AuditedUpdater spreads named arguments.
+                $expect('entity_field_patch writes a foreign field too',
+                    $this->patchTool->patch('tl_page', $patchPageId, 'nh_smoke_foreign', 'Fremdwert', 'Fremdtext'),
+                    static fn ($r) => ($r['patched'] ?? false) === true);
+                \Contao\Model\Registry::getInstance()->reset();
+                $expect('...and the column really carries the new text',
+                    (string) $this->connection->fetchOne('SELECT nh_smoke_foreign FROM tl_page WHERE id = ?', [$patchPageId]),
+                    static fn (string $v) => $v === 'Fremdtext Seite');
+
+                // A column whose encoding we cannot know is refused BY NAME.
+                // Guessing at it is how headline lost its text. The tool reports
+                // this as a structured result, not an exception.
+                $expect('a multi-value column is refused, naming the widget',
+                    $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_complex' => ['a', 'b']]),
+                    static fn ($r) => \is_array($r)
+                        && ($r['error'] ?? '') === 'invalid_input'
+                        && str_contains((string) ($r['message'] ?? ''), 'fileTree'));
+
+                $expect('a field that is in no palette is still refused',
+                    $this->pageTool->update(id: $patchPageId, extras: ['nh_smoke_gibt_es_nicht' => 'x']),
+                    static fn ($r) => \is_array($r) && ($r['error'] ?? '') === 'invalid_input');
+            } finally {
+                foreach (['tl_page', 'tl_article'] as $foreignTable) {
+                    unset(
+                        $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_foreign'],
+                        $GLOBALS['TL_DCA'][$foreignTable]['fields']['nh_smoke_complex'],
+                    );
+                    $this->connection->executeStatement("ALTER TABLE {$foreignTable} DROP COLUMN nh_smoke_foreign");
+                    $this->connection->executeStatement("ALTER TABLE {$foreignTable} DROP COLUMN nh_smoke_complex");
+                }
+            }
+
             // ── Serialised columns ─────────────────────────────────────────
             //
             // cssID holds serialise([id, class]). A text replacement inside it

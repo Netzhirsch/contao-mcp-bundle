@@ -122,7 +122,52 @@ final class AuditedUpdater
                 return $tool->update($id, $fields);
             }
 
-            return $tool->update(...array_merge(['id' => $id], $fields));
+            // A named-parameter tool has one parameter per core field, so a
+            // field another bundle hung on the table has nowhere to go — PHP
+            // answers with "Unknown named parameter" and the caller sees
+            // `save_failed` after the work was already done. That is what
+            // stopped entity_field_patch from writing
+            // netzhirsch_megamenu_subtitle even though it read it happily.
+            //
+            // Anything the signature does not declare goes into the `extras`
+            // bag instead, which the page and article tools already have for
+            // exactly this purpose. The field is still validated there against
+            // the live DCA palette — this only routes it, it does not widen
+            // what may be written.
+            $declared = array_map(
+                static fn (\ReflectionParameter $p): string => $p->getName(),
+                (new \ReflectionMethod($tool, 'update'))->getParameters(),
+            );
+
+            $named = ['id' => $id];
+            $extras = [];
+
+            foreach ($fields as $field => $value) {
+                if (\in_array($field, $declared, true)) {
+                    $named[$field] = $value;
+                } else {
+                    $extras[$field] = $value;
+                }
+            }
+
+            if ($extras !== []) {
+                if (!\in_array('extras', $declared, true)) {
+                    return [
+                        'error' => 'field_not_writable',
+                        'message' => sprintf(
+                            '"%s" has no parameter for %s and no extras bag to route it through. '
+                            .'The field may still be readable — try a dry run.',
+                            $table,
+                            implode(', ', array_map(static fn (string $f): string => '"'.$f.'"', array_keys($extras))),
+                        ),
+                        'fields' => array_keys($extras),
+                    ];
+                }
+
+                $named['extras'] = $extras;
+            }
+
+            return $tool->update(...$named);
         } catch (\Throwable $e) {
             return [
                 'error' => 'save_failed',

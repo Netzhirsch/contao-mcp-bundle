@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Article;
 
 use Contao\ArticleModel;
+use Contao\Controller;
+use Contao\CoreBundle\Framework\ContaoFramework;
+use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\DcaScalarWriter;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 
 /**
@@ -17,6 +21,7 @@ final class FieldMapper
 {
     public function __construct(
         private readonly FieldProviderRegistry $providers,
+        private readonly ContaoFramework $framework,
     ) {
     }
 
@@ -46,7 +51,10 @@ final class FieldMapper
         $changed = [];
 
         // ─── Validate every input key ───
-        $known = self::knownFields();
+        $this->framework->initialize();
+        $this->framework->getAdapter(Controller::class)->loadDataContainer('tl_article');
+
+        $known = $this->knownFields();
         $providers = $this->providers->forTable('tl_article');
 
         foreach (array_keys($input) as $field) {
@@ -193,11 +201,32 @@ final class FieldMapper
         }
 
         // ─── Provider apply ───
+        $providerFields = [];
         foreach ($providers as $provider) {
+            foreach ($provider->getDeclaredFields() as $declared) {
+                $providerFields[] = $declared;
+            }
             if (!$provider->isAvailable()) {
                 continue;
             }
             foreach ($provider->apply($article, $input, $detectChanges) as $field) {
+                $touch($field);
+            }
+        }
+
+        // Everything the groups above do not know about — see the same loop
+        // in Tool\Page\FieldMapper. Refuses rather than guesses at an
+        // encoding it cannot know.
+        foreach ($input as $field => $value) {
+            if ($value === null || \in_array($field, self::HANDLED_BY_GROUPS, true)) {
+                continue;
+            }
+
+            if (\in_array($field, $providerFields, true) || \in_array($field, $changed, true)) {
+                continue;
+            }
+
+            if (DcaScalarWriter::write('tl_article', $article, $field, $value, $detectChanges)) {
                 $touch($field);
             }
         }
@@ -208,14 +237,32 @@ final class FieldMapper
     /**
      * @return list<string>
      */
-    private static function knownFields(): array
+    private function knownFields(): array
     {
+        // …plus the live DCA palette, so a field another bundle hangs on
+        // tl_article is accepted the day that bundle is installed rather
+        // than after a release here. Empty when the DCA is not loaded, and
+        // the curated lists still carry it then.
+        $dca = $GLOBALS['TL_DCA']['tl_article'] ?? null;
+        $fromDca = \is_array($dca) ? DcaPalette::resolve($dca, 'default')['fields'] : [];
+
         return array_values(array_unique(array_merge(
-            self::STRING_FIELDS,
-            self::BOOL_FIELDS,
-            ['page_id', 'sorting', 'author_id', 'printable', 'groups', 'cssID', 'space', 'start', 'stop'],
+            self::HANDLED_BY_GROUPS,
+            $fromDca,
         )));
     }
+
+    /**
+     * Every field one of the hand-written loops above already writes. The
+     * generic writer must not touch these.
+     *
+     * @var list<string>
+     */
+    private const HANDLED_BY_GROUPS = [
+        'title', 'alias', 'inColumn', 'teaserCssID', 'teaser', 'customTpl',
+        'showTeaser', 'protected', 'guests', 'published',
+        'page_id', 'sorting', 'author_id', 'printable', 'groups', 'cssID', 'space', 'start', 'stop',
+    ];
 
     /**
      * Normalises an object/dict like {id: "...", class: "..."} or {top, bottom} into

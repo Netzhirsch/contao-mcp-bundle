@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tool\Page;
 
+use Contao\Controller;
+use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\PageModel;
+use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\DcaScalarWriter;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 
 /**
@@ -23,7 +27,18 @@ final class FieldMapper
 {
     public function __construct(
         private readonly FieldProviderRegistry $providers,
+        private readonly ContaoFramework $framework,
     ) {
+    }
+
+    /**
+     * Makes sure `$GLOBALS['TL_DCA']['tl_page']` is there before anything asks
+     * it what a page type has. Cheap and idempotent — Contao caches it.
+     */
+    private function loadDca(): void
+    {
+        $this->framework->initialize();
+        $this->framework->getAdapter(Controller::class)->loadDataContainer('tl_page');
     }
 
     /**
@@ -201,6 +216,8 @@ final class FieldMapper
             ));
         }
 
+        $this->loadDca();
+
         $coreAllowed = $this->allowedFieldsFor($resolvedType);
         $providers = $this->providers->forTable('tl_page');
 
@@ -362,11 +379,37 @@ final class FieldMapper
 
         // Hand over to extension providers (only available ones; non-available would
         // have already failed the input validation above).
+        $providerFields = [];
         foreach ($providers as $provider) {
+            foreach ($provider->getDeclaredFields() as $declared) {
+                $providerFields[] = $declared;
+            }
             if (!$provider->isAvailable()) {
                 continue;
             }
             foreach ($provider->apply($page, $input, $detectChanges) as $field) {
+                $touch($field);
+            }
+        }
+
+        // Everything the groups above do not know about. Until now such a field
+        // passed validation and was then simply never written — the caller got
+        // `updated: true` and an unchanged record. That is how
+        // netzhirsch_megamenu_subtitle behaved: readable through the patch
+        // tool's dry run, writable through nothing.
+        //
+        // DcaScalarWriter handles the shapes whose storage is unambiguous and
+        // REFUSES the rest by name rather than guessing at an encoding.
+        foreach ($input as $field => $value) {
+            if ($value === null || \in_array($field, self::handledByGroups(), true)) {
+                continue;
+            }
+
+            if (\in_array($field, $providerFields, true) || \in_array($field, $changed, true)) {
+                continue;
+            }
+
+            if (DcaScalarWriter::write('tl_page', $page, $field, $value, $detectChanges)) {
                 $touch($field);
             }
         }
@@ -383,7 +426,55 @@ final class FieldMapper
     {
         $palette = self::TYPE_PALETTES[$type] ?? [];
 
-        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $palette)));
+        // …plus whatever the LIVE DCA says this page type has. The curated
+        // lists above cover core Contao and nothing else, so a field another
+        // bundle hangs on tl_page was rejected as unknown — which is how 35
+        // menu subtitles ended up being translated by hand on grass-merkur
+        // while the rest of the site ran automatically.
+        //
+        // Reading the palette instead of maintaining a registry means a new
+        // bundle works the day it is installed, without a release here.
+        return array_values(array_unique(array_merge(
+            self::COMMON_FIELDS,
+            $palette,
+            $this->dcaFieldsFor($type),
+        )));
+    }
+
+    /**
+     * Every field one of the hand-written loops above already writes. The
+     * generic writer must not touch these, or it would undo the special
+     * handling they exist for (timestamps, binary UUIDs, serialised lists).
+     *
+     * @return list<string>
+     */
+    private static function handledByGroups(): array
+    {
+        return array_values(array_unique(array_merge(
+            self::STRING_FIELDS,
+            self::BOOL_FIELDS,
+            self::INT_FIELDS,
+            ['start', 'stop', 'favicon', 'groups', 'newsArchives', 'eventCalendars', 'chmod'],
+        )));
+    }
+
+    /**
+     * Fields the tl_page DCA declares for this page type, sub-palettes included.
+     *
+     * Empty when the DCA is not loaded — the mapper must keep working in a unit
+     * test that never boots Contao, and the curated lists still carry it there.
+     *
+     * @return list<string>
+     */
+    private function dcaFieldsFor(string $type): array
+    {
+        $dca = $GLOBALS['TL_DCA']['tl_page'] ?? null;
+
+        if (!\is_array($dca)) {
+            return [];
+        }
+
+        return DcaPalette::resolve($dca, $type)['fields'];
     }
 
     /**
