@@ -280,7 +280,7 @@ final class Tool
                 : $this->serializer->fromFilesystem($entry->getRealPath() ?: $entry->getPathname(), $relFromUploadRoot);
         }
 
-        return [
+        $result = [
             'items' => $out,
             'count' => \count($out),
             'total' => $matched,
@@ -291,6 +291,21 @@ final class Tool
             'truncated' => $matched > $offset + \count($out),
             'scan_aborted_at_cap' => $aborted,
         ];
+
+        // Zero hits on a query with no wildcard is nearly always the same
+        // mistake: this is a glob, not a substring search, so `green-it` only
+        // matches a file called exactly that. Nothing distinguishes the empty
+        // answer from "genuinely not there", so say which one it probably is
+        // rather than leaving the caller to conclude the file is missing.
+        if ($matched === 0 && !preg_match('/[*?\[{]/', $query)) {
+            $result['hint'] = sprintf(
+                'No match. `query` is a glob pattern, not a substring: "%1$s" matches only that exact name. '
+                .'Try "*%1$s*" to find it anywhere in the name.',
+                $query,
+            );
+        }
+
+        return $result;
     }
 
     /**

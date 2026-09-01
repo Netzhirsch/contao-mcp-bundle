@@ -174,6 +174,32 @@ final class Tool
 
         $patched = str_replace($old, $new, $current);
 
+        // A serialised column carries byte-length prefixes: `s:7:"Karriere"`
+        // stops being readable the moment the string inside it changes length,
+        // and Contao then reads the whole column as empty. The replacement
+        // itself succeeds and the tool would report success — silent
+        // corruption, which is worse than a refusal.
+        //
+        // Reading stays allowed: the dry run above is genuinely useful for
+        // finding out what is inside such a column, which is exactly how the
+        // grass-merkur report located a field name without database access.
+        if (!$dry_run && self::isSerialised($current)) {
+            return [
+                'error' => 'serialised_field',
+                'message' => sprintf(
+                    '"%s.%s" holds a serialised value (Contao stores several things in this column). '
+                    .'A text replacement would break its length prefixes and Contao would read the column as empty. '
+                    .'Use the update tool for this table instead — it writes the parts separately. '
+                    .'A dry run on this field still works if you only want to read it.',
+                    $table,
+                    $column,
+                ),
+                'table' => $table,
+                'id' => $id,
+                'field' => $column,
+            ];
+        }
+
         if ($dry_run) {
             return [
                 'dry_run' => true,
@@ -233,6 +259,22 @@ final class Tool
      *
      * @return list<array{offset: int, context: string}>
      */
+    /**
+     * True when the column holds a PHP-serialised structure.
+     *
+     * Deliberately conservative: it must actually unserialise, so a piece of
+     * prose that happens to start with `a:` is not mistaken for one. Objects
+     * are not instantiated on the way in.
+     */
+    private static function isSerialised(string $value): bool
+    {
+        if ($value === '' || !preg_match('/^[aOs]:\d+:/', $value)) {
+            return false;
+        }
+
+        return @unserialize($value, ['allowed_classes' => false]) !== false;
+    }
+
     private function contextsOf(string $haystack, string $needle): array
     {
         $out = [];

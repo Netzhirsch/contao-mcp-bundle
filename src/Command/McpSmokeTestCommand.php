@@ -3009,6 +3009,74 @@ final class McpSmokeTestCommand extends Command
                     && substr_count($t, '1.375rem') === 2
                     && str_contains($t, 'Zeile eins'));
 
+            // ── Serialised columns ─────────────────────────────────────────
+            //
+            // cssID holds serialise([id, class]). A text replacement inside it
+            // breaks the byte-length prefixes and Contao then reads the whole
+            // column as empty — silent corruption reported as success. Reading
+            // stays allowed: that is how the grass-merkur report found a field
+            // name without database access.
+            $this->contentTool->update($patchId, ['cssID' => ['id' => 'anker-id', 'class' => 'anker-klasse']]);
+            \Contao\Model\Registry::getInstance()->reset();
+
+            $expect('a write into a serialised column is refused',
+                $this->patchTool->patch('tl_content', $patchId, 'cssID', 'anker-klasse', 'andere-klasse'),
+                static fn ($r) => ($r['error'] ?? '') === 'serialised_field');
+            $expect('and the serialised value survived intact',
+                (string) $this->connection->fetchOne('SELECT cssID FROM tl_content WHERE id = ?', [$patchId]),
+                static fn (string $v) => \is_array(@unserialize($v, ['allowed_classes' => false]))
+                    && str_contains($v, 'anker-klasse'));
+            $expect('but a dry run may still read it',
+                $this->patchTool->patch('tl_content', $patchId, 'cssID', 'anker-klasse', 'x', dry_run: true),
+                static fn ($r) => ($r['dry_run'] ?? false) === true && ($r['occurrences'] ?? 0) === 1);
+
+            // ── Teil-Updates an Tupel-Feldern ──────────────────────────────
+            //
+            // One column holding two things cannot be written from one of them.
+            // Reported from grass-merkur: {unit} alone blanked the headline
+            // text and returned applied: 1. The other direction was just as
+            // broken and went unnoticed because the test element was an h2.
+            $this->contentTool->update($patchId, ['headline' => ['value' => 'Vielen Dank', 'unit' => 'h1']]);
+            \Contao\Model\Registry::getInstance()->reset();
+
+            $headlineOf = fn (): array => (array) @unserialize(
+                (string) $this->connection->fetchOne('SELECT headline FROM tl_content WHERE id = ?', [$patchId]),
+                ['allowed_classes' => false],
+            );
+
+            $this->contentTool->update($patchId, ['headline' => ['unit' => 'h3']]);
+            \Contao\Model\Registry::getInstance()->reset();
+            $expect('changing only the heading level keeps the text',
+                $headlineOf(),
+                static fn (array $h) => ($h['value'] ?? '') === 'Vielen Dank' && ($h['unit'] ?? '') === 'h3');
+
+            $this->contentTool->update($patchId, ['headline' => ['value' => 'Danke sehr']]);
+            \Contao\Model\Registry::getInstance()->reset();
+            $expect('changing only the text keeps the heading level',
+                $headlineOf(),
+                static fn (array $h) => ($h['value'] ?? '') === 'Danke sehr' && ($h['unit'] ?? '') === 'h3');
+
+            $this->contentTool->update($patchId, ['headline' => 'Kurzform']);
+            \Contao\Model\Registry::getInstance()->reset();
+            $expect('the string shorthand keeps it too',
+                $headlineOf(),
+                static fn (array $h) => ($h['value'] ?? '') === 'Kurzform' && ($h['unit'] ?? '') === 'h3');
+
+            $this->contentTool->update($patchId, ['headline' => ['value' => '']]);
+            \Contao\Model\Registry::getInstance()->reset();
+            $expect('an explicit empty string still clears',
+                $headlineOf(),
+                static fn (array $h) => ($h['value'] ?? 'x') === '' && ($h['unit'] ?? '') === 'h3');
+
+            $this->contentTool->update($patchId, ['cssID' => ['class' => 'nur-klasse-neu']]);
+            \Contao\Model\Registry::getInstance()->reset();
+            $expect('a partial cssID keeps the other half',
+                (array) @unserialize(
+                    (string) $this->connection->fetchOne('SELECT cssID FROM tl_content WHERE id = ?', [$patchId]),
+                    ['allowed_classes' => false],
+                ),
+                static fn (array $p) => ($p[0] ?? '') === 'anker-id' && ($p[1] ?? '') === 'nur-klasse-neu');
+
             // Stated count makes a repeated anchor legitimate.
             $expect('an explicit count patches every occurrence',
                 $this->patchTool->patch('tl_content', $patchId, 'text', '1.375rem', '1.25rem', expect_occurrences: 2),

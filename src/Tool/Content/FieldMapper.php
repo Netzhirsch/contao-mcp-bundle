@@ -8,6 +8,7 @@ use Contao\Controller;
 use Contao\ContentModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\SerializedTuple;
 use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
 /**
@@ -175,7 +176,7 @@ final class FieldMapper
             if ($value === null) {
                 continue;
             }
-            $newValue = $this->castValue($field, $value);
+            $newValue = $this->castValue($field, $value, $content->$field);
             if (!$detectChanges || self::isDifferent($content->$field, $newValue)) {
                 $content->$field = $newValue;
                 $touch($field);
@@ -302,7 +303,12 @@ final class FieldMapper
     }
 
 
-    private function castValue(string $field, mixed $value): mixed
+    /**
+     * @param mixed $current the value currently stored in that column, so a
+     *                       partial update to a tuple field can be merged
+     *                       instead of rebuilt from defaults
+     */
+    private function castValue(string $field, mixed $value, mixed $current = null): mixed
     {
         if (\in_array($field, self::BOOL_FIELDS, true)) {
             return $value ? 1 : 0;
@@ -362,20 +368,11 @@ final class FieldMapper
         }
 
         if (\in_array($field, self::HEADLINE_TUPLE_FIELDS, true)) {
-            if (\is_string($value)) {
-                // shorthand: pass just the text, default unit h2
-                return serialize(['value' => $value, 'unit' => 'h2']);
-            }
-            if (\is_object($value)) {
-                $value = (array) $value;
-            }
-            if (!\is_array($value)) {
-                throw new \InvalidArgumentException('"headline" must be a string or an object {value, unit}.');
-            }
-            return serialize([
-                'value' => (string) ($value['value'] ?? ''),
-                'unit' => (string) ($value['unit'] ?? 'h2'),
-            ]);
+            // Merged against what is stored, not rebuilt from defaults. Sending
+            // only {unit: "h1"} used to blank the headline text and report
+            // success; sending only {value: "…"} reset the level to h2. See
+            // Service\SerializedTuple.
+            return serialize(SerializedTuple::headline($value, $current));
         }
 
         if (isset(self::STRING_PAIR_FIELDS[$field])) {
@@ -383,17 +380,16 @@ final class FieldMapper
             if (\is_string($value)) {
                 return $value;
             }
-            if (\is_object($value)) {
-                $value = (array) $value;
-            }
-            if (!\is_array($value)) {
-                [$ka, $kb] = self::STRING_PAIR_FIELDS[$field];
 
-                throw new \InvalidArgumentException(sprintf('"%s" must be a string or an object {%s, %s}.', $field, $ka, $kb));
-            }
             [$keyA, $keyB] = self::STRING_PAIR_FIELDS[$field];
-            $a = (string) ($value[$keyA] ?? $value[0] ?? '');
-            $b = (string) ($value[$keyB] ?? $value[1] ?? '');
+
+            if (!\is_array($value) && !\is_object($value)) {
+                throw new \InvalidArgumentException(sprintf('"%s" must be a string or an object {%s, %s}.', $field, $keyA, $keyB));
+            }
+
+            // Same merge as the headline tuple: one column holding two things
+            // cannot be written from one of them.
+            [$a, $b] = SerializedTuple::pair($value, $current, $keyA, $keyB);
 
             return ($a === '' && $b === '') ? '' : serialize([$a, $b]);
         }

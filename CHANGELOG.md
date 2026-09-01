@@ -6,6 +6,53 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.11.2] – 2026-09-01
+
+> Aus dem Befund-Bericht zum EN-Rollout von grass-merkur.de. Keine
+> Schemaänderung, keine Migration.
+>
+> **Verhaltensänderung:** `headline` als blosser String setzt die
+> Überschriftenebene nicht mehr auf `h2` zurück, sondern behält die bestehende.
+> Wer bisher darauf gebaut hat, dass ein String-Update auf `h2` normalisiert,
+> muss die Ebene jetzt ausdrücklich mitgeben.
+
+### Fixed
+- **Teil-Updates an Tupel-Feldern haben die jeweils andere Hälfte gelöscht.**
+  `content_update(id, fields: {headline: {unit: "h1"}})` setzte `value` auf den
+  Leerstring und meldete `applied: 1, updated: true` — ohne Fehler. Die
+  Überschrift war weg, aufgefallen ist es nur beim Blick ins Frontend.
+
+  Der Bericht hielt die Gegenrichtung für unkritisch. Sie war es nicht: das
+  geprüfte Element war zufällig bereits ein `h2`, deshalb sah das Zurücksetzen
+  der Ebene wie Erhalt aus. Tatsächlich löschte **jede** Richtung die nicht
+  genannte Hälfte, und der String-Kurzform-Fall ebenso. Betroffen war neben
+  `tl_content` auch `tl_module` — derselbe Aufbau, dieselbe Lücke.
+
+  Neu ist `Service\SerializedTuple`: Was der Aufrufer nicht nennt, bleibt
+  stehen. Gilt für `headline` sowie für die Positionspaare `cssID` und `space`.
+  Ausdrückliches Leeren (`{value: ""}`) funktioniert weiterhin — ein leerer
+  String ist eine Anweisung, ein fehlender Schlüssel nicht.
+
+- **`entity_field_patch` durfte in serialisierte Spalten schreiben.** Eine
+  Textersetzung in `cssID` liess die Längenangabe `s:7:` stehen; Contao liest
+  die Spalte danach als leer. Der Aufruf meldete Erfolg. Schreiben wird jetzt
+  mit `serialised_field` abgelehnt und nennt den richtigen Weg. **Lesen bleibt
+  erlaubt** — der Dry-Run auf solchen Spalten ist genau das Werkzeug, mit dem
+  der Bericht den gesuchten Feldnamen ohne Datenbankzugang gefunden hat.
+
+- **`files_search` erklärt jetzt den Nulltreffer.** Die Suche ist ein Glob,
+  kein Teilstring: `green-it` findet nur eine so heissende Datei, `*green-it*`
+  findet sie überall. Bei null Treffern ohne Platzhalter steht das jetzt als
+  `hint` in der Antwort, statt den Aufrufer schliessen zu lassen, die Datei
+  existiere nicht.
+
+### Bereits behoben
+- Der im Bericht erwähnte Fall „`page_update` mit einem `fields`-Objekt liefert
+  `applied: 0` ohne Fehler" ist seit **1.10.0** erledigt: unbekannte Parameter
+  werden abgelehnt und benannt.
+- `template_get` mit `name` statt `path` liefert seit **1.10.0** den
+  Parameternamen und die erlaubte Liste statt `tool_failed · Internal error`.
+
 ## [1.11.1] – 2026-08-28
 
 > Nachschärfung an CIMD aus einem gezielten Selbst-Audit direkt nach 1.11.0.

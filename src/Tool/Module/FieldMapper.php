@@ -9,6 +9,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\ModuleModel;
 use Contao\StringUtil;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\SerializedTuple;
 use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
 
 /**
@@ -123,7 +124,7 @@ final class FieldMapper
             if ($value === null) {
                 continue;
             }
-            $newValue = $this->castValue($field, $value);
+            $newValue = $this->castValue($field, $value, $module->$field);
             if (!$detectChanges || self::isDifferent($module->$field, $newValue)) {
                 $module->$field = $newValue;
                 $touch($field);
@@ -238,7 +239,12 @@ final class FieldMapper
         return !empty($eval['multiple']) ? 'multiple' : 'single';
     }
 
-    private function castValue(string $field, mixed $value): mixed
+    /**
+     * @param mixed $current the value currently stored in that column, so a
+     *                       partial update to a tuple field can be merged
+     *                       instead of rebuilt from defaults
+     */
+    private function castValue(string $field, mixed $value, mixed $current = null): mixed
     {
         // fileTree columns are binary(16), and which columns those are cannot
         // be a hardcoded list: every extension brings its own (the case that
@@ -278,19 +284,20 @@ final class FieldMapper
         }
 
         if (\in_array($field, self::HEADLINE_TUPLE_FIELDS, true)) {
-            if (\is_string($value)) {
-                return serialize(['unit' => 'h2', 'value' => $value]);
+            if (!\is_string($value) && !\is_array($value) && !\is_object($value)) {
+                throw new \InvalidArgumentException('headline must be a string or {value, unit:h1..h6}');
             }
-            if (\is_array($value) || \is_object($value)) {
-                $arr = (array) $value;
-                $unit = (string) ($arr['unit'] ?? 'h2');
-                $val = (string) ($arr['value'] ?? '');
-                if (!\in_array($unit, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)) {
-                    throw new \InvalidArgumentException(sprintf('headline.unit must be h1..h6, got "%s"', $unit));
-                }
-                return serialize(['unit' => $unit, 'value' => $val]);
+
+            // Merged against what is stored: {unit: "h1"} alone used to blank
+            // the module's headline text, {value: "…"} alone reset the level.
+            // See Service\SerializedTuple.
+            $merged = SerializedTuple::headline($value, $current);
+
+            if (!\in_array($merged['unit'], ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)) {
+                throw new \InvalidArgumentException(sprintf('headline.unit must be h1..h6, got "%s"', $merged['unit']));
             }
-            throw new \InvalidArgumentException('headline must be a string or {value, unit:h1..h6}');
+
+            return serialize(['unit' => $merged['unit'], 'value' => $merged['value']]);
         }
 
         // pid + type + name + everything textual.
