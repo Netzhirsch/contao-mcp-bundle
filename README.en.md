@@ -206,8 +206,28 @@ grace after expiry on top. A running Contao cron is the prerequisite.
   `mbstring`, `intl`. `sodium` is mandatory for license verification — without it
   every tool stays locked. CI tests PHP 8.1 (against Contao 5.3) as well as 8.3
   and 8.4 (against Contao 5.7).
-- **Contao** ≥ 5.3. Contao 4.13 is not supported.
-- **Symfony** ≥ 6.4 or 7.x
+- **Contao** 5.3 through 6.0 (CI runs the smoke test against 5.3, 5.7 **and**
+  6.0). Contao 4.13 is not supported.
+- **Symfony** ≥ 6.4, 7.x or 8.x
+
+### Contao 6
+
+Runs unchanged. Two things to know when installing:
+
+**Contao 6 requires PHP ≥ 8.4.** The bundle's own floor stays at 8.1 so Contao
+5.3 instances keep working — on PHP 8.1 only the 5.x line is installable anyway.
+
+**The install needs `-W`:**
+
+```bash
+composer require netzhirsch/contao-mcp-bundle -W
+```
+
+The reason is not this bundle but `php-mcp/server`: it pins
+`phpdocumentor/reflection-docblock` to `^5.6` and `symfony/finder` to `^7.2`,
+while a Contao 6 app resolves both higher. `-W` lets Composer move them back
+down, which both packages tolerate; without it the resolution fails. On Contao 5
+the flag is unnecessary.
 - **MySQL** ≥ 8.0 or MariaDB ≥ 10.6 (strict mode supported)
 - **Storage for `var/mcp/`**: writable, nothing more. Since 1.9.1 the bundle
   writes its state files atomically via `rename()` and needs **no working file

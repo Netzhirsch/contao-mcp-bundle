@@ -6,6 +6,51 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.14.0] – 2026-09-01
+
+> Unterstützt jetzt **Contao 6**. Keine Schemaänderung, keine Migration, keine
+> Codeänderung nötig — der Support-Bereich ist 5.3 bis 6.0.
+
+### Added
+- **Contao 6.0 wird unterstützt.** Constraints geöffnet auf
+  `contao/core-bundle: ^5.3 || ^6.0` und `symfony/*: ^6.4 || ^7.0 || ^8.0`.
+  Die PHP-Untergrenze bleibt bei `^8.1`: Contao 6 verlangt PHP `^8.4`, also ist
+  auf einer 8.1-Instanz ohnehin nur die 5er-Linie installierbar — bestehende
+  Contao-5.3-Kunden sind unberührt.
+
+  **Am Code war nichts zu ändern.** Der Smoke-Test läuft auf einer echten
+  Contao-6.0.0-Instanz mit Symfony 8.1 vollständig durch. Die drei
+  Bruchstellen aus Contao 6, die uns hätten treffen können, tun es nicht:
+  - *Eingaben werden roh gespeichert statt kodiert* — unsere Schreibwege gehen
+    über Models, nie über `Input::post`, waren also nie von Contaos
+    Request-Kodierung abhängig.
+  - *`.html5`-Templates entfallen* — die Template-Werkzeuge listen, was da ist,
+    und setzen kein Format voraus.
+  - *Models casten automatisch und liefern Defaults statt `null`* — die
+    Serializer prüfen ohnehin auf Typ, nicht auf `null`.
+
+  Der `html_filter_*`-Bereich läuft ebenfalls durch: er liest die
+  Konfiguration, statt an den entfernten Twig-Filtern zu hängen.
+
+- **CI-Strecke für Contao 6.** Die Matrix fährt jetzt 5.3/PHP 8.1, 5.7/PHP 8.3,
+  5.7/PHP 8.4 **und 6.0/PHP 8.4**. Weil `contao/managed-edition` bei 5.7
+  aufhört und für Contao 6 (noch) nicht existiert, baut die 6er-Strecke die
+  Testinstanz direkt aus `contao/manager-bundle` samt der optionalen Bundles,
+  die die Managed Edition mitgebracht hätte.
+
+### Notes
+- **Auf Contao 6 braucht die Installation `-W`:**
+
+  ```bash
+  composer require netzhirsch/contao-mcp-bundle -W
+  ```
+
+  Nicht wegen des Bundles, sondern wegen `php-mcp/server`: es pinnt
+  `phpdocumentor/reflection-docblock` auf `^5.6` und `symfony/finder` auf
+  `^7.2`, während eine Contao-6-Installation beide höher auflöst. Dieselbe
+  Klasse von Reibung wie beim `react/http`-Fall in 1.9.0 — und derselbe
+  richtige Ort für die Lösung: eine Erweiterung der Constraints upstream.
+
 ## [1.13.0] – 2026-09-01
 
 > Zweite Runde des grass-merkur-Berichts, nach dem Deployment von 1.12.0.
