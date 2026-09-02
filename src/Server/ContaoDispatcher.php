@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
-use Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard;
+use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
 use PhpMcp\Schema\Content\TextContent;
 use PhpMcp\Schema\Request\CallToolRequest;
 use PhpMcp\Schema\Request\ListToolsRequest;
@@ -40,7 +40,7 @@ final class ContaoDispatcher extends Dispatcher
         ?SchemaValidator $schemaValidator,
         private readonly ToolFilter $toolFilter,
         private readonly PostCallHook $postCallHook,
-        private readonly UnknownArgumentGuard $unknownArgumentGuard,
+        private readonly ArgumentGuard $argumentGuard,
         private readonly LoggerInterface $mcpLogger,
     ) {
         parent::__construct($configuration, $registry, $subscriptionManager, $schemaValidator);
@@ -88,7 +88,7 @@ final class ContaoDispatcher extends Dispatcher
         // here instead -- before the parent runs, and therefore before
         // McpController takes its undo snapshot for a delete.
         $arguments = \is_array($request->arguments) ? $request->arguments : [];
-        if ($unknownArgs = $this->unknownArgumentGuard->check($request->name, $arguments)) {
+        if ($unknownArgs = $this->argumentGuard->check($request->name, $arguments)) {
             return new CallToolResult(
                 [new TextContent((string) json_encode($unknownArgs))],
                 true,

@@ -17,6 +17,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\TranslationMaster;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -41,7 +42,23 @@ final class Tool
         private readonly QueryFilterResolver $filterResolver,
         private readonly Connection $connection,
         private readonly McpPermissionGuard $guard,
+        private readonly TranslationMaster $translationMaster,
     ) {
+    }
+
+    /**
+     * `languageMain` alone does not make a translation: changelanguage also
+     * needs `master` on the category, and without it the column is never read.
+     *
+     * @param array<string, mixed> $result
+     *
+     * @return array<string, mixed>
+     */
+    private function withLinkWarning(array $result, int $id): array
+    {
+        $warning = $this->translationMaster->recordLinkWarning('tl_faq', $id);
+
+        return $warning === null ? $result : $result + ['warnings' => [$warning]];
     }
 
     /**
@@ -221,7 +238,7 @@ final class Tool
         $this->bootVersions((int) $f->id)->create();
         $this->log(sprintf('Created FAQ ID %d ("%s") in category %d via MCP', (int) $f->id, $question, $category_id), __METHOD__);
 
-        return $this->serializer->summary($f) + ['created' => true];
+        return $this->withLinkWarning($this->serializer->summary($f) + ['created' => true], (int) $f->id);
     }
 
     /**
@@ -311,12 +328,12 @@ final class Tool
         }
 
         $this->log(sprintf('Updated FAQ ID %d via MCP (fields: %s)', $id, implode(', ', $changed)), __METHOD__);
-        return $this->serializer->summary($f) + [
+        return $this->withLinkWarning($this->serializer->summary($f) + [
             'updated' => true,
             'id' => (int) $f->id,
             'changed_fields' => $changed,
             'applied' => \count($changed),
-        ];
+        ], (int) $f->id);
     }
 
     /**

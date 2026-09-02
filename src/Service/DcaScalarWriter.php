@@ -151,7 +151,10 @@ final class DcaScalarWriter
                 $field,
                 $table,
                 $target !== '' ? sprintf(' into %s', $target) : '',
-                $field,
+                // The search is word-based, so hand over the words rather than
+                // the identifier: "netzhirsch page state" finds pagestate_assign,
+                // "netzhirschPageState" finds nothing.
+                NameTokens::phrase($target !== '' ? $target : $field),
             ));
         }
 

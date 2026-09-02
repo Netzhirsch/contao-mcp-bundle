@@ -9,6 +9,7 @@ use Contao\ContentModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\CoreBundle\Slug\Slug;
+use Contao\Database;
 use Contao\PageModel;
 use Contao\Versions;
 use Doctrine\DBAL\ArrayParameterType;
@@ -912,13 +913,20 @@ final class Tool
                 ...
               ]
 
-            Pages whose `languageMain` is 0 OR whose target doesn't exist are
-            treated as defaults. Useful before calling `language_link_pages`
-            so you know the current binding state.
+            Pages whose `languageMain` is 0 are treated as defaults. Useful
+            before calling `language_link_pages` so you know the current
+            binding state.
+
+            A translated page's default normally lives in ANOTHER tree, so it
+            is looked up wherever it is rather than only inside the scanned
+            set: passing a root_id groups that root's pages with their
+            defaults instead of declaring all of them orphans. `orphans`
+            therefore means what it says — the target row is gone, or outside
+            your pagemounts (`orphan_reason` says which).
 
             Note: `root_id` is accepted as integer, null, or omitted entirely
-            — all three mean "every page". Pass a positive id to limit the
-            scan to direct children of that page.
+            — all three mean "every page". Pass a positive id to scan that
+            page's whole SUBTREE (itself and every descendant).
         DESC,
     )]
     public function pageTranslationsTree(#[Schema(type: 'integer')] mixed $root_id = null): array
@@ -938,11 +946,15 @@ final class Tool
         $params = [];
 
         if ($rootIdInt > 0) {
-            // Restrict to pages descendant from $root_id by limiting to the
-            // root's own subtree: same `pid`-chain. We use a flat SQL fetch
-            // for performance; trees can be large.
-            $criteria[] = 'tl_page.pid = ?';
-            $params[] = $rootIdInt;
+            // The whole subtree, not just the direct children. Scanning one
+            // level made every deeper page invisible, and — worse — made the
+            // pages that WERE scanned look unlinked, because their defaults sit
+            // in the other language's tree and so were never in the result set.
+            // A live EN root reported 60 orphans with intact hreflang output.
+            $subtree = array_map('intval', Database::getInstance()->getChildRecords([$rootIdInt], 'tl_page'));
+            $subtree[] = $rootIdInt;
+
+            $criteria[] = 'tl_page.id IN ('.implode(',', $subtree).')';
         }
 
         $pages = PageModel::findBy(
@@ -983,14 +995,37 @@ final class Tool
             ];
         }
 
-        // Translations whose default isn't in the result set (e.g. user passed
-        // root_id and the default lives elsewhere) → expose them as orphans.
+        // A translation's default almost always lives in another tree — that is
+        // what a translation IS — so a default missing from the scanned set is
+        // not evidence of anything. Look it up where it actually is, and keep
+        // `orphans` for the case the name promises: the target really is gone.
         $orphans = [];
         foreach ($translations as $defaultId => $kids) {
-            if (!isset($defaults[$defaultId])) {
-                foreach ($kids as $t) {
-                    $orphans[] = $this->translationNode($t) + ['orphaned_languageMain' => $defaultId];
-                }
+            if (isset($defaults[$defaultId])) {
+                continue;
+            }
+
+            $default = PageModel::findById($defaultId);
+            $reason = match (true) {
+                $default === null => 'target_missing',
+                $accessiblePages !== null && !\in_array((int) $default->id, $accessiblePages, true) => 'target_outside_pagemounts',
+                default => null,
+            };
+
+            if ($reason === null && $default !== null) {
+                $groups[] = [
+                    'default' => $this->translationNode($default) + ['outside_scan' => true],
+                    'translations' => array_map(fn ($t) => $this->translationNode($t), $kids),
+                ];
+
+                continue;
+            }
+
+            foreach ($kids as $t) {
+                $orphans[] = $this->translationNode($t) + [
+                    'orphaned_languageMain' => $defaultId,
+                    'orphan_reason' => $reason,
+                ];
             }
         }
 

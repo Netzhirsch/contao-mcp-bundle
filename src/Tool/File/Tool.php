@@ -591,7 +591,7 @@ final class Tool
      */
     #[McpTool(
         name: 'file_update_meta',
-        description: 'Updates the localised metadata (title, alt, caption, link) of a file. Pass meta as a dict like {"de": {"title": "…", "alt": "…"}, "en": {...}}. Replaces existing meta. Logged to tl_log.',
+        description: 'Updates the localised metadata (title, alt, caption, link) of a file. `path` is relative to the upload directory — the `path` field from files_search — but the `dbafs_path` spelling with the leading upload directory is accepted too. Pass meta as a dict like {"de": {"title": "…", "alt": "…"}, "en": {...}}. Replaces existing meta. Logged to tl_log.',
     )]
     public function updateMeta(string $path, #[Schema(type: 'object', additionalProperties: self::META_ITEM_SCHEMA, description: 'Localised file metadata: {locale: {title, alt, link, caption}}. Example: {"de": {"title": "…"}}.')] mixed $meta = null): array
     {

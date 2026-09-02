@@ -7,12 +7,13 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Discovery;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
-use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
-use Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard;
-use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Server\ToolGroups;
+use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
+use Netzhirsch\ContaoMcpBundle\Service\NameTokens;
+use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use PhpMcp\Server\Attributes\McpTool;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -46,7 +47,7 @@ final class Tool
         private readonly McpPermissionEnforcer $permissionEnforcer,
         private readonly UndoRecorder $undoRecorder,
         private readonly DeletionGuard $deletionGuard,
-        private readonly UnknownArgumentGuard $unknownArgumentGuard,
+        private readonly ArgumentGuard $argumentGuard,
     ) {
     }
 
@@ -72,7 +73,6 @@ final class Tool
     public function searchTools(string $query, ?string $group = null, int $limit = 20): array
     {
         $allTools = $this->registryAccessor->getToolsCached();
-        $needle = mb_strtolower(trim($query));
         $groupFilter = $group !== null && $group !== '' ? mb_strtolower($group) : null;
 
         $limit = max(1, min($limit, 100));
@@ -110,13 +110,28 @@ final class Tool
             $rank = -1;
             $hits = 0;
 
-            foreach (self::needles($needle) as $token) {
+            foreach (self::needles($query) as $token) {
                 $tokenRank = match (true) {
                     $token === '' => 0,
                     $lcName === $token => 3,
                     str_starts_with($lcName, $token) => 2,
                     str_contains($lcName, $token) => 1,
                     str_contains($lcDesc, $token) => 0,
+                    default => -1,
+                };
+
+                if ($tokenRank >= 0) {
+                    ++$hits;
+                    $rank = max($rank, $tokenRank);
+                }
+            }
+
+            // Fragments taken out of an identifier only ever look at the name.
+            foreach (self::nameNeedles($query) as $token) {
+                $tokenRank = match (true) {
+                    $lcName === $token => 3,
+                    str_starts_with($lcName, $token) => 2,
+                    str_contains($lcName, $token) => 1,
                     default => -1,
                 };
 
@@ -185,8 +200,10 @@ final class Tool
      *
      * @return list<string>
      */
-    private static function needles(string $needle): array
+    private static function needles(string $query): array
     {
+        $needle = mb_strtolower(trim($query));
+
         if ($needle === '') {
             return [''];
         }
@@ -200,6 +217,30 @@ final class Tool
         }
 
         return array_values(array_unique($tokens));
+    }
+
+    /**
+     * The words hiding inside a single identifier — `netzhirschPageState`
+     * yields netzhirsch, page, state — matched against tool NAMES only.
+     *
+     * Callers paste the name they were just refused, and as one token it finds
+     * nothing: that is how `pagestate_assign` stayed invisible while its field
+     * was written the wrong way round. But these fragments were never typed,
+     * so letting them match DESCRIPTIONS too turns any identifier containing a
+     * common word into a wall of near-misses — a unique `xyzzy_<stamp>` began
+     * matching sixteen tools on the strength of `mcp`. A derived fragment is a
+     * hint about a name, not a search term.
+     *
+     * @return list<string>
+     */
+    private static function nameNeedles(string $query): array
+    {
+        $already = self::needles($query);
+
+        return array_values(array_filter(
+            NameTokens::split($query),
+            static fn (string $token): bool => !\in_array($token, $already, true),
+        ));
     }
 
     /**
@@ -302,7 +343,7 @@ final class Tool
         // validation never runs for it. Without this check a lazy-mode
         // instance -- where EVERY call arrives here -- would keep dropping
         // unknown parameters without a word.
-        if ($unknownArgs = $this->unknownArgumentGuard->check($name, $arguments)) {
+        if ($unknownArgs = $this->argumentGuard->check($name, $arguments)) {
             return $unknownArgs;
         }
 

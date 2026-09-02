@@ -132,7 +132,38 @@ final class PathResolver
             throw new \InvalidArgumentException('Absolute paths are not allowed.');
         }
 
-        return $relative;
+        return $this->stripRedundantUploadPrefix($relative);
+    }
+
+    /**
+     * Accept the DBAFS spelling of a path as well as the upload-relative one.
+     *
+     * `files_search` returns both — `path` without the upload directory and
+     * `dbafs_path` with it — and handing the second to a tool that expects the
+     * first produced `not_found` for a file the same search had just listed.
+     * That reads like a missing file rather than a naming mismatch.
+     *
+     * The prefix is only dropped when keeping it resolves to nothing and
+     * dropping it resolves to something, so a genuine `files/files/…` folder
+     * still wins and no path silently changes meaning.
+     */
+    private function stripRedundantUploadPrefix(string $relative): string
+    {
+        $prefix = $this->uploadPath.'/';
+
+        if ($this->uploadPath === '' || !str_starts_with($relative, $prefix)) {
+            return $relative;
+        }
+
+        $base = $this->projectDir.\DIRECTORY_SEPARATOR.$this->uploadPath.\DIRECTORY_SEPARATOR;
+        $asGiven = $base.str_replace('/', \DIRECTORY_SEPARATOR, $relative);
+        $stripped = substr($relative, \strlen($prefix));
+
+        if (file_exists($asGiven) || !file_exists($base.str_replace('/', \DIRECTORY_SEPARATOR, $stripped))) {
+            return $relative;
+        }
+
+        return $stripped;
     }
 
     private static function isInside(string $child, string $parent): bool

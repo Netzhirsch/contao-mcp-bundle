@@ -130,7 +130,21 @@ final class Tool
             ];
         }
 
-        return ['items' => $out, 'count' => \count($out), 'limit' => $limit, 'offset' => $offset];
+        $result = ['items' => $out, 'count' => \count($out), 'limit' => $limit, 'offset' => $offset];
+
+        // In Contao 5 content hangs off articles, not pages, so `page_id` is a
+        // legacy shape that answers an honest empty list — and reads like "this
+        // page has no content". Say where the content actually is.
+        if ($out === [] && $page_id !== null && $resolvedPtable === 'tl_page') {
+            $result['hint'] = sprintf(
+                'No rows with ptable=tl_page and pid=%d. Content elements normally belong to an '
+                .'article: articles_list(page_id: %d), then content_list(article_id: <id>).',
+                $page_id,
+                $page_id,
+            );
+        }
+
+        return $result;
     }
 
     // ───────────────────────────── get ──────────────────────────────
@@ -140,9 +154,19 @@ final class Tool
      */
     #[McpTool(
         name: 'content_get',
-        description: 'Returns a single tl_content row by id with every column. Binary UUID columns return as hex strings; serialised blobs (groups, multiSRC, headline) are decoded to JSON-friendly shapes.',
+        description: <<<'DESC'
+            Returns a single tl_content row by id. Binary UUID columns return as hex
+            strings; serialised blobs (groups, multiSRC, headline) are decoded to
+            JSON-friendly shapes.
+
+            `fields` narrows the answer to the columns you name (`id` and `type` are
+            always included, so the row stays identifiable). A content element carries
+            around 120 columns — reading four image elements just to collect four
+            singleSRC uuids costs thousands of tokens without it. Unknown names are
+            reported rather than silently dropped.
+        DESC,
     )]
-    public function get(int $id): array
+    public function get(int $id, #[Schema(type: 'array', items: ['type' => 'string'])] ?array $fields = null): array
     {
         $this->framework->initialize();
 
@@ -151,7 +175,32 @@ final class Tool
             return ['error' => 'not_found', 'message' => "Content element $id not found."];
         }
 
-        return $this->serializer->summary($content);
+        $row = $this->serializer->summary($content);
+
+        if ($fields === null) {
+            return $row;
+        }
+
+        if (!array_is_list($fields)) {
+            return ['error' => 'invalid_input', 'message' => '`fields` must be a list of column names.'];
+        }
+
+        $wanted = array_map(strval(...), $fields);
+        $unknown = array_values(array_diff($wanted, array_keys($row)));
+
+        if ($unknown !== []) {
+            return [
+                'error' => 'invalid_input',
+                'message' => sprintf(
+                    'Content element %d has no field %s. Call content_get without `fields` to see them all.',
+                    $id,
+                    implode(', ', array_map(static fn (string $f): string => '"'.$f.'"', $unknown)),
+                ),
+                'unknown_fields' => $unknown,
+            ];
+        }
+
+        return array_intersect_key($row, array_flip([...['id', 'type'], ...$wanted]));
     }
 
     // ──────────────────────────── create ────────────────────────────

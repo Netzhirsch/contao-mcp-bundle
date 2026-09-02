@@ -47,7 +47,7 @@ final class Tool
      */
     #[McpTool(
         name: 'form_fields_list',
-        description: 'Lists tl_form_field rows under one form, sorted by their `sorting` column. q does LIKE-search across DCA-searchable fields; filters is a DCA-validated equality map; updated_after/before take Unix-ts or ISO-8601.',
+        description: 'Lists tl_form_field rows under one form, sorted by their `sorting` column. q does LIKE-search across DCA-searchable fields plus the serialised `options` blob, so a checkbox or select label is findable by its text; filters is a DCA-validated equality map; updated_after/before take Unix-ts or ISO-8601.',
     )]
     public function list(
         int $form_id,
@@ -70,7 +70,9 @@ final class Tool
             $columns[] = "tl_form_field.invisible = ''";
         }
 
-        $search = $this->filterResolver->buildSearchClause('tl_form_field', $q);
+        // `options` is a serialised blob and not DCA-searchable, but it holds
+        // the text a person actually reads — a checkbox label, a select entry.
+        $search = $this->filterResolver->buildSearchClause('tl_form_field', $q, ['options']);
         if ($search !== null) {
             $columns[] = $search['clause'];
             $values = array_merge($values, $search['params']);

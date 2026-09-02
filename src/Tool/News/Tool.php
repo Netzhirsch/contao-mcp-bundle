@@ -17,6 +17,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\TranslationMaster;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -41,7 +42,25 @@ final class Tool
         private readonly QueryFilterResolver $filterResolver,
         private readonly Connection $connection,
         private readonly McpPermissionGuard $guard,
+        private readonly TranslationMaster $translationMaster,
     ) {
+    }
+
+    /**
+     * `languageMain` alone does not make a translation: changelanguage also
+     * needs `master` on the archive, and without it the column is never read.
+     * Reported from a live site where `created: true, languageMain: 8` came
+     * back and the language switcher still went to the home page.
+     *
+     * @param array<string, mixed> $result
+     *
+     * @return array<string, mixed>
+     */
+    private function withLinkWarning(array $result, int $id): array
+    {
+        $warning = $this->translationMaster->recordLinkWarning('tl_news', $id);
+
+        return $warning === null ? $result : $result + ['warnings' => [$warning]];
     }
 
     // ───────────────────────────── list ─────────────────────────────
@@ -349,7 +368,7 @@ final class Tool
             __METHOD__,
         );
 
-        return $this->serializer->summary($news) + ['created' => true];
+        return $this->withLinkWarning($this->serializer->summary($news) + ['created' => true], (int) $news->id);
     }
 
     // ──────────────────────────── update ────────────────────────────
@@ -501,12 +520,12 @@ final class Tool
             __METHOD__,
         );
 
-        return $this->serializer->summary($news) + [
+        return $this->withLinkWarning($this->serializer->summary($news) + [
             'updated' => true,
             'id' => (int) $news->id,
             'changed_fields' => $changed,
             'applied' => \count($changed),
-        ];
+        ], (int) $news->id);
     }
 
     // ──────────────────────────── delete ────────────────────────────

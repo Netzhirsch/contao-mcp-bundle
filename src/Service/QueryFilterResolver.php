@@ -92,15 +92,24 @@ final class QueryFilterResolver
      * Builds the `q`-LIKE-clause across all DCA-searchable fields, or null
      * when the table has no searchable fields or the query is empty.
      *
+     * `$alsoSearch` adds columns the DCA does not mark searchable but a caller
+     * still means when they type a word — a serialised blob whose text a human
+     * reads on the page. The label of a privacy checkbox lives in
+     * `tl_form_field.options`, so "datenschutz" found nothing and the only way
+     * on was to list every field and recognise it by `name`.
+     *
+     * @param list<string> $alsoSearch
+     *
      * @return array{clause: string, params: list<string>}|null
      */
-    public function buildSearchClause(string $table, ?string $q): ?array
+    public function buildSearchClause(string $table, ?string $q, array $alsoSearch = []): ?array
     {
         if ($q === null || trim($q) === '') {
             return null;
         }
         $opts = $this->discover($table);
-        if ($opts['searchable_fields'] === []) {
+        $fields = array_values(array_unique([...$opts['searchable_fields'], ...$alsoSearch]));
+        if ($fields === []) {
             return null;
         }
 
@@ -113,7 +122,7 @@ final class QueryFilterResolver
         $tableId = $this->connection->quoteIdentifier($table);
         $clauses = [];
         $params = [];
-        foreach ($opts['searchable_fields'] as $field) {
+        foreach ($fields as $field) {
             $clauses[] = sprintf('%s.%s LIKE ?', $tableId, $this->connection->quoteIdentifier($field));
             $params[] = $needle;
         }

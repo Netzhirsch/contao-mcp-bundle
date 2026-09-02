@@ -580,10 +580,47 @@ last call.
 Translation happens **in place**: the record you name is the record that changes.
 For a second language, copy first and translate the copy:
 
-1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <target root>, with_children: true)`
+1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <target root>, with_children: true, overrides: {"published": false})`
 2. `deepl_translate_page_tree(id: <the copy>, target_lang: "EN-GB", dry_run: true)` — what will this cost?
 3. the same call with `save: true`
 4. `entity_language_link(...)` to wire it up with changelanguage
+
+Step 1 copies into a tree that may already be live — hence `published: false`,
+or the untranslated source stands publicly readable for as long as the
+translation takes. The returned `tree` is the complete source→target id map you
+need for step 2 anyway.
+
+#### Both halves of a translation link
+
+`terminal42/contao-changelanguage` records a translation in **two** places, and
+without the second the first is never evaluated:
+
+| Level | Column | Tables |
+|---|---|---|
+| Record | `languageMain` | `tl_page`, `tl_article`, `tl_news`, `tl_calendar_events`, `tl_faq` |
+| Collection | `master` | `tl_news_archive`, `tl_calendar`, `tl_faq_category` |
+
+With `master` missing, the language switcher falls back to the language root and
+no `hreflang` alternate is emitted — visible only in the rendered page; the
+database looks correct.
+
+`entity_language_link` covers both levels and completes the collection half
+itself where that is unambiguous and legal:
+
+```
+entity_language_link(table: "tl_news", default_id: 8, translations: {"en": 16})
+→ linked: 1
+  collections_linked: [{table: "tl_news_archive", id: 3, master: 1}]
+  warnings: []
+```
+
+Where it cannot — the target archive is itself a translation, or another
+collection on the same reader page already claims that master — `warnings` says
+what is missing and which call sets it. Collections can also be linked directly:
+`entity_language_link(table: "tl_news_archive", default_id: 1, translations: {"en": 3})`.
+
+Root pages link through `languageRoot` rather than `languageMain` and are
+refused here; `page_update` owns that one.
 
 **Aliases are deliberately not translated.** DeepL returns prose, not a slug, and
 "Our Services" does not belong in a URL. For translated URLs, translate the title

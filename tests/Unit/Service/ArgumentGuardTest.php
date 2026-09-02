@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Service;
 
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
-use Netzhirsch\ContaoMcpBundle\Service\UnknownArgumentGuard;
+use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
 use PhpMcp\Schema\Tool;
 use PhpMcp\Server\Registry;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -19,10 +19,10 @@ use Psr\Log\NullLogger;
  * declares. `page_update(id: 7, pageTitel: "…")` — one transposed letter —
  * answered with the page summary and `applied: 0`.
  */
-#[CoversClass(UnknownArgumentGuard::class)]
-final class UnknownArgumentGuardTest extends TestCase
+#[CoversClass(ArgumentGuard::class)]
+final class ArgumentGuardTest extends TestCase
 {
-    private UnknownArgumentGuard $guard;
+    private ArgumentGuard $guard;
 
     protected function setUp(): void
     {
@@ -50,7 +50,7 @@ final class UnknownArgumentGuardTest extends TestCase
         $accessor = new RegistryAccessor();
         $accessor->set($registry);
 
-        $this->guard = new UnknownArgumentGuard($accessor);
+        $this->guard = new ArgumentGuard($accessor);
     }
 
     public function testAcceptsKnownParameters(): void
@@ -58,9 +58,36 @@ final class UnknownArgumentGuardTest extends TestCase
         self::assertNull($this->guard->check('page_update', ['id' => 7, 'pageTitle' => 'x']));
     }
 
-    public function testAcceptsAnEmptyCall(): void
+    public function testAcceptsAnEmptyCallToAToolThatNeedsNothing(): void
     {
-        self::assertNull($this->guard->check('page_update', []));
+        self::assertNull($this->guard->check('ping', []));
+    }
+
+    public function testNamesTheMissingRequiredParameter(): void
+    {
+        $error = $this->guard->check('page_update', []);
+
+        self::assertNotNull($error);
+        self::assertSame('invalid_input', $error['error']);
+        self::assertSame(['id'], $error['missing_parameters']);
+        self::assertArrayNotHasKey('unknown_parameters', $error);
+        self::assertStringContainsString('requires "id"', $error['message']);
+    }
+
+    /**
+     * The reported shape: a parameter under the wrong name. Both halves are one
+     * mistake, and saying so beats "Internal error" — which reads as a broken
+     * tool and got one filed as defective.
+     */
+    public function testPairsAMisnamedParameterWithTheRequiredOneItWasMeantToBe(): void
+    {
+        $error = $this->guard->check('page_update', ['ids' => 7]);
+
+        self::assertNotNull($error);
+        self::assertSame(['ids'], $error['unknown_parameters']);
+        self::assertSame(['id'], $error['missing_parameters']);
+        self::assertStringContainsString('did you mean "id"', $error['message']);
+        self::assertStringContainsString('requires "id"', $error['message']);
     }
 
     public function testRefusesAnUnknownParameter(): void
@@ -136,7 +163,7 @@ final class UnknownArgumentGuardTest extends TestCase
         );
         $accessor = new RegistryAccessor();
         $accessor->set($registry);
-        $guard = new UnknownArgumentGuard($accessor);
+        $guard = new ArgumentGuard($accessor);
 
         self::assertNull($guard->check('content_update', [
             'id' => 1,

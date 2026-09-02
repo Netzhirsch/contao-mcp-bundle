@@ -112,6 +112,7 @@ final class McpSmokeTestCommand extends Command
         private readonly ModuleTool $moduleTool,
         private readonly HtmlTool $htmlTool,
         private readonly PatchTool $patchTool,
+        private readonly \Netzhirsch\ContaoMcpBundle\Tool\Duplicate\Tool $duplicateTool,
         private readonly Connection $connection,
         private readonly RequestStack $requestStack,
         private readonly KeyManager $keyManager,
@@ -347,6 +348,21 @@ final class McpSmokeTestCommand extends Command
         if (isset($selectFieldResult['id'])) {
             $created['form_field'][] = (int) $selectFieldResult['id'];
         }
+
+        // The label a person reads sits inside the serialised `options` blob,
+        // which the DCA does not mark searchable. Searching for it answered
+        // nothing, and the only way on was to list every field and recognise it
+        // by `name` — reported from a form whose privacy checkbox had to be
+        // found by its wording.
+        $expect('q finds a field by an option label, not only by its own columns',
+            $this->formFieldTool->list(form_id: $formId, q: 'Support'),
+            static fn ($r) => \count(array_filter(
+                $r['items'] ?? [],
+                static fn (array $i): bool => ($i['name'] ?? '') === 'topic',
+            )) === 1);
+        $expect('and a word in no field still answers nothing',
+            $this->formFieldTool->list(form_id: $formId, q: 'gibtesnicht'.$stamp),
+            static fn ($r) => ($r['count'] ?? -1) === 0);
 
         // Reject — invalid field for type
         $expect('text field rejects "options" (not in text-palette)',
@@ -1376,6 +1392,119 @@ final class McpSmokeTestCommand extends Command
             fn ($r) => ($r['error'] ?? null) === 'not_found'
                 && str_contains((string) ($r['message'] ?? ''), 'tl_news'));
 
+        // ── The collection half of a changelanguage link ──────────────────
+        //
+        // The extension stores a translation in two places: `languageMain` on
+        // the record and `master` on its archive/calendar/category. Only the
+        // first was ever written here, and nothing looked wrong — the row held
+        // the id it was given and the tool answered `linked: 1`. The site told
+        // a different story: the language switcher fell back to the language
+        // root and no hreflang alternate was emitted. Reported from a live EN
+        // rollout, after it had already reached readers.
+        $expect('the collection tables are offered alongside the record tables',
+            $this->multilingualTool->entityLanguageLink('tl_settings', 1, (object) ['de' => 2]),
+            static fn ($r) => \in_array('tl_news_archive', $r['supported_tables'] ?? [], true)
+                && \in_array('tl_calendar', $r['supported_tables'] ?? [], true)
+                && \in_array('tl_faq_category', $r['supported_tables'] ?? [], true));
+
+        $hasMaster = \in_array('master', array_map(
+            static fn ($c) => strtolower($c->getName()),
+            $this->connection->createSchemaManager()->listTableColumns('tl_news_archive'),
+        ), true);
+
+        if (!$hasMaster) {
+            // No changelanguage here. The point is that this says so instead of
+            // writing a column that does not exist and reporting success — and
+            // that it says so only once the call itself checks out, so a
+            // malformed one still gets the more specific answer.
+            $bareArchives = [];
+            foreach (['_bare_a', '_bare_b'] as $suffix) {
+                $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.$suffix, 'jumpTo' => 0]);
+                $bareArchives[] = (int) $this->connection->lastInsertId();
+            }
+
+            $expect('without changelanguage the collection link is refused, not silently dropped',
+                $this->multilingualTool->entityLanguageLink('tl_news_archive', $bareArchives[0], (object) ['en' => $bareArchives[1]]),
+                static fn ($r) => ($r['error'] ?? null) === 'extension_not_available'
+                    && str_contains((string) ($r['message'] ?? ''), 'changelanguage'));
+            $expect('...but a malformed call is still answered on its own terms',
+                $this->multilingualTool->entityLanguageLink('tl_news_archive', $bareArchives[0], (object) []),
+                static fn ($r) => ($r['error'] ?? null) === 'invalid_input');
+
+            $this->connection->executeStatement(
+                'DELETE FROM tl_news_archive WHERE id IN ('.implode(',', $bareArchives).')');
+            $output->writeln('  <comment>~ Sammlungs-Verknüpfung nur teilweise geprüft — changelanguage nicht installiert</comment>');
+        } else {
+            // changelanguage resolves the counterpart through the reader page,
+            // so the fixture needs one per language — with jumpTo=0 the field
+            // is not offerable in the backend either.
+            $readerPages = array_map('intval', $this->connection->fetchFirstColumn(
+                "SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 2"));
+            $readerDe = $readerPages[0] ?? 1;
+            $readerEn = $readerPages[1] ?? ($readerDe + 1);
+
+            $mkArchive = function (string $title, int $jumpTo): int {
+                $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $title, 'jumpTo' => $jumpTo, 'master' => 0]);
+
+                return (int) $this->connection->lastInsertId();
+            };
+            $mkNews = function (int $pid, string $headline): int {
+                $this->connection->insert('tl_news', [
+                    'pid' => $pid, 'tstamp' => time(), 'headline' => $headline,
+                    'alias' => 'mcp-'.bin2hex(random_bytes(6)), 'author' => 0,
+                    'date' => time(), 'time' => time(), 'source' => 'default',
+                    'floating' => 'above', 'published' => 0, 'languageMain' => 0,
+                ]);
+
+                return (int) $this->connection->lastInsertId();
+            };
+
+            $archiveDe = $mkArchive($stamp.'_archiv_de', $readerDe);
+            $archiveEn = $mkArchive($stamp.'_archiv_en', $readerEn);
+            $newsDe = $mkNews($archiveDe, $stamp.' Meldung');
+            $newsEn = $mkNews($archiveEn, $stamp.' Story');
+
+            $linkResult = $this->multilingualTool->entityLanguageLink('tl_news', $newsDe, (object) ['en' => $newsEn]);
+            $expect('linking a record also completes the collection half', $linkResult,
+                static fn ($r) => ($r['linked'] ?? 0) === 1
+                    && ($r['collections_linked'][0]['table'] ?? '') === 'tl_news_archive'
+                    && ($r['collections_linked'][0]['id'] ?? 0) === $archiveEn
+                    && ($r['collections_linked'][0]['master'] ?? 0) === $archiveDe);
+            $expect('and the column really holds it',
+                (int) $this->connection->fetchOne('SELECT master FROM tl_news_archive WHERE id = ?', [$archiveEn]),
+                static fn (int $v) => $v === $archiveDe);
+            $expect('the master archive stays a master',
+                (int) $this->connection->fetchOne('SELECT master FROM tl_news_archive WHERE id = ?', [$archiveDe]),
+                static fn (int $v) => $v === 0);
+
+            // A second archive on the same reader page claiming the same master
+            // is what changelanguage's own save_callback refuses. The model
+            // write never reaches that callback, so the rule is checked here.
+            $archiveEn2 = $mkArchive($stamp.'_archiv_en2', $readerEn);
+            $expect('a second translation of the same master on the same reader page is refused',
+                $this->multilingualTool->entityLanguageLink('tl_news_archive', $archiveDe, (object) ['en' => $archiveEn2]),
+                static fn ($r) => ($r['error'] ?? null) === 'invalid_link'
+                    && str_contains((string) ($r['message'] ?? ''), 'only one'));
+            $expect('and it wrote nothing',
+                (int) $this->connection->fetchOne('SELECT master FROM tl_news_archive WHERE id = ?', [$archiveEn2]),
+                static fn (int $v) => $v === 0);
+
+            // The create tools take languageMain directly and cannot complete
+            // the other half — so they say so rather than answering `created:
+            // true` on a link that does nothing.
+            $newsEn2 = $mkNews($archiveEn2, $stamp.' Story zwei');
+            $this->connection->update('tl_news', ['languageMain' => $newsDe], ['id' => $newsEn2]);
+            $expect('news_update names what a lone languageMain still needs',
+                $this->newsTool->update($newsEn2, headline: $stamp.' Story zwei b'),
+                static fn ($r) => str_contains((string) (($r['warnings'][0] ?? '')), 'master=0')
+                    && str_contains((string) (($r['warnings'][0] ?? '')), 'entity_language_link'));
+
+            $this->connection->executeStatement(
+                'DELETE FROM tl_news WHERE id IN ('.implode(',', [$newsDe, $newsEn, $newsEn2]).')');
+            $this->connection->executeStatement(
+                'DELETE FROM tl_news_archive WHERE id IN ('.implode(',', [$archiveDe, $archiveEn, $archiveEn2]).')');
+        }
+
         // page_translations_tree on the whole tree — must run without error,
         // returns a shape we can inspect. The audit-flagged bug was that
         // `{}` from JSON-RPC failed while `{root_id: null}` worked. We now
@@ -1397,6 +1526,63 @@ final class McpSmokeTestCommand extends Command
         $expect('page_translations_tree accepts string "0"',
             $this->pageTool->pageTranslationsTree('0'),
             fn ($r) => isset($r['groups'], $r['orphans']));
+
+        // A translated page's default lives in the OTHER language's tree — that
+        // is what a translation is. Scanning one root and then treating every
+        // default missing from that scan as an orphan therefore declared a
+        // healthy site broken: an EN root reported all 60 of its pages as
+        // orphaned while every one of them emitted correct hreflang alternates.
+        // A tool that raises a false alarm costs more than one that is absent.
+        $ttAnchor = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 1");
+        $ttHasColumn = \in_array('languagemain', array_map(
+            static fn ($c) => strtolower($c->getName()),
+            $this->connection->createSchemaManager()->listTableColumns('tl_page'),
+        ), true);
+
+        if ($ttAnchor > 0 && $ttHasColumn) {
+            $mkPage = function (int $pid, string $title, int $languageMain = 0): int {
+                $this->connection->insert('tl_page', [
+                    'pid' => $pid, 'sorting' => 128, 'tstamp' => time(), 'title' => $title,
+                    'alias' => 'mcp-'.bin2hex(random_bytes(6)), 'type' => 'regular',
+                    'published' => 0, 'languageMain' => $languageMain,
+                ]);
+
+                return (int) $this->connection->lastInsertId();
+            };
+
+            $ttDe = $mkPage($ttAnchor, $stamp.'_tt_de');
+            $ttEn = $mkPage($ttAnchor, $stamp.'_tt_en');
+            $ttLeafDe = $mkPage($ttDe, $stamp.'_tt_leaf_de');
+            $ttLeafEn = $mkPage($ttEn, $stamp.'_tt_leaf_en', $ttLeafDe);
+            $ttLost = $mkPage($ttEn, $stamp.'_tt_lost', 999999999);
+
+            $ttScan = $this->pageTool->pageTranslationsTree($ttEn);
+
+            $expect('a scoped scan reaches the whole subtree, not just one level',
+                $ttScan,
+                static fn ($r) => \count(array_filter(
+                    $r['groups'] ?? [],
+                    static fn (array $g): bool => \count($g['translations'] ?? []) > 0,
+                )) === 1);
+            $expect('the default is found in the other tree and marked as outside the scan',
+                $ttScan,
+                static fn ($r) => \count(array_filter(
+                    $r['groups'] ?? [],
+                    static fn (array $g): bool => ($g['default']['id'] ?? 0) === $ttLeafDe
+                        && ($g['default']['outside_scan'] ?? false) === true
+                        && ($g['translations'][0]['id'] ?? 0) === $ttLeafEn,
+                )) === 1);
+            $expect('only a target that is really gone counts as an orphan, and it says why',
+                $ttScan,
+                static fn ($r) => \count($r['orphans'] ?? []) === 1
+                    && ($r['orphans'][0]['id'] ?? 0) === $ttLost
+                    && ($r['orphans'][0]['orphan_reason'] ?? '') === 'target_missing');
+
+            $this->connection->executeStatement(
+                'DELETE FROM tl_page WHERE id IN ('.implode(',', [$ttLost, $ttLeafEn, $ttLeafDe, $ttEn, $ttDe]).')');
+        } else {
+            $output->writeln('  <comment>~ Übersetzungsbaum-Test übersprungen — keine Seite als Anker oder kein changelanguage</comment>');
+        }
 
         // entity_query_options: examples present + name-rank fix
         $expect('entity_query_options returns examples array',
@@ -2701,6 +2887,17 @@ final class McpSmokeTestCommand extends Command
                 && isset($r['hint'])
                 && \in_array('page', $r['available_groups'] ?? [], true));
 
+        // The next step of the same story: refused a write, the caller searched
+        // for the identifier they had just been refused. One token, no spaces,
+        // no match — so the tool group that owned the field stayed invisible a
+        // second time. An identifier is now split the way a name is read.
+        $expect('a camelCase identifier is searched as its words',
+            $this->discoveryTool->searchTools('newsArchiveList'),
+            static fn ($r) => \in_array('news_archives_list', array_column($r['matches'] ?? [], 'name'), true));
+        $expect('and so is a table name with its tl_ prefix',
+            $this->discoveryTool->searchTools('tl_news_archive'),
+            static fn ($r) => \in_array('news_archives_list', array_column($r['matches'] ?? [], 'name'), true));
+
         // Post-call hook — the second half of the old patch. Observable side
         // effect: it clears the per-call identity context.
         $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
@@ -2782,6 +2979,25 @@ final class McpSmokeTestCommand extends Command
             $this->discoveryTool->call('pages_list', ['limit' => 1]),
             static fn ($r) => \is_array($r) && !isset($r['error']));
 
+        // The mirror image: a required parameter under the wrong name. php-mcp
+        // raises that inside the dispatcher, where it surfaced as
+        // `tool_failed · Internal error` — which describes a broken tool. A
+        // working tool was filed as defective on the strength of it; the only
+        // problem was that template_get takes `path`, not `name`.
+        $missingBody = $decodeResult($dispatcher->handleToolCall(new CallToolRequest(
+            5,
+            'template_get',
+            ['name' => 'news_full.html5'],
+        )));
+
+        $expect('a required parameter under the wrong name says both halves',
+            (string) ($missingBody['message'] ?? ''),
+            static fn (string $m) => str_contains($m, '"name"')
+                && str_contains($m, 'requires "path"'));
+        $expect('and a call that simply omits it is just as clear',
+            $this->discoveryTool->call('template_get', []),
+            static fn ($r) => \is_array($r) && ($r['missing_parameters'] ?? []) === ['path']);
+
 
 
         // ═══════════════════ fileTree-Felder (binary(16)) ═══════════════════
@@ -2797,6 +3013,21 @@ final class McpSmokeTestCommand extends Command
 
         $ftFile = $this->connection->fetchAssociative("SELECT uuid, path FROM tl_files WHERE type = 'file' ORDER BY id LIMIT 1");
         $ftThemeId = (int) $this->connection->fetchOne('SELECT id FROM tl_theme ORDER BY id LIMIT 1');
+
+        // The same file, addressed the way `files_search` prints it. Its two
+        // path fields differ by the upload directory, and handing the DBAFS one
+        // to a tool that wants the relative one answered `not_found` — for a
+        // file the same search had just listed, which reads as a missing file.
+        if (\is_array($ftFile)) {
+            $metaBefore = $this->connection->fetchOne('SELECT meta FROM tl_files WHERE path = ?', [(string) $ftFile['path']]);
+            $expect('file_update_meta accepts the dbafs spelling of a path',
+                $this->fileTool->updateMeta((string) $ftFile['path'], (object) ['de' => (object) ['title' => 'Smoke '.$stamp]]),
+                static fn ($r) => ($r['updated'] ?? false) === true);
+            $expect('and a path that really is missing still says so',
+                $this->fileTool->updateMeta('files/gibt-es-nicht-'.$stamp.'.jpg', (object) ['de' => (object) ['title' => 'x']]),
+                static fn ($r) => ($r['error'] ?? '') === 'not_found');
+            $this->connection->update('tl_files', ['meta' => $metaBefore], ['path' => (string) $ftFile['path']]);
+        }
 
         if (\is_array($ftFile) && $ftThemeId > 0) {
             $ftUuid = StringUtil::binToUuid((string) $ftFile['uuid']);
@@ -2910,6 +3141,58 @@ final class McpSmokeTestCommand extends Command
                 (int) $this->connection->fetchOne(
                     'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]),
                 static fn (int $n) => $n === 3);
+
+            // ── entity_duplicate ──────────────────────────────────────────
+            //
+            // Reported from a translation workflow: copying an article into a
+            // LIVE tree has to produce an unpublished copy, or the untranslated
+            // source stands publicly readable for as long as the translation
+            // takes. `published: false` is the obvious way to ask, and it used
+            // to die in the database layer — PDO binds false as '', and strict
+            // mode answers "Incorrect integer value: '' for column published".
+            $dupCopy = $this->duplicateTool->duplicate(
+                'tl_article',
+                $ctreeArticleId,
+                into_pid: $ctreePageId,
+                overrides: (object) ['title' => $stamp.'_ctree_kopie', 'published' => false],
+            );
+            $expect('a copy can be asked for unpublished with published: false', $dupCopy,
+                static fn ($r) => ($r['duplicated'] ?? false) === true && ($r['copied'] ?? 0) === 6);
+
+            $dupId = (int) ($dupCopy['new_id'] ?? 0);
+            $expect('and the column holds 0, not the empty string', $dupId > 0
+                ? $this->connection->fetchOne('SELECT published FROM tl_article WHERE id = ?', [$dupId])
+                : null,
+                static fn ($v) => (int) $v === 0 && (string) $v !== '');
+
+            // Contao's own copy button records the user who pressed it; the
+            // column is doNotCopy, so letting the DB default apply left copies
+            // ownerless and needing a second call.
+            $srcAuthor = (int) $this->connection->fetchOne('SELECT author FROM tl_article WHERE id = ?', [$ctreeArticleId]);
+            $expect('the copy is attributed to the caller, as the backend copy button does',
+                [$srcAuthor, $dupId > 0 ? (int) $this->connection->fetchOne('SELECT author FROM tl_article WHERE id = ?', [$dupId]) : 0],
+                static fn (array $r) => $r[0] > 0 ? $r[1] === $r[0] : true);
+
+            $expect('a column the table does not have is refused before anything is copied',
+                $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
+                    overrides: (object) ['gibtEsNicht' => 'x']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'gibtEsNicht'));
+            $expect('and that refusal copied nothing',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_article WHERE pid = ? AND title LIKE ?', [$ctreePageId, $stamp.'_ctree%']),
+                static fn (int $n) => $n === 2);
+
+            if ($dupId > 0) {
+                $copiedTop = array_map('intval', $this->connection->fetchFirstColumn(
+                    'SELECT id FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $dupId]));
+                if ($copiedTop !== []) {
+                    $this->connection->executeStatement(
+                        'DELETE FROM tl_content WHERE ptable = ? AND pid IN ('.implode(',', $copiedTop).')', ['tl_content']);
+                }
+                $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $dupId]);
+                $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$dupId]);
+            }
 
             $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $groupId]);
             $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]);
@@ -3419,6 +3702,31 @@ final class McpSmokeTestCommand extends Command
                 $this->contentTool->update((int) $paletteElement['id'], ['linkTitle' => 'nope']),
                 static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
                     && str_contains((string) ($r['message'] ?? ''), 'linkTitle'));
+
+            // A content element carries around 120 columns. Reading four image
+            // elements just to collect four singleSRC uuids cost thousands of
+            // tokens, because there was no way to ask for less.
+            $elementId = (int) $paletteElement['id'];
+            $full = $this->contentTool->get($elementId);
+            $expect('content_get still returns the whole row by default', $full,
+                static fn ($r) => \count($r) > 40);
+            $expect('fields narrows it, keeping the row identifiable',
+                $this->contentTool->get($elementId, ['text']),
+                static fn ($r) => \count($r) === 3 && isset($r['id'], $r['type'], $r['text']));
+            $expect('a name the row does not have is reported, not dropped',
+                $this->contentTool->get($elementId, ['text', 'gibtEsNicht']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && ($r['unknown_fields'] ?? []) === ['gibtEsNicht']);
+
+            // page_id is a Contao 4 shape: content hangs off articles now, so
+            // the honest empty answer reads as "this page has no content".
+            $expect('content_list(page_id) says where the content actually is',
+                $this->contentTool->list(page_id: (int) $paletteArticle['page_id']),
+                static fn ($r) => ($r['count'] ?? -1) === 0
+                    && str_contains((string) ($r['hint'] ?? ''), 'articles_list'));
+            $expect('while an article that has elements answers without a hint',
+                $this->contentTool->list(article_id: (int) $paletteArticle['id']),
+                static fn ($r) => ($r['count'] ?? 0) === 1 && !isset($r['hint']));
 
             $this->connection->executeStatement('DELETE FROM tl_content WHERE id = ?', [(int) $paletteElement['id']]);
             $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [(int) $paletteArticle['id']]);
