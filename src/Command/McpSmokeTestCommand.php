@@ -1414,11 +1414,25 @@ final class McpSmokeTestCommand extends Command
 
         if (!$hasMaster) {
             // No changelanguage here. The point is that this says so instead of
-            // writing a column that does not exist and reporting success.
+            // writing a column that does not exist and reporting success — and
+            // that it says so only once the call itself checks out, so a
+            // malformed one still gets the more specific answer.
+            $bareArchives = [];
+            foreach (['_bare_a', '_bare_b'] as $suffix) {
+                $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.$suffix, 'jumpTo' => 0]);
+                $bareArchives[] = (int) $this->connection->lastInsertId();
+            }
+
             $expect('without changelanguage the collection link is refused, not silently dropped',
-                $this->multilingualTool->entityLanguageLink('tl_news_archive', 1, (object) ['en' => 2]),
+                $this->multilingualTool->entityLanguageLink('tl_news_archive', $bareArchives[0], (object) ['en' => $bareArchives[1]]),
                 static fn ($r) => ($r['error'] ?? null) === 'extension_not_available'
                     && str_contains((string) ($r['message'] ?? ''), 'changelanguage'));
+            $expect('...but a malformed call is still answered on its own terms',
+                $this->multilingualTool->entityLanguageLink('tl_news_archive', $bareArchives[0], (object) []),
+                static fn ($r) => ($r['error'] ?? null) === 'invalid_input');
+
+            $this->connection->executeStatement(
+                'DELETE FROM tl_news_archive WHERE id IN ('.implode(',', $bareArchives).')');
             $output->writeln('  <comment>~ Sammlungs-Verknüpfung nur teilweise geprüft — changelanguage nicht installiert</comment>');
         } else {
             // changelanguage resolves the counterpart through the reader page,

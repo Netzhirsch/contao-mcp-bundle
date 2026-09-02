@@ -154,21 +154,6 @@ final class Tool
 
         [$modelClass, $column] = self::SUPPORTED[$table];
 
-        // Both columns come from the extension. Without it the write would be
-        // filtered out by the model and the tool would still answer `linked: N`
-        // — the failure shape this whole tool is being hardened against.
-        if (!$this->translationMaster->hasColumn($table, $column)) {
-            return [
-                'error' => 'extension_not_available',
-                'message' => sprintf(
-                    '%s has no `%s` column — terminal42/contao-changelanguage is not installed here. '
-                    .'Check with installed_bundles.',
-                    $table,
-                    $column,
-                ),
-            ];
-        }
-
         // Normalise translations input (stdClass / assoc-array / reject lists).
         $map = match (true) {
             \is_object($translations) => get_object_vars($translations),
@@ -238,6 +223,27 @@ final class Tool
                 }
             }
             $resolved[$lang] = [$rowId, $row];
+        }
+
+        // Both columns come from the extension. Without it the write would be
+        // filtered out by the model and the tool would still answer `linked: N`
+        // — the failure shape this whole tool is being hardened against.
+        //
+        // Checked here rather than first: what the caller got wrong about their
+        // own call — a malformed `translations` object, a row that is not there
+        // — is the more specific answer, and it is true whether or not the
+        // extension is installed. The environment only has to be right by the
+        // time something is written.
+        if (!$this->translationMaster->hasColumn($table, $column)) {
+            return [
+                'error' => 'extension_not_available',
+                'message' => sprintf(
+                    '%s has no `%s` column — terminal42/contao-changelanguage is not installed here. '
+                    .'Check with installed_bundles.',
+                    $table,
+                    $column,
+                ),
+            ];
         }
 
         // Linking collections directly: changelanguage's own rules (the target
