@@ -73,9 +73,15 @@ final class Tool
                                ptable, e.g. tl_article or tl_content for nested).
               - with_children: tl_page only — also copy the whole sub-page tree (default false).
               - overrides:     object of fields to set on the TOP-LEVEL copy (e.g. {"title": "…"}).
+                               Values are strings, numbers, booleans or null — `published: false`
+                               is written as 0, so an unpublished copy needs no follow-up call.
+                               A column the table does not have is rejected before anything
+                               is copied.
 
             Conventions mirrored from Contao's own copy:
               - doNotCopy fields (alias, …) are NOT carried over — Contao regenerates them.
+              - the author is set to the calling identity, as Contao's copy button does
+                (the source's author is a doNotCopy field and is not inherited).
               - external-id mappings (external_id_namespace/key) are reset on every copy.
               - the copy is appended after the last sibling (fresh sorting).
               - a duplicated ROOT page gets its fallback + dns cleared (uniqueness) — set
@@ -140,7 +146,19 @@ final class Tool
         $overridesArr = $this->normaliseOverrides($overrides);
 
         try {
-            $tree = $this->duplicator->duplicate($table, $id, $into_pid, $intoPtable, $with_children, $overridesArr);
+            $tree = $this->duplicator->duplicate(
+                $table,
+                $id,
+                $into_pid,
+                $intoPtable,
+                $with_children,
+                $overridesArr,
+                $this->authorResolver->resolve(),
+            );
+        } catch (\InvalidArgumentException $e) {
+            // A rejected override — the caller's own input, so it gets its own
+            // error rather than being reported as a failed copy.
+            return ['error' => 'invalid_input', 'message' => $e->getMessage()];
         } catch (\Throwable $e) {
             return ['error' => 'duplicate_failed', 'message' => $e->getMessage(), 'class' => $e::class];
         }

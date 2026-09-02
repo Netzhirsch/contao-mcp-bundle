@@ -58,14 +58,67 @@ final class RecordDuplicator
         ?string $intoPtable = null,
         bool $withChildren = false,
         array $overrides = [],
+        ?int $authorUserId = null,
     ): array {
         $this->framework->initialize();
 
+        $overrides = $this->normaliseOverrides($table, $overrides);
+
         $counter = 0;
-        $result = $this->copyRecord($table, $id, $intoPid, $intoPtable, $withChildren, $overrides, $counter, true);
+        $result = $this->copyRecord($table, $id, $intoPid, $intoPtable, $withChildren, $overrides, $authorUserId, $counter, true);
         $result['copied'] = $counter;
 
         return $result;
+    }
+
+    /**
+     * Overrides go straight into an INSERT, so they have to arrive as values
+     * the column can hold.
+     *
+     * JSON has real booleans and MySQL columns do not: PDO binds `false` as the
+     * empty string, and a strict-mode server answers "Incorrect integer value:
+     * '' for column `tl_article`.`published`". That is a true message about a
+     * value nobody typed — `published: false` is the obvious way to ask for an
+     * unpublished copy, and it is how every other tool in this bundle takes a
+     * boolean. Reported after a translation workflow had to write `0` instead.
+     *
+     * An unknown column is refused here too, rather than surfacing later as an
+     * SQL error about a name the caller can no longer connect to their call.
+     *
+     * @param array<string, mixed> $overrides
+     *
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function normaliseOverrides(string $table, array $overrides): array
+    {
+        $out = [];
+
+        foreach ($overrides as $column => $value) {
+            $column = (string) $column;
+
+            if (!$this->hasColumn($table, $column)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'overrides: %s has no column "%s". Nothing was copied.',
+                    $table,
+                    $column,
+                ));
+            }
+
+            $out[$column] = match (true) {
+                \is_bool($value) => $value ? 1 : 0,
+                $value === null, \is_scalar($value) => $value,
+                default => throw new \InvalidArgumentException(sprintf(
+                    'overrides["%s"]: expected a string, number, boolean or null, got %s. '
+                    .'Serialised columns must be passed as their stored string.',
+                    $column,
+                    get_debug_type($value),
+                )),
+            };
+        }
+
+        return $out;
     }
 
     /**
@@ -80,6 +133,7 @@ final class RecordDuplicator
         ?string $intoPtable,
         bool $withChildren,
         array $overrides,
+        ?int $authorUserId,
         int &$counter,
         bool $isTopLevel,
     ): array {
@@ -92,7 +146,7 @@ final class RecordDuplicator
             throw new \RuntimeException(sprintf('%s.%d does not exist.', $table, $id));
         }
 
-        $row = $this->buildCopyData($table, $dca, $source, $intoPid, $intoPtable, $isTopLevel ? $overrides : []);
+        $row = $this->buildCopyData($table, $dca, $source, $intoPid, $intoPtable, $isTopLevel ? $overrides : [], $authorUserId);
         $row['tstamp'] = time();
 
         // Build the INSERT with quoted column identifiers ourselves —
@@ -132,6 +186,7 @@ final class RecordDuplicator
                     $dynamicPtable ? $table : null,
                     $withChildren,
                     [],
+                    $authorUserId,
                     $counter,
                     false,
                 );
@@ -141,7 +196,7 @@ final class RecordDuplicator
         // 2) same-table tree children (sub-pages) — only on request.
         if ($withChildren && (int) ($dca['list']['sorting']['mode'] ?? 0) === self::TREE_MODE) {
             foreach ($this->findChildren($table, $id, null) as $childId) {
-                $children[] = $this->copyRecord($table, $childId, $newId, null, true, [], $counter, false);
+                $children[] = $this->copyRecord($table, $childId, $newId, null, true, [], $authorUserId, $counter, false);
             }
         }
 
@@ -159,15 +214,26 @@ final class RecordDuplicator
      *
      * @return array<string, mixed>
      */
-    private function buildCopyData(string $table, array $dca, array $source, ?int $intoPid, ?string $intoPtable, array $overrides): array
+    private function buildCopyData(string $table, array $dca, array $source, ?int $intoPid, ?string $intoPtable, array $overrides, ?int $authorUserId = null): array
     {
         $fields = $dca['fields'] ?? [];
         $row = $source;
         unset($row['id']);
 
         foreach (array_keys($row) as $col) {
-            if (!empty($fields[$col]['eval']['doNotCopy'])) {
-                unset($row[$col]); // let the DB default / Contao regenerate (alias, …)
+            if (empty($fields[$col]['eval']['doNotCopy'])) {
+                continue;
+            }
+
+            unset($row[$col]); // let the DB default / Contao regenerate (alias, …)
+
+            // …except for the author. Contao's own copy button records the user
+            // who pressed it (`tl_article.author` has both doNotCopy and a
+            // `default` that reads the current backend user); dropping the
+            // column here fell back to the DB default of 0, leaving copies
+            // ownerless and needing a second call to repair.
+            if ($authorUserId !== null && $authorUserId > 0 && self::isUserReference($fields[$col] ?? [])) {
+                $row[$col] = $authorUserId;
             }
         }
 
@@ -286,6 +352,17 @@ final class RecordDuplicator
         $max = (int) $this->connection->fetchOne($sql, $params);
 
         return $max + 128;
+    }
+
+    /**
+     * A column that points at a backend user — `foreignKey: tl_user.name` is
+     * how the core DCAs declare it.
+     *
+     * @param array<string, mixed> $definition
+     */
+    private static function isUserReference(array $definition): bool
+    {
+        return str_starts_with((string) ($definition['foreignKey'] ?? ''), 'tl_user.');
     }
 
     private function hasColumn(string $table, string $column): bool

@@ -152,13 +152,20 @@ final class AuditedUpdater
 
             if ($extras !== []) {
                 if (!\in_array('extras', $declared, true)) {
+                    // "This tool cannot" is not the same as "there is no way",
+                    // and reading it as the latter has now cost two live-site
+                    // detours. Where another tool owns the field, name it;
+                    // otherwise hand over the words to search for.
+                    $owner = FieldOwner::hintFor($table, array_keys($extras));
+
                     return [
                         'error' => 'field_not_writable',
                         'message' => sprintf(
                             '"%s" has no parameter for %s and no extras bag to route it through. '
-                            .'The field may still be readable — try a dry run.',
+                            .'The field may still be readable — try a dry run. %s',
                             $table,
                             implode(', ', array_map(static fn (string $f): string => '"'.$f.'"', array_keys($extras))),
+                            $owner,
                         ),
                         'fields' => array_keys($extras),
                     ];

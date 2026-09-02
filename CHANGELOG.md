@@ -6,6 +6,155 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.15.0] – 2026-09-02
+
+> Dritte Runde des grass-merkur-Berichts, erhoben beim EN-Rollout an News,
+> Events, Stellen und FAQ. Keine Schemaänderung, keine Migration.
+>
+> **Zur Einordnung:** Der Bericht lief gegen 1.12.0. Die beiden dort als offen
+> geführten Punkte — `extras` prüft den Wert nicht, und die Leseseite folgt der
+> Schreibseite nicht — sind seit **1.13.0** behoben; ebenso die kleineren
+> Beobachtungen zu `files_search`, zur DeepL-Kappungswarnung und zum Dry-Run als
+> Lesewerkzeug. Wer noch auf 1.12.0 steht, sollte auf 1.15.0 gehen.
+
+### Fixed
+- **Eine Sprachverknüpfung wurde nur zur Hälfte geschrieben.**
+  `terminal42/contao-changelanguage` hinterlegt eine Übersetzung an **zwei**
+  Stellen: `languageMain` am Datensatz und `master` an der Sammlung
+  (`tl_news_archive`, `tl_calendar`, `tl_faq_category`). Fehlt die zweite, wird
+  die erste gar nicht ausgewertet — `AbstractNavigationListener` sucht den
+  Gegenpart über `pid = (SELECT id FROM … WHERE (id=? OR master=?) AND
+  jumpTo=?)`, und eine Sammlung mit `master = 0` trifft dort nichts. Der
+  Sprachwechsler fällt auf die Sprachwurzel zurück, der `hreflang`-Alternate
+  fehlt, und die Datenbank sieht dabei richtig aus.
+
+  Das Bundle hat `master` bislang **nirgends** angefasst. Der Bericht nahm an,
+  `entity_language_link` erledige es für News und nur für Events und FAQs nicht
+  — tatsächlich hat es die Spalte für keine Tabelle geschrieben; das
+  News-Archiv trug seinen `master` aus einer früheren Handarbeit im Backend.
+
+  Jetzt gilt: Wer Datensätze verknüpft, bekommt die Sammlungshälfte mit.
+  - `entity_language_link` vervollständigt sie, wo das eindeutig und nach
+    changelanguages eigenen Regeln zulässig ist — das Paar ist keine Vermutung,
+    es steht in den `pid`s der beiden Datensätze — und meldet das unter
+    `collections_linked`. Wo es nicht geht, sagt `warnings`, was fehlt und mit
+    welchem Aufruf es zu beheben ist.
+  - Die drei Sammlungstabellen sind selbst verknüpfbar:
+    `entity_language_link(table: "tl_news_archive", default_id: 1,
+    translations: {"en": 3})`. Dabei werden changelanguages Regeln vorher
+    geprüft — das Ziel muss selbst ein Master sein, und pro Leserseite darf nur
+    eine Sammlung denselben Master beanspruchen. Der Model-Write erreicht den
+    `save_callback` nie, der das sonst abfängt.
+  - `news_create`/`_update`, `calendar_event_create`/`_update` und
+    `faq_create`/`_update` nehmen `languageMain` weiterhin entgegen, sagen aber
+    jetzt in `warnings`, was der Wert allein noch nicht bewirkt.
+
+  Ohne installiertes changelanguage antworten dieselben Aufrufe
+  `extension_not_available`, statt eine nicht existierende Spalte zu schreiben
+  und Erfolg zu melden.
+
+- **`entity_duplicate` machte aus `false` einen Leerstring.** JSON hat echte
+  Booleans, MySQL-Spalten nicht: PDO bindet `false` als `''`, und ein Server im
+  Strict Mode antwortet *„Incorrect integer value: '' for column
+  `tl_article`.`published`"*. Eine wahre Meldung über einen Wert, den niemand
+  getippt hat — `published: false` ist die naheliegende Art, eine unveröffentlichte
+  Kopie zu verlangen, und beim Duplizieren in einen **live** geschalteten
+  Sprachbaum ist genau das die Voraussetzung dafür, dass der unübersetzte
+  Quelltext nicht öffentlich steht. `overrides` nimmt jetzt Booleans wie jedes
+  andere Werkzeug im Bundle.
+
+  Am selben Werkzeug: Eine Spalte, die es in der Tabelle nicht gibt, wird
+  abgelehnt, **bevor** kopiert wird — statt später als SQL-Fehler über einen
+  Namen aufzutauchen, den der Aufrufer nicht mehr zuordnen kann.
+
+- **Die Kopie hat wieder einen Autor.** `tl_article.author` ist ein
+  `doNotCopy`-Feld mit einem `default`, der den ausführenden Benutzer einträgt —
+  so macht es Contaos Kopieren-Knopf. Wir haben die Spalte fallengelassen und
+  den DB-Default (0) greifen lassen, also musste `author_id` hinterher von Hand
+  gesetzt werden.
+
+- **`page_translations_tree` schlug Fehlalarm.** `root_id` filterte auf
+  `pid = ?`, also auf die **direkten Kinder** statt auf den Teilbaum. Schlimmer:
+  Die Vorlage einer übersetzten Seite liegt naturgemäß im *anderen*
+  Sprachbaum — sie konnte im gescannten Ausschnitt gar nicht vorkommen, und
+  jede Übersetzung wurde folgerichtig als `orphan` gemeldet. Für einen EN-Root
+  las sich das als 60 kaputte Verknüpfungen, während jede dieser Seiten
+  korrekte `hreflang`-Alternates ausgab.
+
+  `root_id` meint jetzt den ganzen Teilbaum, und die Vorlage wird dort gesucht,
+  wo sie steht. `orphans` bedeutet wieder, was der Name sagt: Die Zielzeile
+  existiert nicht oder liegt außerhalb der Pagemounts — `orphan_reason` sagt,
+  welches von beidem.
+
+- **Ein fehlender Pflichtparameter hieß „Internal error".** Unbekannte
+  Parameter wurden seit 1.10.0 benannt; der Spiegelfall lief weiter in php-mcps
+  Dispatcher und kam als `tool_failed · Internal error` zurück — eine Meldung,
+  die ein kaputtes Werkzeug beschreibt. Ein funktionierendes wurde daraufhin als
+  defekt notiert, obwohl nur der Parametername falsch war (`template_get`
+  nimmt `path`, nicht `name`). Beide Hälften werden jetzt in einem Satz
+  genannt: *„has no parameter "name" (did you mean "path"?). requires "path"."*
+  (`Service\UnknownArgumentGuard` heißt entsprechend jetzt `Service\ArgumentGuard`.)
+
+- **`file_update_meta` fand Dateien nicht, die dieselbe Suche gerade geliefert
+  hatte.** `files_search` gibt zwei Pfadfelder aus — `path` ohne und
+  `dbafs_path` mit dem Upload-Verzeichnis — und das zweite an ein Werkzeug zu
+  geben, das das erste erwartet, ergab `not_found`. Beide Schreibweisen werden
+  jetzt akzeptiert, und zwar nur dann, wenn der Pfad **mit** Präfix ins Leere
+  zeigt und **ohne** nicht: ein echter Ordner `files/files/` behält Vorrang.
+
+- **`form_fields_list(q:)` durchsuchte den Options-Blob nicht.** Die Beschriftung
+  einer Checkbox oder eines Select-Eintrags steht in `tl_form_field.options`,
+  das die DCA nicht als durchsuchbar markiert. Wer nach „datenschutz" suchte,
+  bekam null Treffer und musste alle Felder auflisten und am `name` erkennen.
+
+### Added
+- **`content_get` nimmt `fields`.** Ein Inhaltselement hat rund 120 Spalten;
+  vier Bildelemente zu lesen, um vier `singleSRC`-UUIDs einzusammeln, kostete
+  Tausende Token, weil es keine Möglichkeit gab, weniger zu verlangen. `id` und
+  `type` kommen immer mit, damit die Zeile identifizierbar bleibt; ein Name, den
+  die Zeile nicht hat, wird gemeldet statt stillschweigend übergangen.
+
+- **`content_list(page_id:)` sagt, wo der Inhalt wirklich liegt.** In Contao 5
+  hängen Inhaltselemente an Artikeln, nicht an Seiten — die ehrliche leere
+  Antwort las sich als „diese Seite hat keinen Inhalt". Bei null Treffern kommt
+  jetzt ein `hint` auf `articles_list(page_id)` → `content_list(article_id)`.
+
+### Changed
+- **`contao_search_tools` zerlegt auch Bezeichner.** Wer eine Schreibablehnung
+  bekommt, sucht nach genau dem Namen, der abgelehnt wurde:
+  `netzhirschPageState`. Als ein Token trifft der nichts — so blieb
+  `pagestate_assign` ein zweites Mal unsichtbar. camelCase-Fugen und `_`/`-`
+  werden jetzt getrennt (`tl_netzhirsch_page_state` → netzhirsch, page, state).
+
+  Solche aus einem Bezeichner **abgeleiteten** Fragmente werden dabei nur gegen
+  Werkzeug**namen** geprüft, nicht gegen Beschreibungen: sonst wird jeder
+  Bezeichner, der ein häufiges Wort enthält, zur Wand aus Beinahe-Treffern —
+  ein eindeutiges `xyzzy_<stamp>` fing im Test an, sechzehn Werkzeuge zu
+  treffen. Ein abgeleitetes Fragment ist ein Hinweis auf einen Namen, kein
+  Suchbegriff.
+
+- **Ablehnungen zeigen auf das zuständige Werkzeug.** Zweimal wurde ein
+  `field_not_writable` als „geht überhaupt nicht" gelesen und so an einen Kunden
+  weitergegeben, obwohl ein anderes Werkzeug das Feld besaß. Der Moment der
+  Ablehnung ist der einzige, in dem der Aufrufer sicher zuhört — dort steht
+  jetzt der Weg: bei bekannten Feldern der fertige Aufruf, sonst die **Wörter**,
+  mit denen die Suche etwas findet.
+
+- **Root-Seiten werden in `entity_language_link` abgelehnt.** Sie verknüpfen
+  über `languageRoot`, nicht über `languageMain`; ein Schreibvorgang auf die
+  falsche Spalte hätte den Baum verknüpft aussehen lassen, ohne dass
+  changelanguage ihn auswertet.
+
+### Notes
+- Der Smoke-Test deckt die neuen Wege ab: die Sammlungshälfte end-to-end (wo
+  changelanguage installiert ist, sonst die saubere Ablehnung), die
+  Boolean-Overrides und den Autor der Kopie, den Teilbaum-Scan samt echtem
+  Orphan, die Feldauswahl, die Pfad-Toleranz, die Options-Suche und beide
+  Hälften der Parameter-Meldung.
+- **Nicht in diesem Bundle:** Der Bericht wünscht sich `pagestate_of_page(page_id)`.
+  Die `pagestate_*`-Gruppe gehört einem anderen Netzhirsch-Bundle auf der
+  Kundeninstanz; der Wunsch gehört dorthin.
+
 ## [1.14.0] – 2026-09-01
 
 > Unterstützt jetzt **Contao 6**. Keine Schemaänderung, keine Migration, keine

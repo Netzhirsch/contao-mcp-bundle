@@ -446,10 +446,48 @@ Preis des letzten Aufrufs.
 Datensatz, der sich ändert. Für eine zweite Sprache also erst kopieren, dann die
 Kopie übersetzen:
 
-1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <Ziel-Root>, with_children: true)`
+1. `entity_duplicate(table: "tl_page", id: 42, into_pid: <Ziel-Root>, with_children: true, overrides: {"published": false})`
 2. `deepl_translate_page_tree(id: <die Kopie>, target_lang: "EN-GB", dry_run: true)` — was kostet das?
 3. dasselbe mit `save: true`
 4. `entity_language_link(...)` für die Verknüpfung mit changelanguage
+
+Schritt 1 kopiert in einen **live** geschalteten Baum, wenn es ihn schon gibt —
+deshalb das `published: false`: sonst steht der noch unübersetzte Quelltext für
+die Dauer der Übersetzung öffentlich im Netz. Der zurückgegebene `tree` ist die
+komplette Quell→Ziel-ID-Karte, die man in Schritt 2 ohnehin braucht.
+
+#### Beide Hälften einer Übersetzungsbeziehung
+
+`terminal42/contao-changelanguage` hinterlegt eine Übersetzung an **zwei**
+Stellen, und ohne die zweite wird die erste nicht ausgewertet:
+
+| Ebene | Spalte | Tabellen |
+|---|---|---|
+| Datensatz | `languageMain` | `tl_page`, `tl_article`, `tl_news`, `tl_calendar_events`, `tl_faq` |
+| Sammlung | `master` | `tl_news_archive`, `tl_calendar`, `tl_faq_category` |
+
+Fehlt `master`, fällt der Sprachwechsler auf die Sprachwurzel zurück und der
+`hreflang`-Alternate wird nicht ausgegeben — sichtbar wird das erst am
+gerenderten Frontend, die Datenbank sieht korrekt aus.
+
+`entity_language_link` deckt beide Ebenen ab und vervollständigt die
+Sammlungshälfte selbst, wo das eindeutig und zulässig ist:
+
+```
+entity_language_link(table: "tl_news", default_id: 8, translations: {"en": 16})
+→ linked: 1
+  collections_linked: [{table: "tl_news_archive", id: 3, master: 1}]
+  warnings: []
+```
+
+Geht das nicht — weil das Zielarchiv schon eine andere Übersetzung ist, oder
+weil auf derselben Leserseite bereits eine Sammlung denselben Master
+beansprucht —, steht in `warnings`, was fehlt und mit welchem Aufruf es zu
+setzen ist. Die Sammlungen lassen sich auch direkt verknüpfen:
+`entity_language_link(table: "tl_news_archive", default_id: 1, translations: {"en": 3})`.
+
+Root-Seiten verknüpfen über `languageRoot` statt `languageMain` und werden hier
+abgelehnt; dafür ist `page_update` zuständig.
 
 **Aliase werden bewusst nicht übersetzt.** DeepL liefert Fließtext, kein Slug;
 „Unsere Leistungen" gehört nicht in eine URL. Für übersetzte URLs erst den Titel
