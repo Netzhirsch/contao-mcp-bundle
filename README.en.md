@@ -590,6 +590,35 @@ or the untranslated source stands publicly readable for as long as the
 translation takes. The returned `tree` is the complete source→target id map you
 need for step 2 anyway.
 
+The same applies outside the page tree. `entity_duplicate` covers:
+
+```
+tl_page, tl_article, tl_content,
+tl_module, tl_layout,
+tl_news_archive, tl_news,
+tl_calendar, tl_calendar_events,
+tl_faq_category, tl_faq,
+tl_form, tl_form_field
+```
+
+This is the route for anything you would otherwise retype column by column into
+a `*_create` call — a `tl_module` row has between 114 and well over 250 columns
+depending on the extensions installed. Copying a **collection** takes every
+entry with it through the `ctable` cascade: `entity_duplicate(table:
+"tl_news_archive", id: 1)` creates the archive along with its 95 entries and
+their content elements. For a language rollout that is the point, but `copied`
+reports the total — budget for it before the call.
+
+Copying follows the backend's copy button: `doNotCopy` fields are not carried
+over but refilled from the DCA `default` (so a copied news entry is dated today,
+not 1970), the alias is regenerated from the right field (`headline` for news,
+`question` for FAQs) and follows an `overrides` that renames the copy. Names and
+titles are **not** made unique — that is what `overrides` is for.
+
+`tl_user` and `tl_member` are deliberately absent: Contao's copy button lands
+you in the edit mask there, so a human can make the username and e-mail unique
+before anything is saved.
+
 #### Both halves of a translation link
 
 `terminal42/contao-changelanguage` records a translation in **two** places, and

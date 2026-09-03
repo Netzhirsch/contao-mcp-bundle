@@ -3201,6 +3201,90 @@ final class McpSmokeTestCommand extends Command
             $output->writeln('  <comment>~ Content-Baum-Test übersprungen — keine Seite zum Anlegen eines Artikels</comment>');
         }
 
+        // ═══════════════ entity_duplicate außerhalb des Seitenbaums ═══════════════
+        //
+        // The tool used to accept three tables, which left the rows that are
+        // most painful to rebuild by hand outside it: a tl_module row has ~250
+        // columns and module_create wants each one. Copying is DCA-driven the
+        // whole way through, so the narrow list was the arbitrary part.
+        $output->writeln("\n<comment>entity_duplicate (Module, News)</comment>");
+
+        $dupThemeId = (int) $this->connection->fetchOne('SELECT id FROM tl_theme ORDER BY id LIMIT 1');
+
+        if ($dupThemeId > 0) {
+            $srcModule = $this->moduleTool->create(theme_id: $dupThemeId, type: 'navigation', name: $stamp.'_mod');
+            $srcModuleId = (int) ($srcModule['id'] ?? 0);
+            $modCopy = $this->duplicateTool->duplicate('tl_module', $srcModuleId,
+                overrides: (object) ['name' => $stamp.'_mod_kopie']);
+            $modCopyId = (int) ($modCopy['new_id'] ?? 0);
+
+            $expect('a module can be copied instead of retyped column by column', $modCopy,
+                static fn ($r) => ($r['duplicated'] ?? false) === true && ($r['copied'] ?? 0) === 1);
+
+            // The whole point is the columns nobody wants to retype, so compare
+            // all of them rather than spot-checking a few.
+            $ignore = ['id' => 1, 'name' => 1, 'tstamp' => 1, 'external_id_namespace' => 1, 'external_id_key' => 1];
+            $srcRow = $this->connection->fetchAssociative('SELECT * FROM tl_module WHERE id = ?', [$srcModuleId]) ?: [];
+            $copyRow = $this->connection->fetchAssociative('SELECT * FROM tl_module WHERE id = ?', [$modCopyId]) ?: [];
+            $expect(sprintf('every one of its %d other columns came across', max(0, \count($srcRow) - \count($ignore))),
+                [array_diff_key($srcRow, $ignore), array_diff_key($copyRow, $ignore)],
+                static fn (array $r) => $r[0] !== [] && $r[0] === $r[1]);
+            $expect('and the override named the copy', $copyRow['name'] ?? null,
+                static fn ($v) => $v === $stamp.'_mod_kopie');
+
+            $this->connection->executeStatement(
+                'DELETE FROM tl_module WHERE id IN ('.implode(',', array_filter([$srcModuleId, $modCopyId])).')');
+        } else {
+            $output->writeln('  <comment>~ Modul-Kopie übersprungen — kein Theme vorhanden</comment>');
+        }
+
+        // News carries the two things a wider table list would otherwise have
+        // got wrong: its alias comes from `headline`, not `title` (guessing
+        // `title` left the copy with an EMPTY alias and no working URL), and
+        // `date` is doNotCopy AND mandatory with `'default' => time()`, so
+        // falling back to the column default dated every copy to 1970.
+        $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.'_dup_archiv', 'jumpTo' => 0]);
+        $dupArchiveId = (int) $this->connection->lastInsertId();
+        $srcNews = $this->newsTool->create(archive_id: $dupArchiveId, headline: 'Kopierbare Meldung '.$stamp);
+        $srcNewsId = (int) ($srcNews['id'] ?? 0);
+
+        if ($srcNewsId > 0) {
+            $this->connection->update('tl_news', ['date' => strtotime('2019-03-04') ?: 0], ['id' => $srcNewsId]);
+
+            $newsCopy = $this->duplicateTool->duplicate('tl_news', $srcNewsId,
+                overrides: (object) ['headline' => 'Kopie '.$stamp, 'published' => false]);
+            $newsCopyId = (int) ($newsCopy['new_id'] ?? 0);
+
+            $expect('a news entry can be copied', $newsCopy,
+                static fn ($r) => ($r['duplicated'] ?? false) === true);
+
+            $copied = $newsCopyId > 0
+                ? $this->connection->fetchAssociative('SELECT alias, date, author, published FROM tl_news WHERE id = ?', [$newsCopyId])
+                : null;
+
+            $expect('its alias is regenerated from the headline, not left empty', $copied,
+                static fn ($r) => \is_array($r) && str_starts_with((string) $r['alias'], 'kopie-'));
+            $expect('its date comes from the DCA default, not from the column default',
+                $copied,
+                static fn ($r) => \is_array($r) && (int) $r['date'] > strtotime('2020-01-01'));
+            $expect('and it is unpublished because the override said so', $copied,
+                static fn ($r) => \is_array($r) && (int) $r['published'] === 0);
+            $srcNewsAuthor = (int) $this->connection->fetchOne('SELECT author FROM tl_news WHERE id = ?', [$srcNewsId]);
+            $expect('the copy has an author', $copied,
+                static fn ($r) => \is_array($r) && ($srcNewsAuthor === 0 || (int) $r['author'] > 0));
+
+            $this->connection->executeStatement(
+                'DELETE FROM tl_news WHERE id IN ('.implode(',', array_filter([$srcNewsId, $newsCopyId])).')');
+        }
+
+        $expect('an unsupported table still names what is supported',
+            $this->duplicateTool->duplicate('tl_user', 1),
+            static fn ($r) => ($r['error'] ?? '') === 'unsupported_table'
+                && \in_array('tl_module', $r['supported'] ?? [], true)
+                && !\in_array('tl_user', $r['supported'] ?? [], true));
+
+        $this->connection->executeStatement('DELETE FROM tl_news_archive WHERE id = ?', [$dupArchiveId]);
+
         // ═══════════════════ Template-Auffindbarkeit ═══════════════════
         //
         // Modern Contao 5 templates are identified by group + name

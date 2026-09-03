@@ -6,6 +6,85 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.16.0] – 2026-09-02
+
+> `entity_duplicate` deckt jetzt dreizehn statt drei Tabellen ab. Keine
+> Schemaänderung, keine Migration.
+
+### Added
+- **Module, News, Events, FAQs, Formulare und Layouts sind kopierbar.** Die
+  Tabellenliste stand bei `tl_page`, `tl_article`, `tl_content` — und ließ damit
+  ausgerechnet die Zeilen draußen, die von Hand am teuersten sind: Eine
+  `tl_module`-Zeile hat je nach Erweiterungen 114 bis über 250 Spalten, und
+  `module_create` verlangt jede einzeln. Für elf Module und 95 News-Einträge gab
+  es schlicht kein Werkzeug.
+
+  Das Kopieren war schon immer DCA-getrieben — `ctable`-Kaskade, `doNotCopy`,
+  Alias-Neuvergabe, Sortierung —, die enge Liste war also der willkürliche Teil
+  daran, keine Sicherheitseigenschaft. Neu dabei:
+
+  ```
+  tl_module, tl_layout,
+  tl_news_archive, tl_news,
+  tl_calendar, tl_calendar_events,
+  tl_faq_category, tl_faq,
+  tl_form, tl_form_field
+  ```
+
+  Eine Sammlung zu kopieren nimmt **alle** Einträge mit (`ctable`) — für einen
+  Sprach-Rollout ist genau das der Sinn, aber `copied` nennt die Gesamtzahl, und
+  die sollte man vor dem Aufruf einkalkulieren.
+
+  **Nicht dabei sind `tl_user` und `tl_member`.** Contao hat für beide einen
+  Kopieren-Knopf, der aber in der Bearbeitungsmaske landet, damit ein Mensch
+  Benutzername und E-Mail eindeutig macht, bevor gespeichert wird. Dieses
+  Werkzeug schreibt direkt — eine halbfertige Identitätszeile ist nichts, was
+  man als `duplicated: true` zurückgeben sollte.
+
+### Fixed
+- **`doNotCopy`-Spalten bekommen den DCA-Default.** Bisher wurde die Spalte
+  einfach weggelassen und der Spalten-Default der Datenbank griff. Contao füllt
+  sie aus dem `default` der DCA — deshalb ist seine Kopie einer Meldung *heute*
+  datiert und nicht 1970: `tl_news.date` ist `doNotCopy` **und** `mandatory`
+  **und** hat `'default' => time()`, während die Spalte auf 0 steht. Ohne das
+  hätte jede der 95 kopierten Meldungen ein Datum von 1970 getragen.
+
+  Ausgewertet werden nur echte Closures. `is_callable()` wäre auch für den
+  String `'time'` und für `['tl_news', 'generateAlias']` wahr — einen
+  gespeicherten Wert aufzurufen, weil er zufällig etwas Aufrufbares benennt,
+  wäre die falsche Art von schlau.
+
+- **Der Alias kam aus dem falschen Feld.** Die Neuvergabe las `title` bzw.
+  `name`. `tl_news` speist ihn aus `headline`, `tl_faq` aus `question` — eine
+  kopierte Meldung wäre also mit **leerem** Alias gelandet, und ein News-Eintrag
+  ohne Alias hat keine funktionierende URL. Das fällt erst im Frontend auf.
+
+- **Ein Umbenennen beim Kopieren erreicht jetzt auch den Alias.** Die Neuvergabe
+  las die Quellzeile statt der geschriebenen: `overrides: {headline: "Kopie"}`
+  ergab eine Zeile namens „Kopie" unter dem Slug des Originals. Gefunden vom
+  eigenen Smoke-Test beim Absichern der neuen Tabellen.
+
+### Changed
+- **`entity_duplicate` ist permission-gemappt.** Es fehlte in
+  `ToolPermissionMap` und fiel damit auf die sichere Vorgabe des Enforcers —
+  Administratoren only, mit einer Fehlermeldung, die das auch so sagte („is not
+  permission-mapped"). Seine drei Geschwister `entity_move`,
+  `entity_field_patch` und `entity_language_link` sind gemappt; hier war es ein
+  Versehen, und es sperrte genau die Redakteure aus, die etwas kopieren wollen.
+
+  Jetzt gilt `create` auf der im Aufruf genannten Tabelle — dieselbe Anforderung
+  wie bei den `*_create`-Werkzeugen. Zusätzlich prüft das Werkzeug weiterhin
+  selbst Lesen an der Quelle und Anlegen unter dem Ziel-Elternteil. Wer bisher
+  darauf gebaut hat, dass nur Administratoren kopieren können, sollte das
+  wissen: **das ist eine Lockerung.**
+
+### Notes
+- Der Smoke-Test kopiert ein Modul und vergleicht **alle** übrigen Spalten
+  zwischen Original und Kopie (114 auf der Testinstanz), statt einzelne
+  Stichproben zu machen — die Spalten, die niemand abtippen will, sind ja der
+  ganze Punkt. Für News prüft er Alias-Herkunft, DCA-Default beim Datum, den
+  Autor und das `published: false` aus den Overrides.
+
 ## [1.15.0] – 2026-09-02
 
 > Dritte Runde des grass-merkur-Berichts, erhoben beim EN-Rollout an News,

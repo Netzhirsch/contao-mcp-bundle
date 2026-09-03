@@ -167,7 +167,11 @@ final class RecordDuplicator
         // copy would land with an empty alias (broken page routing, ambiguous
         // article URLs). Regenerate a unique alias from the title — what the
         // backend copy effectively does.
-        $this->regenerateAlias($table, $newId, $source);
+        // From the row as WRITTEN, not the source: an override that renames the
+        // copy has to reach the alias too, or `overrides: {headline: "Kopie"}`
+        // lands a row called "Kopie" under the original's slug. `$row` wins,
+        // `$source` fills the columns doNotCopy removed.
+        $this->regenerateAlias($table, $newId, $row + $source);
 
         $children = [];
 
@@ -225,15 +229,24 @@ final class RecordDuplicator
                 continue;
             }
 
-            unset($row[$col]); // let the DB default / Contao regenerate (alias, …)
+            unset($row[$col]); // regenerated (alias) or refilled below
 
-            // …except for the author. Contao's own copy button records the user
-            // who pressed it (`tl_article.author` has both doNotCopy and a
-            // `default` that reads the current backend user); dropping the
-            // column here fell back to the DB default of 0, leaving copies
-            // ownerless and needing a second call to repair.
+            // …but "not copied" is not the same as "left at the DB default".
+            // Contao's copy fills these from the DCA `default`, which is why
+            // its copy of a news entry is dated today rather than 1970:
+            // `tl_news.date` is doNotCopy AND mandatory AND `'default' =>
+            // time()`, while the column default is 0.
             if ($authorUserId !== null && $authorUserId > 0 && self::isUserReference($fields[$col] ?? [])) {
+                // More reliable than the DCA's own default here — that one is a
+                // closure reading BackendUser, which needs a backend session.
                 $row[$col] = $authorUserId;
+
+                continue;
+            }
+
+            $default = self::dcaDefault($fields[$col] ?? []);
+            if ($default !== null) {
+                $row[$col] = $default;
             }
         }
 
@@ -291,7 +304,15 @@ final class RecordDuplicator
         if (!$this->hasColumn($table, 'alias')) {
             return;
         }
-        $title = trim((string) ($source['title'] ?? $source['name'] ?? ''));
+
+        $title = '';
+        foreach (self::aliasSources($table) as $column) {
+            $title = trim((string) ($source[$column] ?? ''));
+            if ($title !== '') {
+                break;
+            }
+        }
+
         if ($title === '') {
             return;
         }
@@ -304,6 +325,26 @@ final class RecordDuplicator
 
         $alias = $this->slug->generate($title, ['validChars' => '0-9a-z'], $check);
         $this->connection->executeStatement("UPDATE {$q} SET alias = ? WHERE id = ?", [$alias, $newId]);
+    }
+
+    /**
+     * Which column feeds the alias, in the order Contao's own save_callback
+     * would read them. Most tables use `title`; these two do not, and guessing
+     * `title` there produced an EMPTY alias — a news entry with no alias has no
+     * working URL, which is the kind of breakage that only shows up in the
+     * frontend.
+     *
+     * @return list<string>
+     */
+    private static function aliasSources(string $table): array
+    {
+        $first = match ($table) {
+            'tl_news' => 'headline',
+            'tl_faq' => 'question',
+            default => null,
+        };
+
+        return $first === null ? ['title', 'name'] : [$first, 'title', 'name'];
     }
 
     /**
@@ -363,6 +404,42 @@ final class RecordDuplicator
     private static function isUserReference(array $definition): bool
     {
         return str_starts_with((string) ($definition['foreignKey'] ?? ''), 'tl_user.');
+    }
+
+    /**
+     * The value Contao would put in a `doNotCopy` column, from the DCA
+     * `default`. Null when there is none — then the column default applies,
+     * which is what dropping it already achieves.
+     *
+     * Only real closures are evaluated. `is_callable()` would also be true for
+     * the string `'time'` and for `['tl_news', 'generateAlias']`, and calling
+     * either because it happens to name something callable would turn a stored
+     * value into a function call.
+     *
+     * @param array<string, mixed> $definition
+     */
+    private static function dcaDefault(array $definition): int|float|string|null
+    {
+        if (!\array_key_exists('default', $definition)) {
+            return null;
+        }
+
+        $value = $definition['default'];
+
+        if ($value instanceof \Closure) {
+            try {
+                $value = $value();
+            } catch (\Throwable) {
+                return null; // needs a context we do not have (e.g. a backend session)
+            }
+        }
+
+        return match (true) {
+            \is_bool($value) => $value ? 1 : 0,
+            \is_int($value), \is_float($value), \is_string($value) => $value,
+            \is_array($value) => serialize($value),
+            default => null,
+        };
     }
 
     private function hasColumn(string $table, string $column): bool

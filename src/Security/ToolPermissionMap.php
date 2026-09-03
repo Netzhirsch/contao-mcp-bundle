@@ -146,6 +146,13 @@ final class ToolPermissionMap
         'external_id_lookup' => ['kind' => 'none'],
         'external_ids_list' => ['kind' => 'none'],
         'entity_move' => ['kind' => 'dc_arg', 'op' => 'update'],
+        // Was missing, so it fell to the enforcer's secure default — the error
+        // said as much ("is not permission-mapped"). Its three siblings above
+        // and below are all mapped; this one was an oversight, not a decision,
+        // and admin-only locked out exactly the editors who copy things. The
+        // tool additionally checks read-on-source and create-under-target with
+        // the concrete parent, as the *_create tools do.
+        'entity_duplicate' => ['kind' => 'dc_arg', 'op' => 'create'],
         // "_patch" is not one of the write verbs the name heuristic knows, and
         // this one replaces text inside a record — it must never be read as a
         // lookup.
