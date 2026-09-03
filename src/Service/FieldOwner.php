@@ -32,12 +32,13 @@ final class FieldOwner
     ];
 
     /**
-     * @param list<string> $fields
+     * @param list<string>                        $fields
+     * @param array<string, array<string, string>> $declared from {@see ExtensionFieldOwnerMap}
      */
-    public static function hintFor(string $table, array $fields): string
+    public static function hintFor(string $table, array $fields, array $declared = []): string
     {
         foreach ($fields as $field) {
-            $owner = self::OWNED[$table.'.'.$field] ?? null;
+            $owner = self::ownerFor($table, $field, $declared, 'write');
             if ($owner !== null) {
                 return sprintf('`%s` is owned by another tool — set it with %s.', $field, $owner);
             }
@@ -49,5 +50,34 @@ final class FieldOwner
         return $phrase === ''
             ? ''
             : sprintf('If another tool owns this field, contao_search_tools("%s") will find it.', $phrase);
+    }
+
+    /**
+     * The call that owns this column, or null when nobody claimed it.
+     *
+     * Core first: an extension must not be able to redirect a caller away from
+     * a core tool by declaring a column the core already owns.
+     *
+     * @param array<string, array<string, string>> $declared
+     * @param 'read'|'write'                       $kind
+     */
+    public static function ownerFor(string $table, string $field, array $declared = [], string $kind = 'write'): ?string
+    {
+        $key = $table.'.'.$field;
+
+        if (isset(self::OWNED[$key])) {
+            return self::OWNED[$key];
+        }
+
+        $hints = $declared[$key] ?? null;
+        if (!\is_array($hints)) {
+            return null;
+        }
+
+        // Falling back to the other direction beats saying nothing: a bundle
+        // that declared only `write` still tells the reader where the column
+        // lives, and "use this to set it" is a usable answer to "why can I not
+        // read it".
+        return $hints[$kind] ?? $hints[$kind === 'write' ? 'read' : 'write'] ?? null;
     }
 }

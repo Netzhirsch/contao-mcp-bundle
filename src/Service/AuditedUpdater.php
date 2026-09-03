@@ -84,6 +84,7 @@ final class AuditedUpdater
         private readonly LayoutTool $layoutTool,
         private readonly MemberTool $memberTool,
         private readonly MemberGroupTool $memberGroupTool,
+        private readonly ExtensionFieldOwnerMap $fieldOwners,
     ) {
     }
 
@@ -156,7 +157,7 @@ final class AuditedUpdater
                     // and reading it as the latter has now cost two live-site
                     // detours. Where another tool owns the field, name it;
                     // otherwise hand over the words to search for.
-                    $owner = FieldOwner::hintFor($table, array_keys($extras));
+                    $owner = FieldOwner::hintFor($table, array_keys($extras), $this->fieldOwners->all());
 
                     return [
                         'error' => 'field_not_writable',

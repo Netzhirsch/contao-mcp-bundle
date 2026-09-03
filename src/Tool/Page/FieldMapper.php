@@ -9,6 +9,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\PageModel;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 use Netzhirsch\ContaoMcpBundle\Service\DcaScalarWriter;
+use Netzhirsch\ContaoMcpBundle\Service\ExtensionFieldOwnerMap;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 
 /**
@@ -28,6 +29,7 @@ final class FieldMapper
     public function __construct(
         private readonly FieldProviderRegistry $providers,
         private readonly ContaoFramework $framework,
+        private readonly ExtensionFieldOwnerMap $fieldOwners,
     ) {
     }
 
@@ -409,7 +411,7 @@ final class FieldMapper
                 continue;
             }
 
-            if (DcaScalarWriter::write('tl_page', $page, $field, $value, $detectChanges)) {
+            if (DcaScalarWriter::write('tl_page', $page, $field, $value, $detectChanges, $this->fieldOwners->all())) {
                 $touch($field);
             }
         }

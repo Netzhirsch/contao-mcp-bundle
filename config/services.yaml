@@ -379,3 +379,10 @@ services:
     Netzhirsch\ContaoMcpBundle\Security\ExtensionPermissionMap:
         arguments:
             $providers: !tagged_iterator netzhirsch_mcp.tool
+
+    # Same tag, other opt-in: McpFieldOwnerProviderInterface, so a refusal on a
+    # column an extension owns can name that extension's tool instead of a
+    # search phrase. Presentation only — it grants nothing.
+    Netzhirsch\ContaoMcpBundle\Service\ExtensionFieldOwnerMap:
+        arguments:
+            $providers: !tagged_iterator netzhirsch_mcp.tool

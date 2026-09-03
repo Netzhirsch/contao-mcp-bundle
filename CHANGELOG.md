@@ -6,6 +6,65 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.17.0] – 2026-09-02
+
+> Antwort auf die Rückmeldung des Page-State-Bundles zum Briefing. Keine
+> Schemaänderung, keine Migration.
+
+### Added
+- **Erweiterungen können sagen, welches ihrer Werkzeuge eine Spalte besitzt.**
+  Ein Bundle, das ein Feld an `tl_page` hängt, bekommt es über den generischen
+  Schreibweg zu Recht abgelehnt — ein Fremdschlüssel als Freitext ist eine
+  ins Leere zeigende Referenz. Aber „hier nicht schreibbar" ist die halbe
+  Antwort, und die fehlende Hälfte wurde zweimal als „geht überhaupt nicht"
+  gelesen, beide Male auf einer Live-Instanz, beide Male gab es das passende
+  Werkzeug.
+
+  Neu ist `Extension\McpFieldOwnerProviderInterface`:
+
+  ```php
+  public function getMcpFieldOwners(): array
+  {
+      return [
+          'tl_page.netzhirschPageState' => [
+              'write' => 'pagestate_assign(page_id: <id>, state_id: <id>)',
+              'read'  => 'pagestate_of_page(page_id: <id>)',
+          ],
+      ];
+  }
+  ```
+
+  Die Ablehnung nennt dann den Aufruf statt einer Suchphrase — und beide
+  Richtungen, wo beide deklariert sind: setzen **und** vorher nachsehen.
+
+  **Warum deklariert statt eingetragen:** Das Page-State-Bundle hatte gebeten,
+  `pagestate_assign` bei uns namentlich einzutragen. Das wären vier Zeilen
+  gewesen — und hätte den Feldnamen *eines* Kunden in ein Produkt gelegt, das
+  alle anderen mitinstallieren. Dieselbe gepflegte Liste, die dieses Bundle in
+  1.12.0 (Felder aus der DCA), 1.13.0 (Leseseite aus **einer** Bedingung) und
+  1.15.0 (Suche statt Registry) jeweils abgeschafft hat. Jetzt gilt es für jedes
+  Bundle, das es deklariert, nicht nur für dieses eine.
+
+  Die Deklaration ist reine Darstellung: Sie gewährt nichts, ändert keine
+  Berechtigung und macht die Spalte nicht schreibbar. Kern-Zuordnungen schlagen
+  Erweiterungen, damit niemand Aufrufer von einem Kern-Werkzeug wegleiten kann.
+
+### Changed
+- **`ToolGroups` lässt Vendor-Präfixe nicht in die Panel-Überschrift durch.**
+  Die Hausregel will den Vendor-Präfix am Werkzeugnamen; die Panel-Box leitet
+  ihre Überschrift aber aus dem Gruppennamen ab, und `netzhirsch_pagestate` als
+  Boxtitel wäre ein schlechterer Tausch, als die Konsistenz wert ist — genau
+  deshalb hatte das Page-State-Bundle bei `pagestate_*` bleiben wollen.
+  `netzhirsch_pagestate_*` fällt jetzt in die Gruppe `pagestate`, damit beides
+  gleichzeitig geht. Beide Schreibweisen landen in derselben Box, eine
+  Umbenennung teilt die Gruppe also nicht.
+
+### Notes
+- `EXTENDING.md` hat einen Abschnitt §5 zu beidem, mit dem fertigen Beispiel.
+- Zur Auffindbarkeit war nichts mehr zu tun: die Wortzerlegung aus 1.15.0 deckt
+  den Bezeichner-Fall bereits ab, und das Bundle hat Synonyme in seinen
+  Beschreibungen ergänzt.
+
 ## [1.16.0] – 2026-09-02
 
 > `entity_duplicate` deckt jetzt dreizehn statt drei Tabellen ab. Keine

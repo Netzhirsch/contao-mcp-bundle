@@ -211,6 +211,69 @@ Rules of the road:
 - **Keep `getMcpToolPermissions()` pure.** It builds a static map; no I/O, no
   request state.
 
+### 5. Point the core's refusals at your tool
+
+If your bundle hangs a column on a core table — a foreign key on `tl_page`, say
+— the generic write path (`page_update(extras: …)`) **refuses** it on purpose: a
+reference written as free text is a dangling row, not an unusual value.
+
+But "you may not write this here" is half an answer, and the missing half has
+twice been read as "there is no way to do this at all" — both times on a live
+site, and both times a tool in the owning bundle did exactly the job. The core
+cannot guess that tool's name, so declare it:
+
+```php
+use Netzhirsch\ContaoMcpBundle\Extension\McpFieldOwnerProviderInterface;
+
+final class PageStateTool extends AbstractMcpTool implements McpFieldOwnerProviderInterface
+{
+    public function getMcpFieldOwners(): array
+    {
+        return [
+            'tl_page.netzhirschPageState' => [
+                'write' => 'pagestate_assign(page_id: <id>, state_id: <id>)',
+                'read'  => 'pagestate_of_page(page_id: <id>)',
+            ],
+        ];
+    }
+}
+```
+
+The refusal then reads:
+
+> Field "netzhirschPageState" on tl_page is a reference into
+> tl_netzhirsch_page_state, not a plain value. … **Use `pagestate_assign(page_id:
+> <id>, state_id: <id>)` instead. To read the current value:
+> `pagestate_of_page(page_id: <id>)`.**
+
+Notes:
+
+- **Write out the CALL, not the bare name.** The caller reading this is about to
+  make one; `<id>` placeholders read as intended.
+- **Both keys are optional.** Declare `write` alone and it answers in both
+  directions — "use this to set it" is a usable answer to "why can I not read
+  it".
+- **Presentation only.** Declaring an owner grants nothing, widens nothing, and
+  does not make the column writable through the generic path. It decides what
+  the error message says, nothing else.
+- **Core wins.** You cannot claim a column a core tool already owns and redirect
+  callers to yourself.
+- Keys must be `tl_<table>.<field>`; anything else is ignored silently, so check
+  your spelling once.
+
+Related: `contao_search_tools` splits identifiers into words (camelCase, `_`,
+`-`), so `netzhirschPageState` and `tl_netzhirsch_page_state` already find your
+tools **by name** without you doing anything. Synonyms in your tool
+*descriptions* (Status, Zustand, Workflow, …) are additional, not instead.
+
+### Group heading in the backend panel
+
+The panel derives its box heading from the tool-name prefix. A vendor-prefixed
+name like `netzhirsch_pagestate_assign` would otherwise produce a box called
+`netzhirsch_pagestate`. `Server\ToolGroups` maps known vendor prefixes to a
+readable group instead, so you can follow the namespacing rule below without
+paying for it in the UI. If your prefix is not mapped, ask — it is one line.
+
 ### What the bundle does NOT do for you
 
 - It does not validate your tool's input. MCP arguments arrive as

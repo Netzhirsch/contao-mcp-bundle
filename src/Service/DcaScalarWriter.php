@@ -59,6 +59,7 @@ final class DcaScalarWriter
         string $field,
         mixed $value,
         bool $detectChanges = true,
+        array $fieldOwners = [],
     ): bool {
         $shape = self::shapeOf($table, $field);
 
@@ -85,7 +86,7 @@ final class DcaScalarWriter
             ));
         }
 
-        self::assertValueIsAllowed($table, $field, (string) $value);
+        self::assertValueIsAllowed($fieldOwners, $table, $field, (string) $value);
 
         $new = match ($shape) {
             'boolean' => $value ? 1 : 0,
@@ -129,7 +130,7 @@ final class DcaScalarWriter
      *
      * @throws \InvalidArgumentException
      */
-    private static function assertValueIsAllowed(string $table, string $field, string $value): void
+    private static function assertValueIsAllowed(array $fieldOwners, string $table, string $field, string $value): void
     {
         $definition = $GLOBALS['TL_DCA'][$table]['fields'][$field] ?? [];
 
@@ -142,19 +143,34 @@ final class DcaScalarWriter
         $target = $foreignKey !== '' ? explode('.', $foreignKey)[0] : '';
 
         if ($target !== '' || isset($definition['relation'])) {
+            $owner = FieldOwner::ownerFor($table, $field, $fieldOwners, 'write');
+            $reader = FieldOwner::ownerFor($table, $field, $fieldOwners, 'read');
+
+            // Naming the call beats naming a search: the owning bundle knows
+            // its own tool and can declare it, and then the refusal is one step
+            // from the fix instead of two. Both directions where both are
+            // declared — a caller who cannot write a value usually wants to see
+            // the current one first, and that round trip is the whole point.
+            $wayOut = $owner !== null
+                ? sprintf('Use %s instead.', $owner)
+                    .($reader !== null && $reader !== $owner ? sprintf(' To read the current value: %s.', $reader) : '')
+                : sprintf(
+                    'Look for that tool with contao_search_tools("%s") — for example a *_assign or '
+                    .'*_list pair — and use it instead.',
+                    // The search is word-based, so hand over the words rather
+                    // than the identifier: "netzhirsch page state" finds
+                    // pagestate_assign, "netzhirschPageState" finds nothing.
+                    NameTokens::phrase($target !== '' ? $target : $field),
+                );
+
             throw new \InvalidArgumentException(sprintf(
                 'Field "%s" on %s is a reference%s, not a plain value. Writing it here would '
                 .'store whatever it is given, including an id that points at nothing, and would '
-                .'skip the tool that owns this relation (which also records the change). '
-                .'Look for that tool with contao_search_tools("%s") — for example a *_assign or '
-                .'*_list pair — and use it instead.',
+                .'skip the tool that owns this relation (which also records the change). %s',
                 $field,
                 $table,
                 $target !== '' ? sprintf(' into %s', $target) : '',
-                // The search is word-based, so hand over the words rather than
-                // the identifier: "netzhirsch page state" finds pagestate_assign,
-                // "netzhirschPageState" finds nothing.
-                NameTokens::phrase($target !== '' ? $target : $field),
+                $wayOut,
             ));
         }
 

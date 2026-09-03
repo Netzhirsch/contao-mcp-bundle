@@ -27,27 +27,36 @@ final class ToolGroups
     {
         $name = mb_strtolower($toolName);
 
-        // Hardcoded multi-word prefixes (sort longest first).
+        // Multi-word prefixes → group (sort longest first). The group is the
+        // prefix without its trailing underscore unless stated otherwise; the
+        // exceptions are vendor-namespaced tools, where the vendor segment
+        // carries no meaning for a panel heading.
         static $prefixes = [
-            'news_archive_', 'news_archives_',
-            'calendar_events_', 'calendar_event_',
-            'faq_categories_', 'faq_category_',
-            'image_size_items_', 'image_size_item_',
-            'image_sizes_', 'image_size_',
-            'url_rewrites_', 'url_rewrite_',
-            'user_groups_',
-            'member_groups_',
-            'content_types_', 'content_palette_',
-            'module_types_', 'module_palette_',
-            'template_overrides_',
-            'pages_tree',
-            'folder_',
-            'html_filter_',
+            'news_archive_' => null, 'news_archives_' => null,
+            'calendar_events_' => null, 'calendar_event_' => null,
+            'faq_categories_' => null, 'faq_category_' => null,
+            'image_size_items_' => null, 'image_size_item_' => null,
+            'image_sizes_' => null, 'image_size_' => null,
+            'url_rewrites_' => null, 'url_rewrite_' => null,
+            'user_groups_' => null,
+            'member_groups_' => null,
+            'content_types_' => null, 'content_palette_' => null,
+            'module_types_' => null, 'module_palette_' => null,
+            'template_overrides_' => null,
+            'pages_tree' => null,
+            'folder_' => null,
+            'html_filter_' => null,
+            // Vendor-namespaced extension tools. The house convention wants the
+            // vendor prefix on the tool name; a panel box called
+            // "netzhirsch_pagestate" would be the price, and it is not one
+            // worth paying — so the group drops the vendor segment and the
+            // heading stays what operators recognise.
+            'netzhirsch_pagestate_' => 'pagestate',
         ];
 
-        foreach ($prefixes as $prefix) {
+        foreach ($prefixes as $prefix => $group) {
             if (str_starts_with($name, $prefix)) {
-                return rtrim($prefix, '_');
+                return $group ?? rtrim($prefix, '_');
             }
         }
 
