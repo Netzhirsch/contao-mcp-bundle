@@ -31,9 +31,32 @@ final class Tool
      * Tables that may be duplicated. Their child trees cascade automatically
      * via DCA `ctable`, so listing the roots is enough.
      *
+     * The list started at three, which made the tool useless for exactly the
+     * rows that hurt most to rebuild by hand: a `tl_module` row has around 250
+     * columns and `module_create` wants each one. Copying is DCA-driven
+     * throughout — ctable cascade, doNotCopy, alias regeneration — so a narrow
+     * list was the arbitrary part, not a safety property.
+     *
+     * What is deliberately NOT here: tl_user and tl_member. Contao offers a
+     * copy button for both, but it lands you in the edit mask to resolve the
+     * unique username/e-mail before anything is saved. This tool writes
+     * straight to the database, and a half-formed identity row is not
+     * something to hand back as `duplicated: true`.
+     *
      * @var list<string>
      */
-    private const ALLOWED = ['tl_page', 'tl_article', 'tl_content'];
+    private const ALLOWED = [
+        // Page tree and its contents
+        'tl_page', 'tl_article', 'tl_content',
+        // Theme building blocks
+        'tl_module', 'tl_layout',
+        // Archives / categories and their entries
+        'tl_news_archive', 'tl_news',
+        'tl_calendar', 'tl_calendar_events',
+        'tl_faq_category', 'tl_faq',
+        // Forms
+        'tl_form', 'tl_form_field',
+    ];
 
     public function __construct(
         private readonly ContaoFramework $framework,
@@ -54,21 +77,40 @@ final class Tool
         name: 'entity_duplicate',
         description: <<<'DESC'
             Duplicates a Contao record with its child tree — the MCP equivalent of the
-            backend "copy" button. Supported tables: tl_page, tl_article, tl_content.
+            backend "copy" button. Use it instead of retyping a record into a *_create
+            call: a tl_module row has ~250 columns and the copy carries all of them.
+
+            Supported tables:
+              tl_page, tl_article, tl_content,
+              tl_module, tl_layout,
+              tl_news_archive, tl_news,
+              tl_calendar, tl_calendar_events,
+              tl_faq_category, tl_faq,
+              tl_form, tl_form_field
 
             What cascades automatically (DCA ctable, always):
-              - tl_article  → its content elements (incl. nested elements)
-              - tl_content  → nested children of container elements
-                              (accordion / element_group / swiper)
-              - tl_page     → its articles (and their content)
+              - tl_article           → its content elements (incl. nested elements)
+              - tl_content           → nested children of container elements
+                                       (accordion / element_group / swiper)
+              - tl_page              → its articles (and their content)
+              - tl_news / tl_calendar_events → their content elements
+              - tl_news_archive / tl_calendar / tl_faq_category → EVERY entry in them
+                                       (and each entry's content) — copying an archive to
+                                       seed a second language copies all of it; `copied`
+                                       reports the total, so check it before assuming.
+              - tl_form              → its form fields
 
             Parameters:
-              - table:         tl_page | tl_article | tl_content
+              - table:         one of the tables above
               - id:            source record id
               - into_pid:      optional new parent id (default: same parent as the source,
-                               i.e. duplicate in place). For tl_content this is the parent
-                               article/element id; for tl_article the page id; for tl_page
-                               the parent page id (0 = root level).
+                               i.e. duplicate in place). What "parent" means per table:
+                               tl_page → parent page (0 = root level), tl_article → page,
+                               tl_content → parent article/element, tl_module + tl_layout
+                               → theme, tl_news → archive, tl_calendar_events → calendar,
+                               tl_faq → category, tl_form_field → form. The archive,
+                               calendar, category and form tables have no parent — leave
+                               into_pid unset for those.
               - into_ptable:   optional parent table for tl_content (default: keep source's
                                ptable, e.g. tl_article or tl_content for nested).
               - with_children: tl_page only — also copy the whole sub-page tree (default false).
@@ -79,9 +121,14 @@ final class Tool
                                is copied.
 
             Conventions mirrored from Contao's own copy:
-              - doNotCopy fields (alias, …) are NOT carried over — Contao regenerates them.
+              - doNotCopy fields are NOT carried over. They are refilled from the DCA
+                `default` where there is one, so a copied news entry is dated today
+                rather than 1970, and the alias is regenerated from the record's own
+                title field (headline for news, question for FAQs).
               - the author is set to the calling identity, as Contao's copy button does
                 (the source's author is a doNotCopy field and is not inherited).
+              - a name/title is NOT made unique — the copy carries the source's. Pass
+                `overrides` to name it, exactly as the backend expects you to.
               - external-id mappings (external_id_namespace/key) are reset on every copy.
               - the copy is appended after the last sibling (fresh sorting).
               - a duplicated ROOT page gets its fallback + dns cleared (uniqueness) — set

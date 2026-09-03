@@ -456,6 +456,36 @@ deshalb das `published: false`: sonst steht der noch unübersetzte Quelltext fü
 die Dauer der Übersetzung öffentlich im Netz. Der zurückgegebene `tree` ist die
 komplette Quell→Ziel-ID-Karte, die man in Schritt 2 ohnehin braucht.
 
+Dasselbe gilt außerhalb des Seitenbaums. `entity_duplicate` deckt ab:
+
+```
+tl_page, tl_article, tl_content,
+tl_module, tl_layout,
+tl_news_archive, tl_news,
+tl_calendar, tl_calendar_events,
+tl_faq_category, tl_faq,
+tl_form, tl_form_field
+```
+
+Das ist der Weg für alles, was man sonst Spalte für Spalte in ein
+`*_create` tippen müsste — eine `tl_module`-Zeile hat je nach Erweiterungen
+114 bis über 250 Spalten. Eine **Sammlung** zu kopieren nimmt über die
+`ctable`-Kaskade alle Einträge mit: `entity_duplicate(table:
+"tl_news_archive", id: 1)` legt das Archiv samt seiner 95 Meldungen und deren
+Inhaltselementen an. Für einen Sprach-Rollout ist genau das der Sinn, aber
+`copied` nennt die Gesamtzahl — vorher einkalkulieren.
+
+Kopiert wird wie beim Kopieren-Knopf im Backend: `doNotCopy`-Felder werden nicht
+übernommen, sondern aus dem DCA-`default` gefüllt (eine kopierte Meldung ist
+deshalb heute datiert, nicht 1970), der Alias wird aus dem richtigen Feld neu
+erzeugt (`headline` bei News, `question` bei FAQs) und folgt einem `overrides`,
+das die Kopie umbenennt. Name und Titel macht das Werkzeug **nicht** eindeutig —
+dafür ist `overrides` da.
+
+`tl_user` und `tl_member` sind bewusst nicht dabei: Contaos Kopieren-Knopf
+landet dort in der Bearbeitungsmaske, damit ein Mensch Benutzername und E-Mail
+eindeutig macht, bevor gespeichert wird.
+
 #### Beide Hälften einer Übersetzungsbeziehung
 
 `terminal42/contao-changelanguage` hinterlegt eine Übersetzung an **zwei**
