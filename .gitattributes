@@ -21,3 +21,10 @@
 /.gitattributes  export-ignore
 /.gitignore      export-ignore
 /.github/        export-ignore
+
+# Internal briefings for OTHER Netzhirsch systems. They name customer
+# instances and describe those systems' gaps, so they have no business in an
+# archive that every customer downloads. (docs/ otherwise ships on purpose —
+# installation.md and friends are for the people installing this.)
+/docs/briefings    export-ignore
+/docs/briefings/** export-ignore
