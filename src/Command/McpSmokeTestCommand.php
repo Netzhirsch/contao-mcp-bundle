@@ -577,50 +577,54 @@ final class McpSmokeTestCommand extends Command
             $clearResult,
             static fn ($r) => \in_array($r['rebuild'] ?? null, ['lazy', 'next_warmup'], true));
 
-        // The whole point: Contao rebuilds on the next access. If this failed,
-        // the tool would be a way to take a site down until someone ran
-        // cache:warmup, so it is asserted rather than trusted.
+        // Now the property that makes clearing safe: a table still loads with
+        // its cache gone.
         //
-        // DcaLoader remembers per process which tables it has loaded and
-        // returns early for those, so the memo has to go first. `reset()`
-        // arrived after 5.3; the property behind it did not, hence the
-        // fallback rather than a version check.
-        $dcaMemoCleared = false;
+        // It has to be a table this process has NOT loaded yet. Resetting
+        // DcaLoader's memo and re-loading tl_page looked like the obvious
+        // probe and is in fact impossible on Contao 5.3: there a cache miss
+        // includes the RAW dca/tl_page.php, which declares `class tl_page` at
+        // the bottom, so the second include is a fatal redeclaration. 5.7
+        // avoids it by dumping a namespaced file. Production never hits this —
+        // the memo means a table is included once per process either way — but
+        // the probe did, and a test that has to fake an impossible state is
+        // testing the wrong thing.
+        // Which tables exist differs by version — tl_style_sheet is gone in
+        // Contao 5 — so the candidate comes from what this installation
+        // actually ships rather than from a list I guessed.
+        $candidates = [];
 
-        if (method_exists(\Contao\DcaLoader::class, 'reset')) {
-            \Contao\DcaLoader::reset();
-            $dcaMemoCleared = true;
-        } else {
-            try {
-                $memo = new \ReflectionProperty(\Contao\DcaLoader::class, 'arrLoaded');
-                $memo->setAccessible(true);
-                $memo->setValue(null, []);
-                $dcaMemoCleared = true;
-            } catch (\Throwable) {
-                // leave it false — reported below rather than silently skipped
+        foreach (\Contao\System::getContainer()->get('contao.resource_finder')->findIn('dca')->name('*.php') as $dcaFile) {
+            $table = $dcaFile->getBasename('.php');
+            if (!isset($GLOBALS['TL_DCA'][$table])) {
+                $candidates[$table] = true;
             }
         }
 
-        if ($dcaMemoCleared) {
-            unset($GLOBALS['TL_DCA']['tl_page']);
-            \Contao\Controller::loadDataContainer('tl_page');
+        $unloaded = null;
 
-            // The property that makes clearing safe on EVERY version: the DCA
-            // still loads from the sources with the cache gone. Whether the
-            // file comes back is the version-dependent extra, and the answer
-            // has to match what the tool told the caller — a tool that says
-            // "lazy" on a version that does not rebuild would send an operator
-            // away without running cache:warmup.
-            $expect('the DCA still loads with the cache gone — this is what makes clearing safe',
-                $GLOBALS['TL_DCA']['tl_page']['config']['dataContainer'] ?? null,
-                static fn ($v) => $v !== null);
+        foreach (array_keys($candidates) as $candidate) {
+            \Contao\Controller::loadDataContainer($candidate);
+            if (\is_array($GLOBALS['TL_DCA'][$candidate]['config'] ?? null) && $GLOBALS['TL_DCA'][$candidate]['config'] !== []) {
+                $unloaded = $candidate;
+                break;
+            }
+        }
 
+        if ($unloaded !== null) {
+            $expect(sprintf('%s still loads with the cache gone — this is what makes clearing safe', $unloaded),
+                $GLOBALS['TL_DCA'][$unloaded]['config'] ?? null,
+                static fn ($v) => \is_array($v) && $v !== []);
+
+            // And the version-dependent half has to match what the tool told
+            // the caller: saying "lazy" on a version that does not rewrite
+            // would send an operator away without running cache:warmup.
             $rebuild = (string) ($clearResult['rebuild'] ?? '');
             $expect(sprintf('and `rebuild: %s` matches what actually happened', $rebuild),
                 [$rebuild, $dcaFileCount()],
                 static fn (array $r) => 'lazy' === $r[0] ? $r[1] > 0 : $r[1] === 0);
         } else {
-            $output->writeln('  <comment>~ Lazy-Rebuild nicht geprüft — DcaLoader-Memo auf dieser Contao-Version nicht zurücksetzbar</comment>');
+            $output->writeln('  <comment>~ Lazy-Rebuild nicht geprüft — keine ungeladene DCA-Tabelle als Sonde übrig</comment>');
         }
 
         $expect('an installation with nothing cached is not reported as an error',

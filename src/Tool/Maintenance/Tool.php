@@ -523,6 +523,13 @@ final class Tool
      * request pays for reading the sources in the meantime. See
      * {@see self::rebuildsLazily()}.
      *
+     * A 5.3 detail worth knowing: its miss path includes the RAW dca file,
+     * which declares `class tl_<table>` at the bottom. That is safe because
+     * DcaLoader remembers per process which tables it has loaded, so nothing
+     * is ever included twice — but it does mean a table already loaded in this
+     * request keeps the definition it has, cache or no cache. The clear takes
+     * effect from the next request, which is what an operator expects anyway.
+     *
      * @var array<string, string>
      */
     private const DCA_CACHE_SCOPES = [
