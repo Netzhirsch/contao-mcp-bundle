@@ -49,6 +49,23 @@ final class McpPermissionGuard
     private ?array $accessiblePages = null;
 
     /**
+     * File operation → the Contao fop right it needs. Reading has no fop right
+     * of its own in Contao: seeing a folder you have mounted is the mount.
+     *
+     * @var array<string, string>
+     */
+    private const FOP_PERMISSIONS = [
+        // 'read' is deliberately absent: it needs the mount, nothing more.
+        'upload' => ContaoCorePermissions::USER_CAN_UPLOAD_FILES,
+        'rename' => ContaoCorePermissions::USER_CAN_RENAME_FILE,
+        'move' => ContaoCorePermissions::USER_CAN_RENAME_FILE,
+        'delete' => ContaoCorePermissions::USER_CAN_DELETE_FILE,
+        'delete_recursive' => ContaoCorePermissions::USER_CAN_DELETE_RECURSIVELY,
+        'edit' => ContaoCorePermissions::USER_CAN_EDIT_FILE,
+        'sync' => ContaoCorePermissions::USER_CAN_SYNC_DBAFS,
+    ];
+
+    /**
      * Tables that have a Contao record-level READ voter which scopes list
      * access (archive/calendar/channel/parent membership). Only these are
      * filtered by {@see filterReadable()} — a table WITHOUT such a voter would
@@ -167,6 +184,49 @@ final class McpPermissionGuard
                     'not_found',
                     sprintf('No record with id %d found in %s.', $id, $table),
                     ['table' => $table, 'id' => $id],
+                );
+            }
+        }
+
+        // Pagemount, centrally.
+        //
+        // Contao's tl_page / tl_article voter checks the page TYPE, not whether
+        // the record sits under one of the user's mounts — the bundle documents
+        // that above and the list/tree tools compensate by hand. The
+        // single-record tools did not, so page_get/_update/_delete and
+        // article_get/_update/_delete asked a mount-blind voter and were told
+        // "allow": a restricted editor could walk the whole instance by id, and
+        // in an agency install that crosses customers. Found by audit.
+        //
+        // It belongs here rather than in each tool: six call sites were missing
+        // it, and the next tool would have been the seventh.
+        if (\in_array($table, ['tl_page', 'tl_article'], true)) {
+            $mountRow = $record;
+
+            // On create there is no record yet — the mount that matters is the
+            // one the new row would land in. The enforcer hands over the
+            // ARGUMENT names, so an article arrives with `page_id` where the
+            // column is `pid`.
+            if ($mountRow === null && $operation === 'create' && \is_array($newData)) {
+                $mountRow = $table === 'tl_article'
+                    ? ['pid' => (int) ($newData['pid'] ?? $newData['page_id'] ?? 0)]
+                    : ['id' => (int) ($newData['id'] ?? 0), 'pid' => (int) ($newData['pid'] ?? $newData['parent_id'] ?? 0)];
+
+                // A new PAGE is keyed by its own id, which does not exist yet;
+                // the mount that governs it is the parent's.
+                if ($table === 'tl_page') {
+                    $mountRow = ['id' => $mountRow['pid']];
+                    if ($mountRow['id'] === 0) {
+                        $mountRow = null; // new root page — the voter decides
+                    }
+                }
+            }
+
+            if ($mountRow !== null && !$this->mayAccessRecord($table, $mountRow)) {
+                return $this->deny(
+                    'permission_denied',
+                    sprintf('This record in %s is outside your page mounts.', $table),
+                    ['table' => $table, 'operation' => $operation, 'id' => $id],
                 );
             }
         }
@@ -352,6 +412,76 @@ final class McpPermissionGuard
         // No record-level ACL in Contao (e.g. tl_url_rewrite): the module gate
         // is the only backend restriction and runs at call time.
         return true;
+    }
+
+    /**
+     * The two backend gates on the file manager that `module: files` does not
+     * cover: WHERE a user may work (filemounts) and WHAT they may do there
+     * (the fop rights f1–f6).
+     *
+     * `tl_files` is not a DataContainer table in the voter sense, so no record
+     * voter runs for it and the module gate was the whole check. A user
+     * confined to `files/kundeA/` could read, overwrite and delete anything
+     * under `files/` — in an agency install that is another customer's
+     * contracts. Found by audit.
+     *
+     * Contao already answers both questions; this only asks them. Paths are
+     * DBAFS-shaped (`files/…`), which is what USER_CAN_ACCESS_PATH compares
+     * against.
+     *
+     * @param list<string> $paths every path the operation touches — for a move
+     *                            or rename that is the source AND the target,
+     *                            because landing a file somewhere you may not
+     *                            write is the same problem in reverse
+     *
+     * @return array{error: string, message: string}|null
+     */
+    public function ensureFileAccess(array $paths, string $operation): ?array
+    {
+        $userId = $this->callContext->getUserId();
+        if ($userId === null || $userId <= 0) {
+            return null; // trusted mode
+        }
+        if ($this->userContext->isAdmin($userId)) {
+            return null;
+        }
+
+        $moduleDenial = $this->ensureModule('files');
+        if ($moduleDenial !== null) {
+            return $moduleDenial;
+        }
+
+        $token = $this->userContext->tokenFor($userId);
+        if ($token === null) {
+            return $this->deny('permission_denied', 'Your backend user could not be resolved.', ['user_id' => $userId]);
+        }
+
+        foreach ($paths as $path) {
+            $path = ltrim(str_replace('\\', '/', $path), '/');
+            if ($path === '') {
+                continue; // the upload root itself — the mount check below covers its children
+            }
+
+            if (!$this->accessDecisionManager->decide($token, [ContaoCorePermissions::USER_CAN_ACCESS_PATH], [$path])) {
+                return $this->deny(
+                    'permission_denied',
+                    sprintf('"%s" is outside your file mounts.', $path),
+                    ['path' => $path],
+                );
+            }
+        }
+
+        $required = self::FOP_PERMISSIONS[$operation] ?? null;
+
+        if ($required !== null && !$this->accessDecisionManager->decide($token, [$required])) {
+            return $this->deny(
+                'permission_denied',
+                sprintf('You do not have the "%s" file-operation right.', $operation),
+                ['operation' => $operation],
+            );
+        }
+
+        return null;
     }
 
     /**

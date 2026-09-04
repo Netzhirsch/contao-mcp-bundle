@@ -6,6 +6,58 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.20.0] – 2026-09-04
+
+> **Sicherheitsrelease.** Zweite Charge aus dem Audit vom 04.09.2026: die
+> Zugriffsgrenzen eines eingeschränkten Backend-Benutzers. Keine
+> Schemaänderung, keine Migration. **Update empfohlen, besonders für
+> Agentur-Installationen mit mehreren getrennten Kundenbereichen.**
+
+### Security
+- **Einzelsatz-Werkzeuge für `tl_page`/`tl_article` haben die Pagemount nicht
+  geprüft.** Contaos Voter für diese beiden Tabellen prüft den *Seitentyp*,
+  nicht die Mount-Zugehörigkeit — das Bundle dokumentiert das selbst, und die
+  Listen-, Baum- und Sprachlink-Werkzeuge gleichen es von Hand aus.
+  `page_get`/`_update`/`_delete` und `article_get`/`_update`/`_delete` taten
+  das nicht: Sie fragten einen mount-blinden Voter und bekamen „erlaubt". Ein
+  Redakteur mit Mount auf einen Teilbaum konnte per ID-Durchlauf jede Seite der
+  Instanz lesen und ändern; in einer Agentur-Installation über Kundengrenzen
+  hinweg.
+
+  Die Prüfung sitzt jetzt **zentral in `McpPermissionGuard::ensureCan()`**, nicht
+  in den sechs Werkzeugen: Sechs Aufrufstellen haben sie vergessen, und das
+  nächste Werkzeug wäre die siebte gewesen. Beim Anlegen gilt der Mount des
+  Elternteils — und dabei kommt `article_create` mit dem Argumentnamen
+  `page_id` an, wo die Spalte `pid` heißt.
+
+- **Die Datei-Werkzeuge haben Filemounts und `fop`-Rechte übergangen.** Alle elf
+  waren nur als `module: files` eingestuft. `tl_files` ist keine
+  DataContainer-Tabelle, es läuft also kein Voter — womit zwei
+  Backend-Schranken fehlten: **wo** jemand arbeiten darf (Filemounts) und
+  **was** er dort darf (die Rechte f1–f6). Ein auf `files/kundeA/`
+  beschränkter Redakteur konnte `files/kundeB/vertraege/preisliste.pdf` lesen,
+  überschreiben und löschen.
+
+  Beides beantwortet Contao längst selbst — es wurde nur nie gefragt. Neu ist
+  eine Einstufung `kind: file`, die die Operation trägt; die berührten Pfade
+  kommen aus dem Aufruf. Bei `file_move` werden **beide** Enden geprüft: Eine
+  Datei dorthin zu legen, wo man nicht schreiben darf, ist dasselbe Problem
+  rückwärts.
+
+  In `tools/list` bleibt die Sichtbarkeit auf Modulebene wie bisher — sonst
+  wären die Datei-Werkzeuge für Nicht-Admins ganz verschwunden, statt
+  eingegrenzt zu sein.
+
+- **`folder_set_public` ist ausdrücklich admin-only.** Es war es schon, aber
+  nur, weil es aus der Einstufungstabelle gefallen war. Was der Webserver
+  ausliefert, sollte nicht von einem Versehen abhängen (Audit F24).
+
+### Notes
+- Beide Befunde wurden am Code verifiziert, nicht nur übernommen. Was noch
+  aussteht: F08 (Meta-Werkzeuge auf Admin), F16 (`external_ids_list` scopen),
+  F06 (Batch deckeln), F10 (Refresh-Reuse-Detection), F12
+  (Provenance-Marker), danach die Härtungspunkte.
+
 ## [1.19.0] – 2026-09-04
 
 > **Sicherheitsrelease.** Erste Charge aus dem Audit vom 04.09.2026: die beiden

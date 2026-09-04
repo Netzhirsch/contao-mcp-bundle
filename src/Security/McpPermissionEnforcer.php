@@ -48,6 +48,16 @@ final class McpPermissionEnforcer
                 \sprintf('The tool "%s" requires administrator rights.', $tool),
             ),
             'module' => $this->guard->ensureModule((string) $req['module']),
+            // tl_files has no DataContainer voter, so the file manager needs
+            // its own gate: the module, plus the filemounts and the fop right
+            // the backend would apply.
+            'file' => $this->guard->ensureFileAccess(
+                array_values(array_filter(
+                    (array) ($req['paths'] ?? []),
+                    static fn ($p): bool => \is_string($p),
+                )),
+                (string) $req['op'],
+            ),
             'dc' => $this->guard->ensureCan(
                 (string) $req['table'],
                 (string) $req['op'],
@@ -78,6 +88,11 @@ final class McpPermissionEnforcer
             'none', 'proxy' => true,
             'admin' => $this->guard->isAdminOrTrusted(),
             'module' => $this->guard->ensureModule((string) $req['module']) === null,
+            // Same coarse level as before this became its own kind: at list
+            // time there is no path to check, so the module decides. Falling
+            // through to the admin default here would have hidden the file
+            // tools from every non-admin instead of scoping them.
+            'file' => $this->guard->ensureModule('files') === null,
             'dc' => $this->guard->canAccessTableModule((string) $req['table']),
             default => $this->guard->isAdminOrTrusted(),
         };
