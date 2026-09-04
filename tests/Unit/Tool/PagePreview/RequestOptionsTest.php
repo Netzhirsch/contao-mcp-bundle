@@ -28,8 +28,50 @@ final class RequestOptionsTest extends TestCase
 
         self::assertArrayNotHasKey('auth_basic', $options);
         self::assertSame(10, $options['timeout']);
-        self::assertSame(5, $options['max_redirects']);
         self::assertSame('Contao-MCP-Bundle/page_preview', $options['headers']['User-Agent']);
+    }
+
+    /**
+     * The client must not follow redirects on its own. The target URL comes out
+     * of the page tree, and a `redirect` page's `url` is caller-controlled — an
+     * editor pointing one at 169.254.169.254 and reading the body back was the
+     * finding. fetch() follows hops by hand so each one is vetted first.
+     */
+    public function testTheClientNeverFollowsARedirectItself(): void
+    {
+        self::assertSame(0, Tool::requestOptions(null)['max_redirects']);
+        self::assertSame(0, Tool::requestOptions('user:pass')['max_redirects']);
+    }
+
+    public function testResolvesARedirectTargetAgainstThePageItCameFrom(): void
+    {
+        self::assertSame(
+            'https://example.com/en/news.html',
+            Tool::absoluteLocation('https://example.com/de/nachrichten.html', '/en/news.html'),
+        );
+        self::assertSame(
+            'https://example.com/de/sub/page.html',
+            Tool::absoluteLocation('https://example.com/de/index.html', 'sub/page.html'),
+        );
+        self::assertSame(
+            'https://other.example/x',
+            Tool::absoluteLocation('https://example.com/', 'https://other.example/x'),
+        );
+        self::assertSame(
+            'https://cdn.example/x',
+            Tool::absoluteLocation('https://example.com/', '//cdn.example/x'),
+        );
+    }
+
+    /**
+     * A Location that is not http(s) is a dead end, not something to hand on to
+     * the next hop.
+     */
+    public function testRefusesANonHttpRedirectTarget(): void
+    {
+        self::assertNull(Tool::absoluteLocation('https://example.com/', 'file:///etc/passwd'));
+        self::assertNull(Tool::absoluteLocation('https://example.com/', 'gopher://x/'));
+        self::assertNull(Tool::absoluteLocation('https://example.com/', '   '));
     }
 
     /**

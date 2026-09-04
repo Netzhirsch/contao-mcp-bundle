@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\PagePreview;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Routing\ContentUrlGenerator;
 use Contao\PageModel;
+use Netzhirsch\ContaoMcpBundle\Security\OutboundUrlGuard;
 use PhpMcp\Server\Attributes\McpTool;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -19,10 +20,17 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  */
 final class Tool
 {
+    /**
+     * Hops followed by hand. Five was the client's own default; the number is
+     * not the security property — vetting each hop is.
+     */
+    private const MAX_REDIRECTS = 5;
+
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly ContentUrlGenerator $contentUrlGenerator,
         private readonly HttpClientInterface $httpClient,
+        private readonly OutboundUrlGuard $outboundGuard,
         /**
          * "user:pass" when the site sits behind HTTP basic auth (staging
          * protection on the webserver). Null keeps the request exactly as it
@@ -30,6 +38,52 @@ final class Tool
          */
         private readonly ?string $previewBasicAuth = null,
     ) {
+    }
+
+    /**
+     * Resolve a `Location` header against the URL it was served from.
+     *
+     * Returns null when the result is not an absolute http(s) URL — a
+     * `Location: file:///etc/passwd` or a mangled header is a dead end here,
+     * not something to hand onward.
+     */
+    public static function absoluteLocation(string $base, string $location): ?string
+    {
+        $location = trim($location);
+
+        if ($location === '') {
+            return null;
+        }
+
+        // Already absolute?
+        if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $location) === 1) {
+            $scheme = strtolower((string) (parse_url($location, \PHP_URL_SCHEME) ?: ''));
+
+            return \in_array($scheme, ['http', 'https'], true) ? $location : null;
+        }
+
+        $parts = parse_url($base);
+        $scheme = $parts['scheme'] ?? null;
+        $host = $parts['host'] ?? null;
+
+        if ($scheme === null || $host === null) {
+            return null;
+        }
+
+        $authority = $scheme.'://'.$host.(isset($parts['port']) ? ':'.$parts['port'] : '');
+
+        if (str_starts_with($location, '//')) {
+            return $scheme.':'.$location;
+        }
+
+        if (str_starts_with($location, '/')) {
+            return $authority.$location;
+        }
+
+        $path = (string) ($parts['path'] ?? '/');
+        $dir = substr($path, 0, strrpos($path, '/') ?: 0);
+
+        return $authority.$dir.'/'.$location;
     }
 
     /**
@@ -43,7 +97,12 @@ final class Tool
     {
         $options = [
             'timeout' => 10,
-            'max_redirects' => 5,
+            // Redirects are followed by hand in fetch(), one hop at a time,
+            // because each hop is a new destination and has to be vetted like
+            // the first. Letting the client follow them meant an editor could
+            // point a `redirect` page at 169.254.169.254 and read the body of
+            // whatever answered — the page tree is caller-controlled content.
+            'max_redirects' => 0,
             'headers' => ['User-Agent' => 'Contao-MCP-Bundle/page_preview'],
         ];
 
@@ -153,11 +212,51 @@ final class Tool
         }
         $url = (string) $urlResult['url'];
 
+        $hops = 0;
+
         try {
-            $response = $this->httpClient->request('GET', $url, self::requestOptions($this->previewBasicAuth));
-            $status = $response->getStatusCode();
-            $contentType = $response->getHeaders(false)['content-type'][0] ?? '';
-            $body = $response->getContent(false);
+            while (true) {
+                [$host, $pinnedIp, $urlError] = $this->outboundGuard->pin($url);
+
+                if ($urlError !== null) {
+                    return $urlError + ['url' => $url, 'hops' => $hops];
+                }
+
+                $response = $this->httpClient->request(
+                    'GET',
+                    $url,
+                    self::requestOptions($this->previewBasicAuth) + ['resolve' => [$host => $pinnedIp]],
+                );
+                $status = $response->getStatusCode();
+                $headers = $response->getHeaders(false);
+                $contentType = $headers['content-type'][0] ?? '';
+
+                $location = $status >= 300 && $status < 400 ? ($headers['location'][0] ?? null) : null;
+
+                if ($location === null) {
+                    $body = $response->getContent(false);
+                    break;
+                }
+
+                if (++$hops > self::MAX_REDIRECTS) {
+                    return [
+                        'error' => 'too_many_redirects',
+                        'message' => sprintf('Gave up after %d redirects.', self::MAX_REDIRECTS),
+                        'url' => $url,
+                    ];
+                }
+
+                // Resolve the hop against the URL it came from, then loop —
+                // which sends it back through pin() before anything connects.
+                $url = self::absoluteLocation($url, (string) $location);
+
+                if ($url === null) {
+                    return [
+                        'error' => 'invalid_redirect',
+                        'message' => sprintf('Could not resolve the Location header "%s".', $location),
+                    ];
+                }
+            }
         } catch (\Throwable $e) {
             return [
                 'error' => 'fetch_failed',
