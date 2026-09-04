@@ -8,6 +8,7 @@ use Contao\Config;
 use Contao\CoreBundle\Filesystem\Dbafs\DbafsManager;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
+use Contao\DcaLoader;
 use Contao\PageModel;
 use Contao\System;
 use Doctrine\DBAL\Connection;
@@ -505,16 +506,22 @@ final class Tool
      * The four buckets Contao keeps under `var/cache/<env>/contao`, and what
      * goes stale in each when a bundle is installed or its DCA changes.
      *
-     * Every one of them is regenerated lazily on the next miss — checked in
-     * Contao 5.7, not assumed, because a cache without a fallback would not be
-     * a cache but a build artefact, and deleting it would take the site down
-     * until someone ran `cache:warmup`:
+     * Every one of them falls back to the sources on a miss, so clearing them
+     * never takes a site down — checked, not assumed, because a cache without a
+     * fallback would not be a cache but a build artefact:
      *
-     *   dca       DcaLoader::loadDcaFiles() re-dumps via CombinedFileDumper
+     *   dca       DcaLoader::loadDcaFiles() includes the source files
      *   sql       DcaExtractor::__construct() falls back to createExtract()
      *   config    Config::preload() / TemplateLoader / Model::getColumnCastTypes()
      *             each fall back to reading the sources
      *   languages System::loadLanguageFile() falls back to the .php/.xlf finder
+     *
+     * Whether the cache is also REWRITTEN on that miss is version-dependent,
+     * which is the part worth knowing before clearing a production site:
+     * Contao 5.7 re-dumps the DCA through CombinedFileDumper, Contao 5.3 does
+     * not — there the files stay gone until the next `cache:warmup`, and every
+     * request pays for reading the sources in the meantime. See
+     * {@see self::rebuildsLazily()}.
      *
      * @var array<string, string>
      */
@@ -544,8 +551,16 @@ final class Tool
               - config     config.php, template map, column cast types
               - languages  compiled labels
 
-            Each bucket regenerates lazily on the next access, so this is safe to
-            run on a live site: the first request after it pays the rebuild.
+            Safe to run on a live site: every bucket falls back to reading the
+            sources, so nothing breaks while the cache is cold.
+
+            Whether the files are also REWRITTEN on that first access depends on
+            the Contao version, and the answer comes back as `rebuild`:
+              - "lazy"        Contao re-dumps them (5.7+). Nothing else to do.
+              - "next_warmup" Contao 5.3 only reads the sources without caching
+                              them again. The site stays correct but pays for it
+                              on every request until `contao-console cache:warmup`
+                              runs. On a busy site, clear during a deploy.
 
             What this does NOT do: clear the compiled Symfony container in
             `var/cache/<env>` itself. A NEW service, listener or tool needs
@@ -665,7 +680,14 @@ final class Tool
             'scopes' => $result,
             'files' => $totalFiles,
             'bytes' => $totalBytes,
+            'rebuild' => self::rebuildsLazily() ? 'lazy' : 'next_warmup',
         ];
+
+        if (!self::rebuildsLazily() && !$dry_run && $totalFiles > 0) {
+            $out['note'] = 'This Contao version reads the sources without caching them again, so every '
+                .'request pays for it until `vendor/bin/contao-console cache:warmup` runs. The site is '
+                .'correct in the meantime — just slower.';
+        }
 
         if ($failed !== []) {
             // Saying "cleared" while files survived is the failure shape this
@@ -682,6 +704,24 @@ final class Tool
         }
 
         return $out;
+    }
+
+    /**
+     * Whether this Contao writes the DCA cache back after a miss.
+     *
+     * Probed by capability rather than by version number on purpose: 5.3 does
+     * not re-dump and 5.7 does, but which release in between drew the line is
+     * not something to guess at in a message an operator will act on.
+     * `DcaLoader::$freshPaths` exists only to support the re-dump path, so its
+     * presence is the capability.
+     *
+     * If a future Contao renames it, this reports "next_warmup" for a version
+     * that would in fact self-heal — an operator running cache:warmup they did
+     * not strictly need. That is the right direction to be wrong in.
+     */
+    private static function rebuildsLazily(): bool
+    {
+        return property_exists(DcaLoader::class, 'freshPaths');
     }
 
     /**

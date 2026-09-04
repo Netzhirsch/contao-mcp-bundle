@@ -30,14 +30,29 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   `dry_run: true` zeigt vorher, was ginge.
 
   **Warum das gefahrlos ist, wurde geprüft, nicht angenommen.** Alle vier
-  Bereiche werden beim nächsten Zugriff lazy neu gebaut — `DcaLoader` schreibt
-  über `CombinedFileDumper` neu, `DcaExtractor` fällt auf `createExtract()`
-  zurück, `Config`/`TemplateLoader`/`Model::getColumnCastTypes()` lesen sonst
-  die Quellen, und `System::loadLanguageFile()` fällt auf den .php/.xlf-Finder
-  zurück. Der Smoke-Test verifiziert genau diese Eigenschaft: leeren, dann
-  `DcaLoader::reset()` und neu laden, und prüfen, dass die Datei wieder da ist.
-  Wäre einer der Bereiche nur über `cache:warmup` zu befüllen, wäre das
-  Werkzeug ein Weg, eine Live-Site abzuschießen.
+  Bereiche fallen bei einem Miss auf die Quellen zurück — `DcaLoader`
+  inkludiert die DCA-Dateien, `DcaExtractor` ruft `createExtract()`,
+  `Config`/`TemplateLoader`/`Model::getColumnCastTypes()` lesen die Quellen,
+  `System::loadLanguageFile()` nutzt den .php/.xlf-Finder. Die Site bleibt also
+  korrekt, auch wenn der Cache kalt ist.
+
+  **Ob der Cache dabei auch neu geschrieben wird, hängt an der
+  Contao-Version** — und das ist der Teil, den man vor dem Leeren einer
+  Produktivinstanz wissen will. Contao 5.7 schreibt die DCA über
+  `CombinedFileDumper` zurück, **Contao 5.3 nicht**: dort bleiben die Dateien
+  weg und jeder Request liest die Quellen, bis `cache:warmup` läuft. Die
+  Antwort sagt es über `rebuild: "lazy"` bzw. `"next_warmup"`, im zweiten Fall
+  mit dem Hinweis auf `cache:warmup`.
+
+  Erkannt wird das über die Fähigkeit, nicht über die Versionsnummer: ich weiß,
+  dass 5.3 es nicht kann und 5.7 schon, aber nicht, welches Release dazwischen
+  die Grenze zieht — und eine geratene Grenze in einer Meldung, nach der jemand
+  handelt, ist schlechter als keine. Fällt die Erkennung künftig falsch aus,
+  dann in Richtung „lieber einmal zu viel `cache:warmup`".
+
+  Der Smoke-Test prüft beide Hälften getrennt: dass die DCA mit leerem Cache
+  überhaupt noch lädt (das ist die Sicherheitsaussage, auf jeder Version), und
+  dass `rebuild` zu dem passt, was tatsächlich passiert ist.
 
   Was es **nicht** tut: den kompilierten Symfony-Container leeren. Ein neuer
   Service, Listener oder Tool braucht weiterhin

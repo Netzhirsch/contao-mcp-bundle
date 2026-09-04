@@ -546,12 +546,20 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
                 && \in_array('dca', $r['available_scopes'] ?? [], true));
 
-        // Warm the DCA cache for one table, so there is something to discard.
-        \Contao\Controller::loadDataContainer('tl_page');
+        // Warming differs by version: 5.7 re-dumps the DCA on a miss, 5.3 only
+        // reads the sources. So the fixture is written the way the warmer would
+        // — otherwise the test asserts the platform, not the tool.
         $dcaCacheDir = \Contao\System::getContainer()->getParameter('kernel.cache_dir').'/contao/dca';
         $dcaFileCount = static fn (): int => is_dir($dcaCacheDir)
             ? \count(glob($dcaCacheDir.'/*.php') ?: [])
             : 0;
+
+        \Contao\Controller::loadDataContainer('tl_page');
+
+        if ($dcaFileCount() === 0) {
+            @mkdir($dcaCacheDir, 0o777, true);
+            file_put_contents($dcaCacheDir.'/tl_smoke_fixture.php', "<?php\n// written by the MCP smoke test\n");
+        }
 
         $expect('the dry run reports files without removing any',
             [$this->maintenanceTool->dcaCacheClear(['dca'], dry_run: true), $dcaFileCount()],
@@ -565,6 +573,9 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => ($r['cleared'] ?? false) === true && ($r['files'] ?? 0) > 0);
         $expect('and the directory is empty afterwards', $dcaFileCount(),
             static fn (int $n) => $n === 0);
+        $expect('the answer says whether Contao will rewrite the cache by itself',
+            $clearResult,
+            static fn ($r) => \in_array($r['rebuild'] ?? null, ['lazy', 'next_warmup'], true));
 
         // The whole point: Contao rebuilds on the next access. If this failed,
         // the tool would be a way to take a site down until someone ran
@@ -593,9 +604,21 @@ final class McpSmokeTestCommand extends Command
         if ($dcaMemoCleared) {
             unset($GLOBALS['TL_DCA']['tl_page']);
             \Contao\Controller::loadDataContainer('tl_page');
-            $expect('a cold DCA cache regenerates on the next access, not on a warmup command',
-                [$dcaFileCount(), $GLOBALS['TL_DCA']['tl_page']['config']['dataContainer'] ?? null],
-                static fn (array $r) => $r[0] > 0 && $r[1] !== null);
+
+            // The property that makes clearing safe on EVERY version: the DCA
+            // still loads from the sources with the cache gone. Whether the
+            // file comes back is the version-dependent extra, and the answer
+            // has to match what the tool told the caller — a tool that says
+            // "lazy" on a version that does not rebuild would send an operator
+            // away without running cache:warmup.
+            $expect('the DCA still loads with the cache gone — this is what makes clearing safe',
+                $GLOBALS['TL_DCA']['tl_page']['config']['dataContainer'] ?? null,
+                static fn ($v) => $v !== null);
+
+            $rebuild = (string) ($clearResult['rebuild'] ?? '');
+            $expect(sprintf('and `rebuild: %s` matches what actually happened', $rebuild),
+                [$rebuild, $dcaFileCount()],
+                static fn (array $r) => 'lazy' === $r[0] ? $r[1] > 0 : $r[1] === 0);
         } else {
             $output->writeln('  <comment>~ Lazy-Rebuild nicht geprüft — DcaLoader-Memo auf dieser Contao-Version nicht zurücksetzbar</comment>');
         }
