@@ -567,12 +567,42 @@ final class McpSmokeTestCommand extends Command
             static fn (int $n) => $n === 0);
 
         // The whole point: Contao rebuilds on the next access. If this failed,
-        // the tool would be a way to take a site down.
-        \Contao\DcaLoader::reset();
-        \Contao\Controller::loadDataContainer('tl_page');
-        $expect('a cold DCA cache regenerates on the next access, not on a warmup command',
-            [$dcaFileCount(), $GLOBALS['TL_DCA']['tl_page']['config']['dataContainer'] ?? null],
-            static fn (array $r) => $r[0] > 0 && $r[1] !== null);
+        // the tool would be a way to take a site down until someone ran
+        // cache:warmup, so it is asserted rather than trusted.
+        //
+        // DcaLoader remembers per process which tables it has loaded and
+        // returns early for those, so the memo has to go first. `reset()`
+        // arrived after 5.3; the property behind it did not, hence the
+        // fallback rather than a version check.
+        $dcaMemoCleared = false;
+
+        if (method_exists(\Contao\DcaLoader::class, 'reset')) {
+            \Contao\DcaLoader::reset();
+            $dcaMemoCleared = true;
+        } else {
+            try {
+                $memo = new \ReflectionProperty(\Contao\DcaLoader::class, 'arrLoaded');
+                $memo->setAccessible(true);
+                $memo->setValue(null, []);
+                $dcaMemoCleared = true;
+            } catch (\Throwable) {
+                // leave it false — reported below rather than silently skipped
+            }
+        }
+
+        if ($dcaMemoCleared) {
+            unset($GLOBALS['TL_DCA']['tl_page']);
+            \Contao\Controller::loadDataContainer('tl_page');
+            $expect('a cold DCA cache regenerates on the next access, not on a warmup command',
+                [$dcaFileCount(), $GLOBALS['TL_DCA']['tl_page']['config']['dataContainer'] ?? null],
+                static fn (array $r) => $r[0] > 0 && $r[1] !== null);
+        } else {
+            $output->writeln('  <comment>~ Lazy-Rebuild nicht geprüft — DcaLoader-Memo auf dieser Contao-Version nicht zurücksetzbar</comment>');
+        }
+
+        $expect('an installation with nothing cached is not reported as an error',
+            $this->maintenanceTool->dcaCacheClear(['languages']),
+            static fn ($r) => !isset($r['error']));
 
         // ═══════════════════════ System (settings + tags) ══════════
         $output->writeln("\n<comment>System extensions</comment>");

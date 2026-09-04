@@ -47,6 +47,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   schreibbar. `server_info` liefert `container.compiled_at`, damit die beiden
   Fälle unterscheidbar bleiben, statt das falsche Mittel zu greifen.
 
+  Ein Verzeichnis, das noch gar nicht existiert — frisch deployte Instanz, die
+  noch keinen Request bedient hat —, ist **kein Fehler**: Die Nachbedingung
+  „nichts Veraltetes im Cache" gilt dann bereits. Und die Prüfung der `scopes`
+  läuft vor der Prüfung des Verzeichnisses, damit ein Tippfehler im Parameter
+  nicht als Aussage über die Maschine zurückkommt.
+
   Dateien, die nicht entfernt werden konnten (unter Windows hält sie meist ein
   anderer Prozess offen), setzen `cleared: false` und werden aufgezählt —
   „geräumt“ zu melden, während etwas übrig blieb, ist genau die Fehlerform, die

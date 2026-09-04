@@ -563,17 +563,10 @@ final class Tool
     )]
     public function dcaCacheClear(?array $scopes = null, bool $dry_run = false): array
     {
-        $cacheDir = (string) $this->parameterBag->get('kernel.cache_dir');
-        $base = realpath($cacheDir.\DIRECTORY_SEPARATOR.'contao');
-
-        if ($base === false) {
-            return [
-                'cleared' => false,
-                'error' => 'not_found',
-                'message' => sprintf('%s/contao does not exist — nothing is cached yet.', $cacheDir),
-            ];
-        }
-
+        // The caller's own input first, the environment second. A typo in
+        // `scopes` is a typo whether or not anything is cached, and answering
+        // "nothing is cached yet" to it hides the typo behind a fact about the
+        // machine.
         $wanted = $scopes ?? array_keys(self::DCA_CACHE_SCOPES);
         $unknown = array_values(array_diff(array_map(strval(...), $wanted), array_keys(self::DCA_CACHE_SCOPES)));
 
@@ -586,6 +579,25 @@ final class Tool
                     implode(', ', array_keys(self::DCA_CACHE_SCOPES)),
                 ),
                 'available_scopes' => array_keys(self::DCA_CACHE_SCOPES),
+            ];
+        }
+
+        $cacheDir = (string) $this->parameterBag->get('kernel.cache_dir');
+        $base = realpath($cacheDir.\DIRECTORY_SEPARATOR.'contao');
+
+        if ($base === false) {
+            // Not an error: the postcondition — "nothing stale is cached" — is
+            // already true. A freshly deployed installation that has not served
+            // a request yet looks exactly like this, and answering `error`
+            // there would send the caller looking for a fault that is not one.
+            return [
+                'cleared' => !$dry_run,
+                'dry_run' => $dry_run,
+                'cache_dir' => $this->stripRootDir($cacheDir.\DIRECTORY_SEPARATOR.'contao'),
+                'scopes' => [],
+                'files' => 0,
+                'bytes' => 0,
+                'note' => 'Nothing was cached — the directory does not exist yet. Contao creates it on the first request that needs a DCA.',
             ];
         }
 
