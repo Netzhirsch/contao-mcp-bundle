@@ -8,6 +8,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\ExternalIdDcaInjector;
+use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use PhpMcp\Server\Attributes\McpTool;
 use Psr\Log\LoggerInterface;
@@ -57,6 +58,7 @@ final class Tool
         private readonly Connection $connection,
         private readonly LoggerInterface $logger,
         private readonly AuthorResolver $authorResolver,
+        private readonly McpPermissionGuard $guard,
     ) {
     }
 
@@ -241,6 +243,15 @@ final class Tool
             return ['found' => false];
         }
 
+        // An id the caller may not open in the backend must not come back here
+        // either — otherwise the external key becomes an oracle for the
+        // existence and primary key of records behind their access boundary
+        // (audit F16). "Not found" is the honest answer: for this caller, it
+        // is not there.
+        if (!$this->maySee($table, (int) $row)) {
+            return ['found' => false];
+        }
+
         return [
             'found' => true,
             'row_id' => (int) $row,
@@ -248,6 +259,58 @@ final class Tool
             'namespace' => $namespace,
             'external_key' => $external_key,
         ];
+    }
+
+    /**
+     * Whether the caller may see one record — the same question
+     * {@see McpPermissionGuard::mayAccessRecord()} answers, with the row loaded
+     * for it. The guard needs the record's own columns (a pagemount is decided
+     * by an article's `pid`, a voter by whatever it inspects), and the caller
+     * only has an id.
+     */
+    private function maySee(string $table, int $id): bool
+    {
+        $row = $this->connection->fetchAssociative(
+            'SELECT * FROM '.$this->connection->quoteIdentifier($table).' WHERE id = ?',
+            [$id],
+        );
+
+        return \is_array($row) && $this->guard->mayAccessRecord($table, $row);
+    }
+
+    /**
+     * Resolve a page of UNION rows to the ids the caller may see, one query per
+     * table rather than one per row.
+     *
+     * @param list<array<string, mixed>> $rows
+     *
+     * @return array<string, array<int, true>> table → set of visible ids
+     */
+    private function visibleIdsByTable(array $rows): array
+    {
+        $idsByTable = [];
+        foreach ($rows as $r) {
+            $idsByTable[(string) $r['tbl']][] = (int) $r['id'];
+        }
+
+        $visible = [];
+
+        foreach ($idsByTable as $table => $ids) {
+            $ids = array_values(array_unique($ids));
+            $placeholders = implode(',', array_fill(0, \count($ids), '?'));
+            $records = $this->connection->fetchAllAssociative(
+                'SELECT * FROM '.$this->connection->quoteIdentifier($table).' WHERE id IN ('.$placeholders.')',
+                $ids,
+            );
+
+            foreach ($records as $record) {
+                if ($this->guard->mayAccessRecord($table, $record)) {
+                    $visible[$table][(int) $record['id']] = true;
+                }
+            }
+        }
+
+        return $visible;
     }
 
     /**
@@ -392,20 +455,44 @@ final class Tool
 
         $rows = $this->connection->fetchAllAssociative($sql, $params);
 
-        $items = array_map(static fn (array $r): array => [
-            'namespace' => (string) $r['ns'],
-            'external_key' => (string) $r['k'],
-            'table' => (string) $r['tbl'],
-            'row_id' => (int) $r['id'],
-        ], $rows);
+        // The UNION spans every supported table with no notion of who is
+        // asking, so a restricted caller could enumerate the existence,
+        // primary key and business key of records they cannot open — including
+        // tl_member and tl_page (audit F16). Filter the page down to what this
+        // caller may actually see, in the order the query returned it.
+        $items = [];
+        $visible = $this->visibleIdsByTable($rows);
 
-        return [
+        foreach ($rows as $r) {
+            if (!isset($visible[(string) $r['tbl']][(int) $r['id']])) {
+                continue;
+            }
+
+            $items[] = [
+                'namespace' => (string) $r['ns'],
+                'external_key' => (string) $r['k'],
+                'table' => (string) $r['tbl'],
+                'row_id' => (int) $r['id'],
+            ];
+        }
+
+        $result = [
             'items' => $items,
             'count' => \count($items),
             'supported_tables' => $supported,
             'limit' => $limit,
             'offset' => $offset,
         ];
+
+        // Say so rather than letting a short page read as "that is all there
+        // is" — the caller would otherwise page forward believing the mapping
+        // is complete.
+        $hidden = \count($rows) - \count($items);
+        if ($hidden > 0) {
+            $result['hidden_by_permissions'] = $hidden;
+        }
+
+        return $result;
     }
 
     /**

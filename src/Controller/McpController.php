@@ -66,6 +66,16 @@ use Symfony\Component\Routing\Annotation\Route;
  */
 final class McpController
 {
+    /**
+     * Items a single JSON-RPC batch may carry.
+     *
+     * The ceiling is not about correctness — it is about the rate limiter
+     * meaning something. A batch used to cost one token no matter how many
+     * calls were in it (audit F06). 50 is well above what any agent sends in
+     * one envelope and far below what would tie up a worker.
+     */
+    private const MAX_BATCH_ITEMS = 50;
+
     public function __construct(
         private readonly McpServerConfigStorage $configStorage,
         private readonly HttpDispatcherFactory $dispatcherFactory,
@@ -167,10 +177,12 @@ final class McpController
         // When auth_mode === 'none' there is no client_id to key against —
         // the deployment is presumed trusted (developer laptop, internal
         // network) and rate-limiting would just add latency.
+        $batchLimiter = null;
         if ($identity !== null) {
             $clientId = $identity['client_id'];
             if ($clientId !== '') {
                 $limiter = $this->mcpToolCallLimiter->create($clientId);
+                $batchLimiter = $limiter;
                 $limit = $limiter->consume(1);
                 if (!$limit->isAccepted()) {
                     $retryAfter = max(1, $limit->getRetryAfter()->getTimestamp() - time());
@@ -216,6 +228,42 @@ final class McpController
             // parser chose to throw. The caller already holds the body it
             // sent; naming the fault is enough.
             return $this->errorResponse(null, McpServerException::parseError('Malformed JSON-RPC request body.'));
+        }
+
+        // 2b. A batch is many calls, and the limiter above charged for one.
+        //
+        // It runs before the body is parsed, so the size is only knowable here.
+        // Without this, a single POST carrying thousands of tools/call cost one
+        // token and executed all of them — expensive tools included — which
+        // makes the limiter decorative and the FPM pool the actual limit.
+        if ($message instanceof BatchRequest) {
+            $itemCount = \count([...$message->items]);
+
+            if ($itemCount > self::MAX_BATCH_ITEMS) {
+                return $this->errorResponse(null, McpServerException::invalidRequest(\sprintf(
+                    'Batch too large: %d items, maximum is %d. Split it up.',
+                    $itemCount,
+                    self::MAX_BATCH_ITEMS,
+                )));
+            }
+
+            // Charge the rest of the batch before running any of it, so the
+            // refusal lands before the work rather than after.
+            if ($batchLimiter !== null && $itemCount > 1) {
+                $batchLimit = $batchLimiter->consume($itemCount - 1);
+                if (!$batchLimit->isAccepted()) {
+                    $retryAfter = max(1, $batchLimit->getRetryAfter()->getTimestamp() - time());
+
+                    return new JsonResponse(
+                        [
+                            'error' => 'rate_limited',
+                            'message' => \sprintf('A batch of %d calls exceeds the remaining budget.', $itemCount),
+                        ],
+                        429,
+                        ['Retry-After' => (string) $retryAfter, 'Access-Control-Allow-Origin' => '*'],
+                    );
+                }
+            }
         }
 
         // 3. Dispatch via php-mcp.

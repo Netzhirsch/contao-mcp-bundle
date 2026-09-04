@@ -6,6 +6,58 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.21.0] – 2026-09-04
+
+> **Sicherheitsrelease.** Dritte Charge aus dem Audit vom 04.09.2026:
+> Informationspreisgabe und Rate-Limit. Keine Schemaänderung, keine Migration.
+
+### Security
+- **Drei Meta-Werkzeuge waren für jeden authentifizierten Aufrufer lesbar.**
+  `system_settings`, `system_health_check` und `server_info` beantworten Fragen
+  über den **Host**, nicht über den Inhalt: absolute Pfade, der Dateimodus des
+  privaten OAuth-Schlüssels, der OS-Benutzer, PHP-Erweiterungen, die
+  bereinigte Config samt `auth_mode` und `backend_url`, dazu
+  `tl_settings.adminEmail`. Nichts davon braucht man, um eine Seite zu
+  bearbeiten. Jetzt admin-only (Audit F08).
+
+  **`installed_bundles` und `contao_version` bleiben bewusst offen.** Der
+  Bericht führt das Paket-Inventar mit auf, empfiehlt aber nur die drei — und
+  die Fehlermeldungen dieses Bundles verweisen Aufrufer selbst dorthin („Check
+  with `installed_bundles`", wenn ein Feld eine Extension braucht). Wer nicht
+  fragen darf, was installiert ist, kann dem Rat nicht folgen. Sie beantworten,
+  was in der `composer.lock` steht, nichts über den Host.
+
+- **`external_ids_list` und `external_id_lookup` liefen ohne Scoping.**
+  `list` führt mit Namespace ein `UNION ALL` über alle unterstützten Tabellen —
+  darunter `tl_member` und `tl_page`. Ein Nicht-Admin konnte damit Existenz,
+  Primärschlüssel und externen Geschäftsschlüssel von Datensätzen aufzählen,
+  die er im Backend nicht öffnen darf (Audit F16).
+
+  Beide sind jetzt pro Zeile gescopet. `lookup` ist dabei der schärfere Fall,
+  den der Bericht nur als Nachsatz führt: Es beantwortet gezielt „existiert
+  Datensatz X" für genau einen Schlüssel — ein Orakel. Es antwortet jetzt
+  `found: false`, was für diesen Aufrufer die ehrliche Antwort ist.
+
+  `list` meldet zusätzlich `hidden_by_permissions`. Eine kurze Seite ohne
+  diesen Hinweis läse sich als „mehr gibt es nicht", und der Aufrufer würde
+  weiterblättern in dem Glauben, die Zuordnung sei vollständig.
+
+- **Ein JSON-RPC-Batch hatte keine Obergrenze und kostete ein Token.** Der
+  Rate-Limiter wird einmal pro POST verbraucht, **bevor** der Body geparst
+  wird; danach lief der Batch ohne Item-Deckel. Ein POST mit tausenden
+  `tools/call` zählte als ein Aufruf und führte alle aus — womit der Limiter
+  dekorativ und der FPM-Pool die eigentliche Grenze war (Audit F06).
+
+  Jetzt: höchstens 50 Items, geprüft **bevor** etwas ausgeführt wird, und der
+  Rest des Batches wird vorab auf den Limiter gebucht. Die Ablehnung landet
+  damit vor der Arbeit statt danach.
+
+### Notes
+- Der Deckel sitzt hinter der Auth-Prüfung — einen unautorisierten Aufrufer
+  abzuweisen, bevor man seine Items zählt, ist die richtige Reihenfolge.
+- Noch offen: F10 (Refresh-Reuse-Detection), F12 (Provenance-Marker), danach
+  die Härtungs- und Dokumentationspunkte F05, F09, F11, F17–F27.
+
 ## [1.20.0] – 2026-09-04
 
 > **Sicherheitsrelease.** Zweite Charge aus dem Audit vom 04.09.2026: die
