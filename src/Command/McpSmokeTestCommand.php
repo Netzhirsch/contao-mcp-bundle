@@ -2874,6 +2874,46 @@ final class McpSmokeTestCommand extends Command
             $prm,
             fn ($d) => ($d['resource'] ?? '') === 'https://smoke.example/'.trim((string) ($this->configStorage->load()['path'] ?? 'mcp'), '/'));
 
+        // ── Batch size ────────────────────────────────────────────────────
+        //
+        // The rate limiter is consumed once per POST, before the body is
+        // parsed. A batch used to run without any item ceiling after that, so
+        // thousands of tools/call cost one token and executed all of them —
+        // which makes the limiter decorative and the FPM pool the real limit
+        // (audit F06).
+        $batchOf = static function (int $n): Request {
+            $items = [];
+            for ($i = 1; $i <= $n; ++$i) {
+                $items[] = ['jsonrpc' => '2.0', 'id' => $i, 'method' => 'tools/call',
+                    'params' => ['name' => 'ping', 'arguments' => (object) []]];
+            }
+
+            return Request::create('/mcp', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'],
+                (string) json_encode($items));
+        };
+
+        // The OAuth section above left auth_mode=oauth, and the ceiling sits
+        // behind the auth check — deliberately, since refusing an unauthorised
+        // caller before counting their items is the right order. Test it
+        // without a token requirement and put the mode back.
+        $authModeBefore = (string) ($this->configStorage->load()['auth_mode'] ?? 'none');
+        $this->configStorage->save([...$this->configStorage->load(), 'auth_mode' => 'none']);
+
+        $oversized = $this->mcpController->handle($batchOf(51));
+        $expect('a batch above the ceiling is refused',
+            [$oversized->getStatusCode(), (string) $oversized->getContent()],
+            static fn (array $r) => str_contains(mb_strtolower($r[1]), 'batch too large'));
+        $expect('...and it names the ceiling so the caller can split correctly',
+            (string) $oversized->getContent(),
+            static fn (string $b) => str_contains($b, '50'));
+
+        $accepted = $this->mcpController->handle($batchOf(3));
+        $expect('a batch within the ceiling still runs every item',
+            json_decode((string) $accepted->getContent(), true),
+            static fn ($d) => \is_array($d) && \count($d) === 3);
+
+        $this->configStorage->save([...$this->configStorage->load(), 'auth_mode' => $authModeBefore]);
+
         // Pairing window. Registration is gated in `restricted` mode; the
         // window is the only path a standard MCP client can take, because it
         // cannot send an IAT header.

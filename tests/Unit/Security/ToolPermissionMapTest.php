@@ -79,7 +79,32 @@ final class ToolPermissionMapTest extends TestCase
 
     public static function readOnlyMetaTools(): array
     {
-        return [['ping'], ['contao_version'], ['server_info'], ['installed_bundles'], ['system_health_check'], ['entity_query_options'], ['insert_tags_list'], ['system_settings'], ['contao_search_tools'], ['contao_describe_tool'], ['external_id_lookup'], ['external_ids_list']];
+        return [['ping'], ['contao_version'], ['installed_bundles'], ['entity_query_options'], ['insert_tags_list'], ['contao_search_tools'], ['contao_describe_tool'], ['external_id_lookup'], ['external_ids_list']];
+    }
+
+    /**
+     * These three answer questions about the HOST — absolute paths, the file
+     * mode of the OAuth private key, the OS user, adminEmail — and were
+     * readable by every authenticated caller (audit F08). None of it is needed
+     * to edit a page.
+     *
+     * `installed_bundles` and `contao_version` stay open on purpose: the
+     * bundle's own error messages tell callers to run them, and a non-admin who
+     * cannot ask what is installed cannot act on that advice.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function hostFacingMetaTools(): iterable
+    {
+        yield 'system_settings' => ['system_settings'];
+        yield 'system_health_check' => ['system_health_check'];
+        yield 'server_info' => ['server_info'];
+    }
+
+    #[DataProvider('hostFacingMetaTools')]
+    public function testHostFacingMetaToolsAreAdminOnly(string $tool): void
+    {
+        self::assertSame(['kind' => 'admin'], $this->map->requirement($tool, []));
     }
 
     public function testContaoCallIsProxy(): void

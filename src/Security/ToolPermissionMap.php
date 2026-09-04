@@ -69,15 +69,27 @@ final class ToolPermissionMap
         'contao_describe_tool' => ['kind' => 'none'],
         'contao_call' => ['kind' => 'proxy'],
         'ping' => ['kind' => 'none'],
-        'contao_version' => ['kind' => 'none'],
-        'server_info' => ['kind' => 'none'],
-        'installed_bundles' => ['kind' => 'none'],
-        'system_health_check' => ['kind' => 'none'],
         'entity_query_options' => ['kind' => 'none'],
         'insert_tags_list' => ['kind' => 'none'],
-        'system_settings' => ['kind' => 'none'],
+        // Kept readable for any token ON PURPOSE: this bundle's own error
+        // messages tell the caller to run them ("Check with installed_bundles"
+        // when a field needs an extension), and a non-admin who cannot ask
+        // what is installed cannot act on that advice. They answer what the
+        // composer.lock says, nothing about the host.
+        'installed_bundles' => ['kind' => 'none'],
+        'contao_version' => ['kind' => 'none'],
 
         // Admin-only.
+        //
+        // These three answer questions about the HOST, not about the content:
+        // absolute paths, the file mode of the OAuth private key, the OS user,
+        // PHP extensions, the sanitised config including auth_mode and
+        // backend_url, and tl_settings.adminEmail. None of it is needed to edit
+        // a page, and all of it is useful to someone deciding what to try next.
+        // They were readable by every authenticated caller (audit F08).
+        'system_settings' => ['kind' => 'admin'],
+        'system_health_check' => ['kind' => 'admin'],
+        'server_info' => ['kind' => 'admin'],
         'system_settings_update' => ['kind' => 'admin'],
         'maintenance_run' => ['kind' => 'admin'],
         'maintenance_jobs_list' => ['kind' => 'admin'],
