@@ -6,6 +6,62 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.19.0] – 2026-09-04
+
+> **Sicherheitsrelease.** Erste Charge aus dem Audit vom 04.09.2026: die beiden
+> SSRF-Pfade und der Fail-Open-Schalter der Authentifizierung. Keine
+> Schemaänderung, keine Migration. **Update empfohlen.**
+
+### Security
+- **`file_upload(source_url)` und `page_preview` hatten je eine eigene,
+  schwächere Kopie der SSRF-Prüfung.** Nicht aus Nachlässigkeit an diesen
+  Stellen, sondern weil eine zweite Kopie einer Regel von selbst von der ersten
+  abdriftet. Beide gehen jetzt durch `Security\OutboundUrlGuard`, der dieselben
+  Bausteine nutzt wie der CIMD-Pfad.
+
+  Zwei echte Defekte waren darin:
+
+  - **Resolve-then-check statt Resolve-then-Pin.** Die Adresse wurde geprüft und
+    dann der *Hostname* an den HTTP-Client gegeben, der ihn erneut auflöst — das
+    Zeitfenster, in dem DNS eine andere Antwort geben kann. Jetzt geht die
+    geprüfte IP als `resolve`-Option mit, die Verbindung landet dort, wo die
+    Prüfung hingesehen hat.
+  - **CGNAT und NAT64 waren offen.** `filter_var(NO_PRIV_RANGE|NO_RES_RANGE)`
+    lässt `100.64.0.0/10` und `64:ff9b::/96` durch — auf PHP 8.3 und 8.4
+    nachgemessen. `PrivateAddressCheck` blockt beide.
+
+- **`page_preview` folgte Redirects ungeprüft** (`max_redirects=5`). Die Ziel-URL
+  entsteht aus dem Seitenbaum, und die `url` einer `redirect`-Seite ist Inhalt,
+  den ein eingeschränkter Redakteur anlegen darf. Der Client folgt jetzt gar
+  keinem Redirect mehr; die Hops laufen von Hand, und **jeder** geht vorher
+  durch dieselbe Adressprüfung. Ein `Location`, das nicht http(s) ist, endet
+  dort.
+
+- **Ein unlesbarer oder kaputter `config.json` schaltete die Authentifizierung
+  ab.** Der Default für `auth_mode` ist `none`, und *jeder* Fehlerpfad in
+  `load()` lieferte die Defaults: fehlende Leserechte, ein durch eine volle
+  Platte abgebrochener Write, ein von Hand editierter Wert mit Leerzeichen. Aus
+  einem OAuth-geschützten Server wurde ein offener mit ~186 Werkzeugen, und
+  nichts in der Antwort sagte es.
+
+  Jetzt: Eine Datei, die **existiert** und nicht brauchbar ist, ist ein Fehler,
+  keine Abwesenheit. `/mcp` antwortet dann **503** und schreibt den Grund ins
+  Log. Nur wenn nie eine Config existierte, gelten die Defaults — dort gibt es
+  keinen Schutz, der verloren gehen könnte. Ein ausdrückliches
+  `auth_mode: "none"` bleibt unangetastet, das ist eine Entscheidung.
+
+### Notes
+- **Eine Korrektur am Auditbericht:** Der Befund F01 nennt als Angriffsweg
+  `::ffff:169.254.169.254` und schreibt, das passiere „deterministisch". Das
+  stimmt nicht — `filter_var` blockt IPv4-mapped IPv6 auf PHP 8.3 und 8.4
+  korrekt, nachgemessen. Die beiden anderen Teilbefunde (fehlendes Pinning,
+  CGNAT/NAT64) sind real, F01 bleibt also ein echter Befund; nur der
+  plakativste Angriffsweg daraus funktioniert nicht. Ebenso stand
+  `max_redirects=0` in `file_upload` bereits — das Redirect-Problem war
+  `page_preview` allein.
+- Noch offen aus dem Audit: F03/F04 (Pagemount-/Filemount-Scoping) als nächste
+  Charge, danach F08, F16, F06, F10, F12.
+
 ## [1.18.0] – 2026-09-02
 
 > Ein Werkzeug mehr. Keine Schemaänderung, keine Migration.

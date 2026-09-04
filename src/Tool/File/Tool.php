@@ -13,6 +13,7 @@ use Contao\File as ContaoFile;
 use Contao\FilesModel;
 use Contao\Folder as ContaoFolder;
 use Contao\StringUtil;
+use Netzhirsch\ContaoMcpBundle\Security\OutboundUrlGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -74,6 +75,7 @@ final class Tool
         private readonly AuthorResolver $authorResolver,
         private readonly string $projectDir,
         private readonly HttpClientInterface $httpClient,
+        private readonly OutboundUrlGuard $outboundGuard,
     ) {
     }
 
@@ -931,16 +933,24 @@ final class Tool
             return [null, ['error' => 'invalid_source_url', 'message' => 'source_url must be an http(s) URL with a host.']];
         }
 
-        // Resolve + block non-public targets. A bracketed IPv6 literal arrives
-        // with brackets stripped by parse_url's host.
-        $ips = $this->resolveHost($host);
-        if ($ips === []) {
-            return [null, ['error' => 'source_url_unresolvable', 'message' => sprintf('Could not resolve host "%s".', $host)]];
-        }
-        foreach ($ips as $ip) {
-            if (filter_var($ip, \FILTER_VALIDATE_IP, \FILTER_FLAG_NO_PRIV_RANGE | \FILTER_FLAG_NO_RES_RANGE) === false) {
-                return [null, ['error' => 'source_url_blocked', 'message' => sprintf('Refusing to fetch from a private/reserved address (%s → %s).', $host, $ip)]];
-            }
+        // Address check + pin, shared with the other outbound paths. This used
+        // to be a local copy that checked the resolved ip and then handed the
+        // HOSTNAME to the client, which resolves it a second time — the window
+        // an attacker's DNS answers differently in. It also used
+        // filter_var(NO_PRIV_RANGE|NO_RES_RANGE), which passes CGNAT and NAT64.
+        [$host, $pinnedIp, $urlError] = $this->outboundGuard->pin($url);
+
+        if ($urlError !== null) {
+            // Keep the error codes this tool has always returned — callers and
+            // the smoke test match on them.
+            return [null, [
+                'error' => match ($urlError['error']) {
+                    'invalid_url' => 'invalid_source_url',
+                    'url_unresolvable' => 'source_url_unresolvable',
+                    default => 'source_url_blocked',
+                },
+                'message' => $urlError['message'],
+            ]];
         }
 
         try {
@@ -949,6 +959,9 @@ final class Tool
                 'max_redirects' => 0,        // a redirect could point back at a blocked host
                 'max_duration' => 30,
                 'headers' => ['Accept' => '*/*'],
+                // Connect to the address that was checked, not to whatever the
+                // name resolves to on the second lookup.
+                'resolve' => [$host => $pinnedIp],
             ]);
             $status = $response->getStatusCode();
             if ($status < 200 || $status >= 300) {
@@ -972,34 +985,6 @@ final class Tool
         } catch (\Throwable $e) {
             return [null, ['error' => 'source_url_failed', 'message' => 'Could not fetch source_url: '.$e->getMessage()]];
         }
-    }
-
-    /**
-     * @return list<string> resolved IP addresses (the literal itself if $host is an IP)
-     */
-    private function resolveHost(string $host): array
-    {
-        if (filter_var($host, \FILTER_VALIDATE_IP) !== false) {
-            return [$host];
-        }
-
-        $ips = [];
-        $records = @dns_get_record($host, \DNS_A | \DNS_AAAA) ?: [];
-        foreach ($records as $r) {
-            if (isset($r['ip'])) {
-                $ips[] = (string) $r['ip'];
-            } elseif (isset($r['ipv6'])) {
-                $ips[] = (string) $r['ipv6'];
-            }
-        }
-        if ($ips === []) {
-            $v4 = gethostbyname($host);
-            if ($v4 !== $host) {
-                $ips[] = $v4;
-            }
-        }
-
-        return $ips;
     }
 
     private function makeValidator(): UploadValidator

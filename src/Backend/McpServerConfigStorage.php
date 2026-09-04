@@ -119,7 +119,8 @@ final class McpServerConfigStorage
      *     registration_open_until: int,
      *     license_server_url: string,
      *     cimd_mode: string,
-     *     cimd_trusted_hosts: list<string>
+     *     cimd_trusted_hosts: list<string>,
+     *     config_error?: string
      * }
      */
     public function load(): array
@@ -131,14 +132,33 @@ final class McpServerConfigStorage
             return $defaults;
         }
 
+        // A config file that EXISTS but cannot be read or parsed must not fall
+        // back to the defaults, because one of those defaults is
+        // `auth_mode = none`. Restoring a backup without var/mcp, losing the
+        // file's permissions, a full disk during save() — any of those turned
+        // an OAuth-protected server into an open one with ~186 tools, and
+        // nothing in the answer said so. The failure has to point the other
+        // way: keep serving nothing rather than serving everything.
         $raw = @file_get_contents($path);
         if ($raw === false) {
-            return $defaults;
+            return $defaults + ['config_error' => sprintf('%s exists but could not be read.', $path)];
         }
 
         $decoded = json_decode($raw, true);
         if (!\is_array($decoded)) {
-            return $defaults;
+            return $defaults + ['config_error' => sprintf('%s is not valid JSON (%s).', $path, json_last_error_msg())];
+        }
+
+        // Same reasoning one level down: an auth_mode that is present but not
+        // one we know is a corrupted or hand-edited value, and clamping it to
+        // the default would silently disable authentication.
+        $declaredAuthMode = $decoded['auth_mode'] ?? null;
+        if ($declaredAuthMode !== null && !\in_array($declaredAuthMode, ['none', 'oauth'], true)) {
+            return $defaults + ['config_error' => sprintf(
+                '%s has auth_mode=%s, which is neither "none" nor "oauth".',
+                $path,
+                var_export($declaredAuthMode, true),
+            )];
         }
 
         // Pre-v0.3.0 config files carried `mode`, `host`, `port` fields for

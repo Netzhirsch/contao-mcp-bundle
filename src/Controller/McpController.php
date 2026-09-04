@@ -107,6 +107,27 @@ final class McpController
         }
 
         $config = $this->configStorage->load();
+
+        // A config file that exists but is unreadable or corrupt used to fall
+        // back to `auth_mode = none` — an open server with ~186 tools, with
+        // nothing in the response to say the guard had been switched off. Serve
+        // nothing instead, and say why in the log where an operator will find
+        // it. The message to the caller stays generic.
+        if (isset($config['config_error'])) {
+            $this->logger->critical(
+                sprintf('MCP refused every request: %s', (string) $config['config_error']),
+            );
+
+            return new JsonResponse(
+                [
+                    'error' => 'server_misconfigured',
+                    'message' => 'The MCP server configuration could not be read. Requests are refused until it is fixed.',
+                ],
+                503,
+                ['Cache-Control' => 'no-store'],
+            );
+        }
+
         $authMode = (string) ($config['auth_mode'] ?? 'none');
 
         // 1. OAuth Bearer validation (if enabled).
