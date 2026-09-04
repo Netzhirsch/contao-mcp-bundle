@@ -502,6 +502,191 @@ final class Tool
     }
 
     /**
+     * The four buckets Contao keeps under `var/cache/<env>/contao`, and what
+     * goes stale in each when a bundle is installed or its DCA changes.
+     *
+     * Every one of them is regenerated lazily on the next miss — checked in
+     * Contao 5.7, not assumed, because a cache without a fallback would not be
+     * a cache but a build artefact, and deleting it would take the site down
+     * until someone ran `cache:warmup`:
+     *
+     *   dca       DcaLoader::loadDcaFiles() re-dumps via CombinedFileDumper
+     *   sql       DcaExtractor::__construct() falls back to createExtract()
+     *   config    Config::preload() / TemplateLoader / Model::getColumnCastTypes()
+     *             each fall back to reading the sources
+     *   languages System::loadLanguageFile() falls back to the .php/.xlf finder
+     *
+     * @var array<string, string>
+     */
+    private const DCA_CACHE_SCOPES = [
+        'dca' => 'merged DataContainer arrays — stale after a bundle adds or changes a field',
+        'sql' => 'per-table schema extracts — stale after a column changes',
+        'config' => 'config.php, template map, column cast types',
+        'languages' => 'compiled XLF/PHP labels — stale after a bundle ships new translations',
+    ];
+
+    /**
+     * @param list<string>|null $scopes
+     *
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'dca_cache_clear',
+        description: <<<'DESC'
+            Discards Contao's own file caches under `var/cache/<env>/contao` so the
+            next request rebuilds them from the current sources. Use it when a DCA
+            change is not showing up — a bundle added a field, a palette changed, a
+            label is still the old one.
+
+            Scopes (default: all four):
+              - dca        merged DataContainer arrays
+              - sql        per-table schema extracts
+              - config     config.php, template map, column cast types
+              - languages  compiled labels
+
+            Each bucket regenerates lazily on the next access, so this is safe to
+            run on a live site: the first request after it pays the rebuild.
+
+            What this does NOT do: clear the compiled Symfony container in
+            `var/cache/<env>` itself. A NEW service, listener or tool needs
+            `vendor/bin/contao-console cache:clear --env=prod` — that is a CLI
+            operation, and doing it from inside a request would mean deleting the
+            container the request is running on. `server_info` returns
+            `container.compiled_at` so you can tell the two cases apart before
+            reaching for the wrong remedy.
+
+            Pass `dry_run: true` to see what would be removed. Returns per scope:
+            files, bytes, and anything that could not be removed (a Windows file
+            lock is the usual reason) — a partial result says so instead of
+            reporting success.
+        DESC,
+    )]
+    public function dcaCacheClear(?array $scopes = null, bool $dry_run = false): array
+    {
+        $cacheDir = (string) $this->parameterBag->get('kernel.cache_dir');
+        $base = realpath($cacheDir.\DIRECTORY_SEPARATOR.'contao');
+
+        if ($base === false) {
+            return [
+                'cleared' => false,
+                'error' => 'not_found',
+                'message' => sprintf('%s/contao does not exist — nothing is cached yet.', $cacheDir),
+            ];
+        }
+
+        $wanted = $scopes ?? array_keys(self::DCA_CACHE_SCOPES);
+        $unknown = array_values(array_diff(array_map(strval(...), $wanted), array_keys(self::DCA_CACHE_SCOPES)));
+
+        if ($unknown !== []) {
+            return [
+                'error' => 'invalid_input',
+                'message' => sprintf(
+                    'Unknown scope %s. Available: %s.',
+                    implode(', ', array_map(static fn (string $s): string => '"'.$s.'"', $unknown)),
+                    implode(', ', array_keys(self::DCA_CACHE_SCOPES)),
+                ),
+                'available_scopes' => array_keys(self::DCA_CACHE_SCOPES),
+            ];
+        }
+
+        $result = [];
+        $totalFiles = 0;
+        $totalBytes = 0;
+        $failed = [];
+
+        foreach ($wanted as $scope) {
+            $scope = (string) $scope;
+            $dir = realpath($base.\DIRECTORY_SEPARATOR.$scope);
+
+            // Never delete outside the Contao cache, whatever the parameter or a
+            // symlink says. The scope names are ours, but the paths they resolve
+            // to are the filesystem's.
+            if ($dir === false || !self::isInside($dir, $base)) {
+                $result[$scope] = ['files' => 0, 'bytes' => 0, 'present' => false];
+
+                continue;
+            }
+
+            $files = 0;
+            $bytes = 0;
+
+            foreach (SymfonyFinder::create()->files()->in($dir) as $file) {
+                $path = $file->getPathname();
+                $size = (int) $file->getSize();
+
+                if ($dry_run) {
+                    ++$files;
+                    $bytes += $size;
+
+                    continue;
+                }
+
+                if (@unlink($path)) {
+                    ++$files;
+                    $bytes += $size;
+                } else {
+                    $failed[] = $this->stripRootDir($path);
+                }
+            }
+
+            $result[$scope] = [
+                'files' => $files,
+                'bytes' => $bytes,
+                'present' => true,
+                'what' => self::DCA_CACHE_SCOPES[$scope],
+            ];
+            $totalFiles += $files;
+            $totalBytes += $bytes;
+        }
+
+        if (!$dry_run) {
+            $this->log(
+                sprintf('Discarded Contao cache (%s): %d file(s) via MCP', implode(', ', $wanted), $totalFiles),
+                __METHOD__,
+            );
+        }
+
+        $out = [
+            'cleared' => !$dry_run,
+            'dry_run' => $dry_run,
+            'cache_dir' => $this->stripRootDir($base),
+            'scopes' => $result,
+            'files' => $totalFiles,
+            'bytes' => $totalBytes,
+        ];
+
+        if ($failed !== []) {
+            // Saying "cleared" while files survived is the failure shape this
+            // whole bundle keeps closing: the caller would move on believing the
+            // stale entry is gone.
+            $out['cleared'] = false;
+            $out['failed'] = \array_slice($failed, 0, 20);
+            $out['failed_count'] = \count($failed);
+            $out['message'] = sprintf(
+                '%d file(s) could not be removed and are still cached. On Windows another '
+                .'process usually holds them open; retry, or clear on the CLI.',
+                \count($failed),
+            );
+        }
+
+        return $out;
+    }
+
+    /**
+     * Containment check for a path that has already been through realpath().
+     * Case-insensitive on Windows, exact elsewhere.
+     */
+    private static function isInside(string $child, string $parent): bool
+    {
+        $parent = rtrim($parent, \DIRECTORY_SEPARATOR).\DIRECTORY_SEPARATOR;
+        $child = rtrim($child, \DIRECTORY_SEPARATOR).\DIRECTORY_SEPARATOR;
+
+        return \PHP_OS_FAMILY === 'Windows'
+            ? str_starts_with(mb_strtolower($child), mb_strtolower($parent))
+            : str_starts_with($child, $parent);
+    }
+
+    /**
      * @param list<string>|null $paths
      *
      * @return array<string, mixed>

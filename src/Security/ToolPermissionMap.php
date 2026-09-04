@@ -83,6 +83,9 @@ final class ToolPermissionMap
         'maintenance_jobs_list' => ['kind' => 'admin'],
         'page_cache_invalidate' => ['kind' => 'admin'],
         'dbafs_sync' => ['kind' => 'admin'],
+        // Touches the cache of the whole installation, not one record — same
+        // bar as the other maintenance tools.
+        'dca_cache_clear' => ['kind' => 'admin'],
 
         // Template editor module (file-based, not a DC table).
         'templates_list' => ['kind' => 'module', 'module' => 'tpl_editor'],

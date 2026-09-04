@@ -6,6 +6,52 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.18.0] – 2026-09-02
+
+> Ein Werkzeug mehr. Keine Schemaänderung, keine Migration.
+
+### Added
+- **`dca_cache_clear` verwirft Contaos eigene Datei-Caches** unter
+  `var/cache/<env>/contao`. Keiner der bestehenden Purges fasste die an:
+  `maintenance_run("scripts")` klingt danach, räumt aber `assets/js`,
+  `assets/css` und den HTTP-Page-Cache. Eine DCA, die stale wurde, weil ein
+  Bundle ein Feld an `tl_page` gehängt hat, hatte über MCP also gar keine
+  Abhilfe.
+
+  Vier Bereiche, per `scopes` einzeln wählbar, Vorgabe alle:
+
+  | Bereich | wird stale durch |
+  |---|---|
+  | `dca` | ein Bundle ändert oder ergänzt ein Feld |
+  | `sql` | eine Spalte ändert sich |
+  | `config` | `config.php`, Template-Map, Column-Cast-Typen |
+  | `languages` | ein Bundle liefert neue Übersetzungen |
+
+  `dry_run: true` zeigt vorher, was ginge.
+
+  **Warum das gefahrlos ist, wurde geprüft, nicht angenommen.** Alle vier
+  Bereiche werden beim nächsten Zugriff lazy neu gebaut — `DcaLoader` schreibt
+  über `CombinedFileDumper` neu, `DcaExtractor` fällt auf `createExtract()`
+  zurück, `Config`/`TemplateLoader`/`Model::getColumnCastTypes()` lesen sonst
+  die Quellen, und `System::loadLanguageFile()` fällt auf den .php/.xlf-Finder
+  zurück. Der Smoke-Test verifiziert genau diese Eigenschaft: leeren, dann
+  `DcaLoader::reset()` und neu laden, und prüfen, dass die Datei wieder da ist.
+  Wäre einer der Bereiche nur über `cache:warmup` zu befüllen, wäre das
+  Werkzeug ein Weg, eine Live-Site abzuschießen.
+
+  Was es **nicht** tut: den kompilierten Symfony-Container leeren. Ein neuer
+  Service, Listener oder Tool braucht weiterhin
+  `vendor/bin/contao-console cache:clear --env=prod`. Aus einem Request heraus
+  hieße das, den Container zu löschen, auf dem der Request gerade läuft — und
+  auf gehärteten Hostings ist `var/cache` für den Web-User oft bewusst nicht
+  schreibbar. `server_info` liefert `container.compiled_at`, damit die beiden
+  Fälle unterscheidbar bleiben, statt das falsche Mittel zu greifen.
+
+  Dateien, die nicht entfernt werden konnten (unter Windows hält sie meist ein
+  anderer Prozess offen), setzen `cleared: false` und werden aufgezählt —
+  „geräumt“ zu melden, während etwas übrig blieb, ist genau die Fehlerform, die
+  dieses Bundle in dieser Runde mehrfach geschlossen hat.
+
 ## [1.17.0] – 2026-09-02
 
 > Antwort auf die Rückmeldung des Page-State-Bundles zum Briefing. Keine

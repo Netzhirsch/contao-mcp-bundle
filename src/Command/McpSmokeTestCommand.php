@@ -534,6 +534,46 @@ final class McpSmokeTestCommand extends Command
             $tempResult,
             fn ($r) => isset($r['jobs'][0]['before'], $r['jobs'][0]['after'], $r['jobs'][0]['duration_ms']));
 
+        // ── dca_cache_clear ───────────────────────────────────────────────
+        //
+        // None of the Contao purges touch var/cache/<env>/contao, so a DCA that
+        // went stale after a bundle installed a field had no remedy over MCP at
+        // all. The four buckets each regenerate lazily on the next access —
+        // that is what makes deleting them safe, and it is the property this
+        // section actually verifies rather than assumes.
+        $expect('an unknown scope is refused, naming the real ones',
+            $this->maintenanceTool->dcaCacheClear(['gibtsnicht']),
+            static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                && \in_array('dca', $r['available_scopes'] ?? [], true));
+
+        // Warm the DCA cache for one table, so there is something to discard.
+        \Contao\Controller::loadDataContainer('tl_page');
+        $dcaCacheDir = \Contao\System::getContainer()->getParameter('kernel.cache_dir').'/contao/dca';
+        $dcaFileCount = static fn (): int => is_dir($dcaCacheDir)
+            ? \count(glob($dcaCacheDir.'/*.php') ?: [])
+            : 0;
+
+        $expect('the dry run reports files without removing any',
+            [$this->maintenanceTool->dcaCacheClear(['dca'], dry_run: true), $dcaFileCount()],
+            static fn (array $r) => ($r[0]['dry_run'] ?? false) === true
+                && ($r[0]['cleared'] ?? true) === false
+                && ($r[0]['files'] ?? 0) === $r[1]
+                && $dcaFileCount() === $r[1]);
+
+        $clearResult = $this->maintenanceTool->dcaCacheClear(['dca']);
+        $expect('the real run removes them', $clearResult,
+            static fn ($r) => ($r['cleared'] ?? false) === true && ($r['files'] ?? 0) > 0);
+        $expect('and the directory is empty afterwards', $dcaFileCount(),
+            static fn (int $n) => $n === 0);
+
+        // The whole point: Contao rebuilds on the next access. If this failed,
+        // the tool would be a way to take a site down.
+        \Contao\DcaLoader::reset();
+        \Contao\Controller::loadDataContainer('tl_page');
+        $expect('a cold DCA cache regenerates on the next access, not on a warmup command',
+            [$dcaFileCount(), $GLOBALS['TL_DCA']['tl_page']['config']['dataContainer'] ?? null],
+            static fn (array $r) => $r[0] > 0 && $r[1] !== null);
+
         // ═══════════════════════ System (settings + tags) ══════════
         $output->writeln("\n<comment>System extensions</comment>");
 
