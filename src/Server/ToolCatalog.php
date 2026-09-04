@@ -281,6 +281,7 @@ final class ToolCatalog
             'user_groups' => 'user',
             'external' => 'external_id',
             'dbafs' => 'maintenance',
+            'dca' => 'maintenance',
             'insert' => 'system',
             'html_filter' => 'system',
             'server' => 'system',

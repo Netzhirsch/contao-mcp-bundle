@@ -6,6 +6,73 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.18.0] – 2026-09-02
+
+> Ein Werkzeug mehr. Keine Schemaänderung, keine Migration.
+
+### Added
+- **`dca_cache_clear` verwirft Contaos eigene Datei-Caches** unter
+  `var/cache/<env>/contao`. Keiner der bestehenden Purges fasste die an:
+  `maintenance_run("scripts")` klingt danach, räumt aber `assets/js`,
+  `assets/css` und den HTTP-Page-Cache. Eine DCA, die stale wurde, weil ein
+  Bundle ein Feld an `tl_page` gehängt hat, hatte über MCP also gar keine
+  Abhilfe.
+
+  Vier Bereiche, per `scopes` einzeln wählbar, Vorgabe alle:
+
+  | Bereich | wird stale durch |
+  |---|---|
+  | `dca` | ein Bundle ändert oder ergänzt ein Feld |
+  | `sql` | eine Spalte ändert sich |
+  | `config` | `config.php`, Template-Map, Column-Cast-Typen |
+  | `languages` | ein Bundle liefert neue Übersetzungen |
+
+  `dry_run: true` zeigt vorher, was ginge.
+
+  **Warum das gefahrlos ist, wurde geprüft, nicht angenommen.** Alle vier
+  Bereiche fallen bei einem Miss auf die Quellen zurück — `DcaLoader`
+  inkludiert die DCA-Dateien, `DcaExtractor` ruft `createExtract()`,
+  `Config`/`TemplateLoader`/`Model::getColumnCastTypes()` lesen die Quellen,
+  `System::loadLanguageFile()` nutzt den .php/.xlf-Finder. Die Site bleibt also
+  korrekt, auch wenn der Cache kalt ist.
+
+  **Ob der Cache dabei auch neu geschrieben wird, hängt an der
+  Contao-Version** — und das ist der Teil, den man vor dem Leeren einer
+  Produktivinstanz wissen will. Contao 5.7 schreibt die DCA über
+  `CombinedFileDumper` zurück, **Contao 5.3 nicht**: dort bleiben die Dateien
+  weg und jeder Request liest die Quellen, bis `cache:warmup` läuft. Die
+  Antwort sagt es über `rebuild: "lazy"` bzw. `"next_warmup"`, im zweiten Fall
+  mit dem Hinweis auf `cache:warmup`.
+
+  Erkannt wird das über die Fähigkeit, nicht über die Versionsnummer: ich weiß,
+  dass 5.3 es nicht kann und 5.7 schon, aber nicht, welches Release dazwischen
+  die Grenze zieht — und eine geratene Grenze in einer Meldung, nach der jemand
+  handelt, ist schlechter als keine. Fällt die Erkennung künftig falsch aus,
+  dann in Richtung „lieber einmal zu viel `cache:warmup`".
+
+  Der Smoke-Test prüft beide Hälften getrennt: dass die DCA mit leerem Cache
+  überhaupt noch lädt (das ist die Sicherheitsaussage, auf jeder Version), und
+  dass `rebuild` zu dem passt, was tatsächlich passiert ist.
+
+  Was es **nicht** tut: den kompilierten Symfony-Container leeren. Ein neuer
+  Service, Listener oder Tool braucht weiterhin
+  `vendor/bin/contao-console cache:clear --env=prod`. Aus einem Request heraus
+  hieße das, den Container zu löschen, auf dem der Request gerade läuft — und
+  auf gehärteten Hostings ist `var/cache` für den Web-User oft bewusst nicht
+  schreibbar. `server_info` liefert `container.compiled_at`, damit die beiden
+  Fälle unterscheidbar bleiben, statt das falsche Mittel zu greifen.
+
+  Ein Verzeichnis, das noch gar nicht existiert — frisch deployte Instanz, die
+  noch keinen Request bedient hat —, ist **kein Fehler**: Die Nachbedingung
+  „nichts Veraltetes im Cache" gilt dann bereits. Und die Prüfung der `scopes`
+  läuft vor der Prüfung des Verzeichnisses, damit ein Tippfehler im Parameter
+  nicht als Aussage über die Maschine zurückkommt.
+
+  Dateien, die nicht entfernt werden konnten (unter Windows hält sie meist ein
+  anderer Prozess offen), setzen `cleared: false` und werden aufgezählt —
+  „geräumt“ zu melden, während etwas übrig blieb, ist genau die Fehlerform, die
+  dieses Bundle in dieser Runde mehrfach geschlossen hat.
+
 ## [1.17.0] – 2026-09-02
 
 > Antwort auf die Rückmeldung des Page-State-Bundles zum Briefing. Keine

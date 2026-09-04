@@ -8,6 +8,7 @@ use Contao\Config;
 use Contao\CoreBundle\Filesystem\Dbafs\DbafsManager;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
+use Contao\DcaLoader;
 use Contao\PageModel;
 use Contao\System;
 use Doctrine\DBAL\Connection;
@@ -499,6 +500,249 @@ final class Tool
         }
 
         return $normalized;
+    }
+
+    /**
+     * The four buckets Contao keeps under `var/cache/<env>/contao`, and what
+     * goes stale in each when a bundle is installed or its DCA changes.
+     *
+     * Every one of them falls back to the sources on a miss, so clearing them
+     * never takes a site down — checked, not assumed, because a cache without a
+     * fallback would not be a cache but a build artefact:
+     *
+     *   dca       DcaLoader::loadDcaFiles() includes the source files
+     *   sql       DcaExtractor::__construct() falls back to createExtract()
+     *   config    Config::preload() / TemplateLoader / Model::getColumnCastTypes()
+     *             each fall back to reading the sources
+     *   languages System::loadLanguageFile() falls back to the .php/.xlf finder
+     *
+     * Whether the cache is also REWRITTEN on that miss is version-dependent,
+     * which is the part worth knowing before clearing a production site:
+     * Contao 5.7 re-dumps the DCA through CombinedFileDumper, Contao 5.3 does
+     * not — there the files stay gone until the next `cache:warmup`, and every
+     * request pays for reading the sources in the meantime. See
+     * {@see self::rebuildsLazily()}.
+     *
+     * A 5.3 detail worth knowing: its miss path includes the RAW dca file,
+     * which declares `class tl_<table>` at the bottom. That is safe because
+     * DcaLoader remembers per process which tables it has loaded, so nothing
+     * is ever included twice — but it does mean a table already loaded in this
+     * request keeps the definition it has, cache or no cache. The clear takes
+     * effect from the next request, which is what an operator expects anyway.
+     *
+     * @var array<string, string>
+     */
+    private const DCA_CACHE_SCOPES = [
+        'dca' => 'merged DataContainer arrays — stale after a bundle adds or changes a field',
+        'sql' => 'per-table schema extracts — stale after a column changes',
+        'config' => 'config.php, template map, column cast types',
+        'languages' => 'compiled XLF/PHP labels — stale after a bundle ships new translations',
+    ];
+
+    /**
+     * @param list<string>|null $scopes
+     *
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'dca_cache_clear',
+        description: <<<'DESC'
+            Discards Contao's own file caches under `var/cache/<env>/contao` so the
+            next request rebuilds them from the current sources. Use it when a DCA
+            change is not showing up — a bundle added a field, a palette changed, a
+            label is still the old one.
+
+            Scopes (default: all four):
+              - dca        merged DataContainer arrays
+              - sql        per-table schema extracts
+              - config     config.php, template map, column cast types
+              - languages  compiled labels
+
+            Safe to run on a live site: every bucket falls back to reading the
+            sources, so nothing breaks while the cache is cold.
+
+            Whether the files are also REWRITTEN on that first access depends on
+            the Contao version, and the answer comes back as `rebuild`:
+              - "lazy"        Contao re-dumps them (5.7+). Nothing else to do.
+              - "next_warmup" Contao 5.3 only reads the sources without caching
+                              them again. The site stays correct but pays for it
+                              on every request until `contao-console cache:warmup`
+                              runs. On a busy site, clear during a deploy.
+
+            What this does NOT do: clear the compiled Symfony container in
+            `var/cache/<env>` itself. A NEW service, listener or tool needs
+            `vendor/bin/contao-console cache:clear --env=prod` — that is a CLI
+            operation, and doing it from inside a request would mean deleting the
+            container the request is running on. `server_info` returns
+            `container.compiled_at` so you can tell the two cases apart before
+            reaching for the wrong remedy.
+
+            Pass `dry_run: true` to see what would be removed. Returns per scope:
+            files, bytes, and anything that could not be removed (a Windows file
+            lock is the usual reason) — a partial result says so instead of
+            reporting success.
+        DESC,
+    )]
+    public function dcaCacheClear(?array $scopes = null, bool $dry_run = false): array
+    {
+        // The caller's own input first, the environment second. A typo in
+        // `scopes` is a typo whether or not anything is cached, and answering
+        // "nothing is cached yet" to it hides the typo behind a fact about the
+        // machine.
+        $wanted = $scopes ?? array_keys(self::DCA_CACHE_SCOPES);
+        $unknown = array_values(array_diff(array_map(strval(...), $wanted), array_keys(self::DCA_CACHE_SCOPES)));
+
+        if ($unknown !== []) {
+            return [
+                'error' => 'invalid_input',
+                'message' => sprintf(
+                    'Unknown scope %s. Available: %s.',
+                    implode(', ', array_map(static fn (string $s): string => '"'.$s.'"', $unknown)),
+                    implode(', ', array_keys(self::DCA_CACHE_SCOPES)),
+                ),
+                'available_scopes' => array_keys(self::DCA_CACHE_SCOPES),
+            ];
+        }
+
+        $cacheDir = (string) $this->parameterBag->get('kernel.cache_dir');
+        $base = realpath($cacheDir.\DIRECTORY_SEPARATOR.'contao');
+
+        if ($base === false) {
+            // Not an error: the postcondition — "nothing stale is cached" — is
+            // already true. A freshly deployed installation that has not served
+            // a request yet looks exactly like this, and answering `error`
+            // there would send the caller looking for a fault that is not one.
+            return [
+                'cleared' => !$dry_run,
+                'dry_run' => $dry_run,
+                'cache_dir' => $this->stripRootDir($cacheDir.\DIRECTORY_SEPARATOR.'contao'),
+                'scopes' => [],
+                'files' => 0,
+                'bytes' => 0,
+                'note' => 'Nothing was cached — the directory does not exist yet. Contao creates it on the first request that needs a DCA.',
+            ];
+        }
+
+        $result = [];
+        $totalFiles = 0;
+        $totalBytes = 0;
+        $failed = [];
+
+        foreach ($wanted as $scope) {
+            $scope = (string) $scope;
+            $dir = realpath($base.\DIRECTORY_SEPARATOR.$scope);
+
+            // Never delete outside the Contao cache, whatever the parameter or a
+            // symlink says. The scope names are ours, but the paths they resolve
+            // to are the filesystem's.
+            if ($dir === false || !self::isInside($dir, $base)) {
+                $result[$scope] = ['files' => 0, 'bytes' => 0, 'present' => false];
+
+                continue;
+            }
+
+            $files = 0;
+            $bytes = 0;
+
+            foreach (SymfonyFinder::create()->files()->in($dir) as $file) {
+                $path = $file->getPathname();
+                $size = (int) $file->getSize();
+
+                if ($dry_run) {
+                    ++$files;
+                    $bytes += $size;
+
+                    continue;
+                }
+
+                if (@unlink($path)) {
+                    ++$files;
+                    $bytes += $size;
+                } else {
+                    $failed[] = $this->stripRootDir($path);
+                }
+            }
+
+            $result[$scope] = [
+                'files' => $files,
+                'bytes' => $bytes,
+                'present' => true,
+                'what' => self::DCA_CACHE_SCOPES[$scope],
+            ];
+            $totalFiles += $files;
+            $totalBytes += $bytes;
+        }
+
+        if (!$dry_run) {
+            $this->log(
+                sprintf('Discarded Contao cache (%s): %d file(s) via MCP', implode(', ', $wanted), $totalFiles),
+                __METHOD__,
+            );
+        }
+
+        $out = [
+            'cleared' => !$dry_run,
+            'dry_run' => $dry_run,
+            'cache_dir' => $this->stripRootDir($base),
+            'scopes' => $result,
+            'files' => $totalFiles,
+            'bytes' => $totalBytes,
+            'rebuild' => self::rebuildsLazily() ? 'lazy' : 'next_warmup',
+        ];
+
+        if (!self::rebuildsLazily() && !$dry_run && $totalFiles > 0) {
+            $out['note'] = 'This Contao version reads the sources without caching them again, so every '
+                .'request pays for it until `vendor/bin/contao-console cache:warmup` runs. The site is '
+                .'correct in the meantime — just slower.';
+        }
+
+        if ($failed !== []) {
+            // Saying "cleared" while files survived is the failure shape this
+            // whole bundle keeps closing: the caller would move on believing the
+            // stale entry is gone.
+            $out['cleared'] = false;
+            $out['failed'] = \array_slice($failed, 0, 20);
+            $out['failed_count'] = \count($failed);
+            $out['message'] = sprintf(
+                '%d file(s) could not be removed and are still cached. On Windows another '
+                .'process usually holds them open; retry, or clear on the CLI.',
+                \count($failed),
+            );
+        }
+
+        return $out;
+    }
+
+    /**
+     * Whether this Contao writes the DCA cache back after a miss.
+     *
+     * Probed by capability rather than by version number on purpose: 5.3 does
+     * not re-dump and 5.7 does, but which release in between drew the line is
+     * not something to guess at in a message an operator will act on.
+     * `DcaLoader::$freshPaths` exists only to support the re-dump path, so its
+     * presence is the capability.
+     *
+     * If a future Contao renames it, this reports "next_warmup" for a version
+     * that would in fact self-heal — an operator running cache:warmup they did
+     * not strictly need. That is the right direction to be wrong in.
+     */
+    private static function rebuildsLazily(): bool
+    {
+        return property_exists(DcaLoader::class, 'freshPaths');
+    }
+
+    /**
+     * Containment check for a path that has already been through realpath().
+     * Case-insensitive on Windows, exact elsewhere.
+     */
+    private static function isInside(string $child, string $parent): bool
+    {
+        $parent = rtrim($parent, \DIRECTORY_SEPARATOR).\DIRECTORY_SEPARATOR;
+        $child = rtrim($child, \DIRECTORY_SEPARATOR).\DIRECTORY_SEPARATOR;
+
+        return \PHP_OS_FAMILY === 'Windows'
+            ? str_starts_with(mb_strtolower($child), mb_strtolower($parent))
+            : str_starts_with($child, $parent);
     }
 
     /**

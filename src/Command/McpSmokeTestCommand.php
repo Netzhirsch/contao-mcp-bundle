@@ -534,6 +534,103 @@ final class McpSmokeTestCommand extends Command
             $tempResult,
             fn ($r) => isset($r['jobs'][0]['before'], $r['jobs'][0]['after'], $r['jobs'][0]['duration_ms']));
 
+        // ── dca_cache_clear ───────────────────────────────────────────────
+        //
+        // None of the Contao purges touch var/cache/<env>/contao, so a DCA that
+        // went stale after a bundle installed a field had no remedy over MCP at
+        // all. The four buckets each regenerate lazily on the next access —
+        // that is what makes deleting them safe, and it is the property this
+        // section actually verifies rather than assumes.
+        $expect('an unknown scope is refused, naming the real ones',
+            $this->maintenanceTool->dcaCacheClear(['gibtsnicht']),
+            static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                && \in_array('dca', $r['available_scopes'] ?? [], true));
+
+        // Warming differs by version: 5.7 re-dumps the DCA on a miss, 5.3 only
+        // reads the sources. So the fixture is written the way the warmer would
+        // — otherwise the test asserts the platform, not the tool.
+        $dcaCacheDir = \Contao\System::getContainer()->getParameter('kernel.cache_dir').'/contao/dca';
+        $dcaFileCount = static fn (): int => is_dir($dcaCacheDir)
+            ? \count(glob($dcaCacheDir.'/*.php') ?: [])
+            : 0;
+
+        \Contao\Controller::loadDataContainer('tl_page');
+
+        if ($dcaFileCount() === 0) {
+            @mkdir($dcaCacheDir, 0o777, true);
+            file_put_contents($dcaCacheDir.'/tl_smoke_fixture.php', "<?php\n// written by the MCP smoke test\n");
+        }
+
+        $expect('the dry run reports files without removing any',
+            [$this->maintenanceTool->dcaCacheClear(['dca'], dry_run: true), $dcaFileCount()],
+            static fn (array $r) => ($r[0]['dry_run'] ?? false) === true
+                && ($r[0]['cleared'] ?? true) === false
+                && ($r[0]['files'] ?? 0) === $r[1]
+                && $dcaFileCount() === $r[1]);
+
+        $clearResult = $this->maintenanceTool->dcaCacheClear(['dca']);
+        $expect('the real run removes them', $clearResult,
+            static fn ($r) => ($r['cleared'] ?? false) === true && ($r['files'] ?? 0) > 0);
+        $expect('and the directory is empty afterwards', $dcaFileCount(),
+            static fn (int $n) => $n === 0);
+        $expect('the answer says whether Contao will rewrite the cache by itself',
+            $clearResult,
+            static fn ($r) => \in_array($r['rebuild'] ?? null, ['lazy', 'next_warmup'], true));
+
+        // Now the property that makes clearing safe: a table still loads with
+        // its cache gone.
+        //
+        // It has to be a table this process has NOT loaded yet. Resetting
+        // DcaLoader's memo and re-loading tl_page looked like the obvious
+        // probe and is in fact impossible on Contao 5.3: there a cache miss
+        // includes the RAW dca/tl_page.php, which declares `class tl_page` at
+        // the bottom, so the second include is a fatal redeclaration. 5.7
+        // avoids it by dumping a namespaced file. Production never hits this —
+        // the memo means a table is included once per process either way — but
+        // the probe did, and a test that has to fake an impossible state is
+        // testing the wrong thing.
+        // Which tables exist differs by version — tl_style_sheet is gone in
+        // Contao 5 — so the candidate comes from what this installation
+        // actually ships rather than from a list I guessed.
+        $candidates = [];
+
+        foreach (\Contao\System::getContainer()->get('contao.resource_finder')->findIn('dca')->name('*.php') as $dcaFile) {
+            $table = $dcaFile->getBasename('.php');
+            if (!isset($GLOBALS['TL_DCA'][$table])) {
+                $candidates[$table] = true;
+            }
+        }
+
+        $unloaded = null;
+
+        foreach (array_keys($candidates) as $candidate) {
+            \Contao\Controller::loadDataContainer($candidate);
+            if (\is_array($GLOBALS['TL_DCA'][$candidate]['config'] ?? null) && $GLOBALS['TL_DCA'][$candidate]['config'] !== []) {
+                $unloaded = $candidate;
+                break;
+            }
+        }
+
+        if ($unloaded !== null) {
+            $expect(sprintf('%s still loads with the cache gone — this is what makes clearing safe', $unloaded),
+                $GLOBALS['TL_DCA'][$unloaded]['config'] ?? null,
+                static fn ($v) => \is_array($v) && $v !== []);
+
+            // And the version-dependent half has to match what the tool told
+            // the caller: saying "lazy" on a version that does not rewrite
+            // would send an operator away without running cache:warmup.
+            $rebuild = (string) ($clearResult['rebuild'] ?? '');
+            $expect(sprintf('and `rebuild: %s` matches what actually happened', $rebuild),
+                [$rebuild, $dcaFileCount()],
+                static fn (array $r) => 'lazy' === $r[0] ? $r[1] > 0 : $r[1] === 0);
+        } else {
+            $output->writeln('  <comment>~ Lazy-Rebuild nicht geprüft — keine ungeladene DCA-Tabelle als Sonde übrig</comment>');
+        }
+
+        $expect('an installation with nothing cached is not reported as an error',
+            $this->maintenanceTool->dcaCacheClear(['languages']),
+            static fn ($r) => !isset($r['error']));
+
         // ═══════════════════════ System (settings + tags) ══════════
         $output->writeln("\n<comment>System extensions</comment>");
 
