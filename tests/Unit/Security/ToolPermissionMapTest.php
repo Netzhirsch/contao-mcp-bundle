@@ -90,8 +90,54 @@ final class ToolPermissionMapTest extends TestCase
     public function testModuleTools(): void
     {
         self::assertSame(['kind' => 'module', 'module' => 'tpl_editor'], $this->map->requirement('template_create', ['name' => 'foo']));
-        self::assertSame(['kind' => 'module', 'module' => 'files'], $this->map->requirement('file_upload', []));
         self::assertSame(['kind' => 'module', 'module' => 'user'], $this->map->requirement('users_list', []));
+    }
+
+    /**
+     * The file manager is not a module gate any more: `module: files` left out
+     * the filemounts and the fop rights, so a user confined to one customer's
+     * folder could read and delete another's. Each tool now carries the
+     * operation, and the paths it touches come from the call.
+     */
+    public function testFileToolsCarryTheirOperation(): void
+    {
+        self::assertSame('file', $this->map->requirement('file_upload', [])['kind']);
+        self::assertSame('upload', $this->map->requirement('file_upload', [])['op']);
+        self::assertSame('read', $this->map->requirement('file_get', [])['op']);
+        self::assertSame('delete', $this->map->requirement('file_delete', [])['op']);
+        self::assertSame('delete_recursive', $this->map->requirement('folder_delete', [])['op']);
+        self::assertSame('edit', $this->map->requirement('file_update_meta', [])['op']);
+    }
+
+    /**
+     * Both ends of a move have to be checked — landing a file where you may not
+     * write is the same problem as taking one from where you may not read.
+     */
+    public function testAMoveCarriesSourceAndTarget(): void
+    {
+        $req = $this->map->requirement('file_move', [
+            'path' => 'kundeA/x.pdf',
+            'new_parent_path' => 'kundeB',
+        ]);
+
+        self::assertSame(['kundeA/x.pdf', 'kundeB'], $req['paths']);
+    }
+
+    public function testAnUploadCarriesItsTargetFolder(): void
+    {
+        $req = $this->map->requirement('file_upload', ['parent_path' => 'kundeA/bilder', 'name' => 'x.jpg']);
+
+        self::assertSame(['kundeA/bilder'], $req['paths']);
+    }
+
+    /**
+     * Publishing a folder changes what the web server hands out and has no fop
+     * right of its own. It was admin-only by falling off the map; now it is
+     * admin-only on purpose.
+     */
+    public function testPublishingAFolderIsAdminOnly(): void
+    {
+        self::assertSame(['kind' => 'admin'], $this->map->requirement('folder_set_public', ['path' => 'x']));
     }
 
     public function testExternalIdSetResolvesTableFromArgs(): void

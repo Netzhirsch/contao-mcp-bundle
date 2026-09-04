@@ -98,17 +98,26 @@ final class ToolPermissionMap
         'template_delete' => ['kind' => 'module', 'module' => 'tpl_editor'],
         'template_rename' => ['kind' => 'module', 'module' => 'tpl_editor'],
 
-        // File manager module.
-        'files_list' => ['kind' => 'module', 'module' => 'files'],
-        'files_search' => ['kind' => 'module', 'module' => 'files'],
-        'file_get' => ['kind' => 'module', 'module' => 'files'],
-        'file_upload' => ['kind' => 'module', 'module' => 'files'],
-        'file_delete' => ['kind' => 'module', 'module' => 'files'],
-        'file_rename' => ['kind' => 'module', 'module' => 'files'],
-        'file_move' => ['kind' => 'module', 'module' => 'files'],
-        'file_update_meta' => ['kind' => 'module', 'module' => 'files'],
-        'folder_create' => ['kind' => 'module', 'module' => 'files'],
-        'folder_delete' => ['kind' => 'module', 'module' => 'files'],
+        // File manager. `module: files` alone was the whole check, which left
+        // out the two gates the backend actually applies to a restricted user:
+        // WHERE they may work (filemounts) and WHAT they may do (fop f1-f6).
+        // tl_files is not a DataContainer table, so no record voter fills that
+        // in. `kind: file` carries the operation; hydrate() collects the paths
+        // the call touches from its arguments.
+        'files_list' => ['kind' => 'file', 'op' => 'read'],
+        'files_search' => ['kind' => 'file', 'op' => 'read'],
+        'file_get' => ['kind' => 'file', 'op' => 'read'],
+        'file_upload' => ['kind' => 'file', 'op' => 'upload'],
+        'file_delete' => ['kind' => 'file', 'op' => 'delete'],
+        'file_rename' => ['kind' => 'file', 'op' => 'rename'],
+        'file_move' => ['kind' => 'file', 'op' => 'move'],
+        'file_update_meta' => ['kind' => 'file', 'op' => 'edit'],
+        'folder_create' => ['kind' => 'file', 'op' => 'upload'],
+        'folder_delete' => ['kind' => 'file', 'op' => 'delete_recursive'],
+        // Publishing a folder changes what the web server serves. Contao has no
+        // fop right for it, and it was already admin-only by falling off the
+        // map — now it says so on purpose (audit F24).
+        'folder_set_public' => ['kind' => 'admin'],
 
         // Backend users / groups — reference reads, gated by the user module.
         'users_list' => ['kind' => 'module', 'module' => 'user'],
@@ -297,6 +306,26 @@ final class ToolPermissionMap
                 return ['kind' => 'admin']; // can't resolve table → admin-only
             }
             $req = ['kind' => 'dc', 'table' => $table, 'op' => $req['op'] ?? 'update'];
+        }
+
+        // Collect every path a file call touches. Both ends of a move or rename
+        // matter: landing a file where you may not write is the same problem as
+        // taking one from where you may not read.
+        if ($kind === 'file') {
+            $paths = [];
+
+            foreach (['path', 'parent_path', 'new_parent_path'] as $key) {
+                if (\is_string($args[$key] ?? null)) {
+                    $paths[] = $args[$key];
+                }
+            }
+
+            // A rename stays in place, so the source path is the whole story;
+            // `new_name` is a basename, not a path, and joining it would only
+            // produce a sibling of a path already checked.
+            $req['paths'] = array_values(array_unique($paths));
+
+            return $req;
         }
 
         if (($req['kind'] ?? null) !== 'dc') {
