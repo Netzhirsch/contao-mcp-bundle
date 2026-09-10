@@ -51,15 +51,31 @@ final class McpServerConfigStorageFailClosedTest extends TestCase
     }
 
     /**
-     * The one case where defaults are right: nothing was ever configured, so
-     * there is no protection to preserve.
+     * Nothing writes config.json at install time — it appears the first time
+     * somebody saves the backend form. So "no file" is the state a freshly
+     * installed, licensed instance is in, and defaulting to `none` there meant
+     * every tool was served at /mcp unauthenticated until an operator happened
+     * to open the configuration.
      */
-    public function testNoFileAtAllStillYieldsTheDefaults(): void
+    public function testAFreshInstallDefaultsToOauthAndSaysItIsUnconfigured(): void
     {
         $config = $this->storage()->load();
 
-        self::assertSame('none', $config['auth_mode']);
-        self::assertArrayNotHasKey('config_error', $config);
+        self::assertSame('oauth', $config['auth_mode']);
+        self::assertSame('missing', $config['config_state']);
+    }
+
+    /**
+     * The three broken-config states are told apart, because "you have not set
+     * this up yet" and "your file is corrupt" need different answers.
+     */
+    public function testTheConfigStatesAreDistinguishable(): void
+    {
+        $this->write('{"auth_mode":"oauth","backend_ur');
+        self::assertSame('invalid', $this->storage()->load()['config_state']);
+
+        $this->write(json_encode(['auth_mode' => 'oauth']));
+        self::assertArrayNotHasKey('config_state', $this->storage()->load());
     }
 
     public function testAValidConfigIsReadAsBefore(): void

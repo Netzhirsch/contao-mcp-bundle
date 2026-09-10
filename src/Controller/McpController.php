@@ -128,10 +128,15 @@ final class McpController
                 sprintf('MCP refused every request: %s', (string) $config['config_error']),
             );
 
+            $notConfigured = ($config['config_state'] ?? '') === 'missing';
+
             return new JsonResponse(
                 [
-                    'error' => 'server_misconfigured',
-                    'message' => 'The MCP server configuration could not be read. Requests are refused until it is fixed.',
+                    'error' => $notConfigured ? 'server_not_configured' : 'server_misconfigured',
+                    'message' => $notConfigured
+                        ? 'The MCP server is installed but has not been configured yet. '
+                          .'Open MCP-Server → Konfiguration in the Contao backend and choose an authentication mode.'
+                        : 'The MCP server configuration could not be read. Requests are refused until it is fixed.',
                 ],
                 503,
                 ['Cache-Control' => 'no-store'],
