@@ -6,6 +6,47 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.22.0] – 2026-09-10
+
+> **Sicherheitsrelease.** Der Default für `auth_mode` war `none`.
+> **Update dringend empfohlen für jede Instanz, auf der die
+> MCP-Konfiguration im Backend noch nie gespeichert wurde.**
+
+### Security
+- **Eine frische Installation bediente `/mcp` ohne Authentifizierung.**
+  `config.json` wird von nichts angelegt — sie entsteht erst, wenn jemand
+  *MCP-Server → Konfiguration* im Backend speichert. Bis dahin greifen die
+  Defaults, und der Default für `auth_mode` war `none`.
+
+  Für eine installierte und lizenzierte Instanz hieß das: **alle 197 Werkzeuge
+  am öffentlichen Endpunkt, ohne Token**, bis ein Mensch daran dachte, die
+  Konfiguration zu öffnen. Das Fenster war standardmäßig offen und wurde durchs
+  Erinnern geschlossen — die falsche Richtung.
+
+  Der Default ist jetzt `oauth`. Ein ausdrückliches `auth_mode: "none"` in einer
+  vorhandenen `config.json` bleibt unangetastet: das ist eine Entscheidung, und
+  auf einem Loopback-Host eine legitime.
+
+  Ergänzt 1.19.0, das denselben Fehler für *kaputte* Konfigurationen geschlossen
+  hat. Dort ging es um eine Datei, die unlesbar wird; hier um eine, die es noch
+  nie gab. Beide Wege führten auf `none`.
+
+- **„Noch nicht konfiguriert" wird als solches gemeldet.** Eine Instanz ohne
+  `config.json` hat auch keine OAuth-Schlüssel und keine `backend_url` — jeder
+  Aufruf wäre an einem 401 gescheitert, das nach einem Token-Problem aussieht.
+  `/mcp` antwortet stattdessen **503** mit `server_not_configured` und dem Hinweis,
+  welches Backend-Modul zu öffnen ist. Die drei Fehlzustände (fehlend, unlesbar,
+  ungültig) sind über `config_state` unterscheidbar.
+
+### Upgrade
+- Instanzen mit gespeicherter Konfiguration: **keine Änderung.**
+- Instanzen, bei denen die Konfiguration nie gespeichert wurde: `/mcp` antwortet
+  ab sofort 503 statt zu bedienen. Einmal *MCP-Server → Konfiguration* öffnen,
+  Modus wählen, speichern.
+- Eine handgeschriebene `config.json` ohne `auth_mode`-Schlüssel fällt jetzt auf
+  `oauth` statt auf `none`. Wer dort bewusst ohne Auth fährt, trägt den Wert
+  ausdrücklich ein.
+
 ## [1.21.0] – 2026-09-04
 
 > **Sicherheitsrelease.** Dritte Charge aus dem Audit vom 04.09.2026:

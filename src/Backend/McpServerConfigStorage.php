@@ -38,11 +38,20 @@ final class McpServerConfigStorage
         return [
             'path' => 'mcp',
             'pagination_limit' => 500,
-            // 'none' = no auth (only safe on a private/loopback host).
             // 'oauth' = OAuth 2.1 with PKCE, tokens issued by the Backend's
             //           /_mcp_oauth/* endpoints, verified as JWTs by the
             //           controller before dispatching tool calls.
-            'auth_mode' => 'none',
+            // 'none'  = no auth. Only safe on a private/loopback host, and only
+            //           as an explicit choice — never as something an
+            //           installation drifts into.
+            //
+            // This defaults to the SECURE value because nothing writes
+            // config.json at install time: it appears the first time somebody
+            // saves the backend form. With 'none' here, a freshly installed and
+            // licensed instance served every tool at /mcp unauthenticated until
+            // an operator happened to open MCP-Server → Konfiguration. The
+            // window was open by default and closed by remembering.
+            'auth_mode' => 'oauth',
             // Public base URL of the Contao Backend. Used when the server
             // advertises OAuth endpoints in
             // /.well-known/oauth-authorization-server. Required when
@@ -120,6 +129,7 @@ final class McpServerConfigStorage
      *     license_server_url: string,
      *     cimd_mode: string,
      *     cimd_trusted_hosts: list<string>,
+     *     config_state?: string,
      *     config_error?: string
      * }
      */
@@ -128,8 +138,15 @@ final class McpServerConfigStorage
         $defaults = $this->defaults();
         $path = $this->filePath();
 
+        // Never configured. The defaults are safe now (auth_mode = oauth), but
+        // an instance in this state has no OAuth keys and no backend_url
+        // either, so every call would fail with a 401 that reads like a token
+        // problem. Say what it actually is instead.
         if (!is_file($path)) {
-            return $defaults;
+            return $defaults + [
+                'config_state' => 'missing',
+                'config_error' => sprintf('%s does not exist — the server has not been configured yet.', $path),
+            ];
         }
 
         // A config file that EXISTS but cannot be read or parsed must not fall
@@ -141,12 +158,18 @@ final class McpServerConfigStorage
         // way: keep serving nothing rather than serving everything.
         $raw = @file_get_contents($path);
         if ($raw === false) {
-            return $defaults + ['config_error' => sprintf('%s exists but could not be read.', $path)];
+            return $defaults + [
+                'config_state' => 'unreadable',
+                'config_error' => sprintf('%s exists but could not be read.', $path),
+            ];
         }
 
         $decoded = json_decode($raw, true);
         if (!\is_array($decoded)) {
-            return $defaults + ['config_error' => sprintf('%s is not valid JSON (%s).', $path, json_last_error_msg())];
+            return $defaults + [
+                'config_state' => 'invalid',
+                'config_error' => sprintf('%s is not valid JSON (%s).', $path, json_last_error_msg()),
+            ];
         }
 
         // Same reasoning one level down: an auth_mode that is present but not
@@ -154,11 +177,14 @@ final class McpServerConfigStorage
         // the default would silently disable authentication.
         $declaredAuthMode = $decoded['auth_mode'] ?? null;
         if ($declaredAuthMode !== null && !\in_array($declaredAuthMode, ['none', 'oauth'], true)) {
-            return $defaults + ['config_error' => sprintf(
-                '%s has auth_mode=%s, which is neither "none" nor "oauth".',
-                $path,
-                var_export($declaredAuthMode, true),
-            )];
+            return $defaults + [
+                'config_state' => 'invalid',
+                'config_error' => sprintf(
+                    '%s has auth_mode=%s, which is neither "none" nor "oauth".',
+                    $path,
+                    var_export($declaredAuthMode, true),
+                ),
+            ];
         }
 
         // Pre-v0.3.0 config files carried `mode`, `host`, `port` fields for
