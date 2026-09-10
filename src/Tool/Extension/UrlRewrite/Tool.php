@@ -9,6 +9,7 @@ use Contao\CoreBundle\Monolog\ContaoContext;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\UrlRewriteCacheInvalidator;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -43,6 +44,7 @@ final class Tool
         private readonly LoggerInterface $logger,
         private readonly FieldMapper $mapper,
         private readonly AuthorResolver $authorResolver,
+        private readonly UrlRewriteCacheInvalidator $routerCache,
     ) {
     }
 
@@ -190,7 +192,9 @@ final class Tool
 
         $row = $this->connection->fetchAssociative('SELECT * FROM tl_url_rewrite WHERE id = ?', [$id]);
 
-        return ($row ? Serializer::summary($row) : ['id' => $id]) + ['created' => true];
+        return ($row ? Serializer::summary($row) : ['id' => $id])
+            + ['created' => true]
+            + $this->routerCacheResult();
     }
 
     /**
@@ -271,7 +275,7 @@ final class Tool
             'id' => $id,
             'changed_fields' => $changed,
             'applied' => \count($changed),
-        ];
+        ] + $this->routerCacheResult();
     }
 
     /**
@@ -308,7 +312,65 @@ final class Tool
         $name = (string) ($row['name'] ?? '');
         $this->log(sprintf('Deleted URL rewrite ID %d ("%s") via MCP', $id, $name), __METHOD__);
 
-        return ['deleted' => true, 'id' => $id, 'name' => $name];
+        return ['deleted' => true, 'id' => $id, 'name' => $name] + $this->routerCacheResult();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'url_rewrite_cache_rebuild',
+        description: <<<'DESC'
+            Rebuilds the compiled Symfony route tables so rules in tl_url_rewrite
+            take effect.
+
+            terminal42/contao-url-rewrite contributes its rules through a route
+            loader, so they are compiled into the router cache. The create /
+            update / delete tools already trigger this rebuild themselves and
+            report it as `router_cache_rebuilt` — this tool exists for the case
+            where the table was changed some other way (a migration, an import,
+            a direct SQL edit) and the router is now serving a stale table.
+
+            It does NOT clear the HTTP page cache — that is
+            page_cache_invalidate — and not Contao's DCA cache, which is
+            dca_cache_clear.
+        DESC,
+    )]
+    public function cacheRebuild(): array
+    {
+        if (($unavailable = $this->ensureAvailable()) !== null) {
+            return $unavailable;
+        }
+
+        $result = $this->routerCache->rebuild();
+
+        if (($result['rebuilt'] ?? false) === true) {
+            $this->log('Rebuilt the URL-rewrite router cache via MCP', __METHOD__);
+        }
+
+        return $result;
+    }
+
+    /**
+     * The rebuild outcome, folded into every write result.
+     *
+     * Reported rather than done silently: a rule that is stored but not routed
+     * looks identical to a rule that works, and the caller has no way to tell
+     * from `created: true` alone. That was the reported failure.
+     *
+     * @return array<string, mixed>
+     */
+    private function routerCacheResult(): array
+    {
+        $result = $this->routerCache->rebuild();
+
+        $out = ['router_cache_rebuilt' => (bool) ($result['rebuilt'] ?? false)];
+
+        if (isset($result['hint'])) {
+            $out['router_cache_hint'] = $result['hint'];
+        }
+
+        return $out;
     }
 
     /**

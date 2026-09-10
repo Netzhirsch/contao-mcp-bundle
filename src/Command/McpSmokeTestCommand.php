@@ -112,6 +112,7 @@ final class McpSmokeTestCommand extends Command
         private readonly ModuleTool $moduleTool,
         private readonly HtmlTool $htmlTool,
         private readonly PatchTool $patchTool,
+        private readonly \Netzhirsch\ContaoMcpBundle\Tool\Extension\UrlRewrite\Tool $urlRewriteTool,
         private readonly \Netzhirsch\ContaoMcpBundle\Tool\Duplicate\Tool $duplicateTool,
         private readonly Connection $connection,
         private readonly RequestStack $requestStack,
@@ -2638,6 +2639,66 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => ($r['error'] ?? '') === 'invalid_filename');
 
         $this->fileTool->folderDelete($publicDirName, confirm_destructive: true, cascade: true);
+
+        // ═══════════════════ URL-Rewrite Router-Cache ═══════════════════
+        //
+        // terminal42/contao-url-rewrite contributes its rules through a route
+        // LOADER, so they get compiled into the router cache. It keeps that in
+        // step through DCA callbacks (config.onsubmit / ondelete), which only a
+        // DataContainer save reaches. Our tools write with DBAL and never did.
+        //
+        // Reported from a live site: url_rewrite_create answered created:true,
+        // url_rewrite_get confirmed the row, and /karriere kept returning 404
+        // because the router was still serving a table compiled before the row
+        // existed. Nothing in the answer hinted at it.
+        $output->writeln("
+<comment>URL-Rewrite Router-Cache</comment>");
+
+        $rwProbe = $this->urlRewriteTool->list(limit: 1);
+
+        if (isset($rwProbe['error'])) {
+            $output->writeln('  <comment>~ übersprungen — terminal42/contao-url-rewrite nicht installiert</comment>');
+        } else {
+            $routerCacheFile = \Contao\System::getContainer()->getParameter('kernel.cache_dir')
+                .'/url_matching_routes.php';
+            $mtimeBefore = is_file($routerCacheFile) ? filemtime($routerCacheFile) : 0;
+            clearstatcache(true, $routerCacheFile);
+            sleep(1); // filemtime has second resolution
+
+            $rwCreated = $this->urlRewriteTool->create(
+                name: $stamp.'_rewrite',
+                requestPath: 'mcp-smoke-'.bin2hex(random_bytes(4)),
+                responseCode: 301,
+                responseUri: '/',
+            );
+
+            $expect('url_rewrite_create still writes the rule', $rwCreated,
+                static fn ($r) => ($r['created'] ?? false) === true && (int) ($r['id'] ?? 0) > 0);
+
+            // The point of the fix: the write reports whether the router was
+            // actually rebuilt, instead of leaving the caller to find out in
+            // the frontend.
+            $expect('...and reports that the router cache was rebuilt', $rwCreated,
+                static fn ($r) => ($r['router_cache_rebuilt'] ?? null) === true);
+
+            clearstatcache(true, $routerCacheFile);
+            $expect('the compiled route table was really rewritten',
+                [$mtimeBefore, is_file($routerCacheFile) ? filemtime($routerCacheFile) : 0],
+                static fn (array $r) => $r[1] > $r[0]);
+
+            $rwId = (int) ($rwCreated['id'] ?? 0);
+
+            $expect('the standalone rebuild tool works on its own',
+                $this->urlRewriteTool->cacheRebuild(),
+                static fn ($r) => ($r['rebuilt'] ?? false) === true);
+
+            if ($rwId > 0) {
+                $expect('deleting a rule rebuilds it too',
+                    $this->urlRewriteTool->delete($rwId, confirm_destructive: true),
+                    static fn ($r) => ($r['deleted'] ?? false) === true
+                        && ($r['router_cache_rebuilt'] ?? null) === true);
+            }
+        }
 
         // ═══════════════════════ Settings reality ══════════════════
         // A write tool that reports success without doing anything undermines

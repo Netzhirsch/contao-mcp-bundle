@@ -333,6 +333,14 @@ services:
         arguments:
             $projectDir: '%kernel.project_dir%'
 
+    # Rebuilds the compiled route tables after a tl_url_rewrite write by calling
+    # terminal42/contao-url-rewrite's own listener, which they declare public.
+    # Needs the container because that service only exists when the optional
+    # extension is installed.
+    Netzhirsch\ContaoMcpBundle\Service\UrlRewriteCacheInvalidator:
+        arguments:
+            $container: '@service_container'
+
     # Discovery proxy: needs the service_container to invoke other registered
     # tools via their handlers (each handler resolves its own dependencies
     # from the container at call time).

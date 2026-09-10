@@ -6,6 +6,60 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.23.0] – 2026-09-10
+
+> Weiterleitungen wurden geschrieben, aber nicht ausgeliefert. Keine
+> Schemaänderung, keine Migration.
+
+### Fixed
+- **`url_rewrite_create`/`_update`/`_delete` schrieben die Regel, ohne dass sie
+  griff.** Von einer Live-Instanz gemeldet: Die Regel lag korrekt in
+  `tl_url_rewrite`, `url_rewrite_get` bestätigte sie, und die Ziel-URL lieferte
+  weiter 404. Der HTTP-Cache war ausgeschlossen.
+
+  Ursache, am Quelltext von terminal42/contao-url-rewrite bestätigt: Das Bundle
+  liefert seine Regeln über einen **Route-Loader**, sie landen also kompiliert
+  in `url_matching_routes.php`. In Takt gehalten wird das über DCA-Callbacks:
+
+  ```php
+  #[AsCallback('tl_url_rewrite', 'config.onsubmit')]
+  #[AsCallback('tl_url_rewrite', 'config.ondelete')]   → clearRouterCache()
+  ```
+
+  Callbacks laufen beim DataContainer-Speichern, also über das Backend-Formular.
+  Unsere Werkzeuge schreiben mit DBAL — schnell und nebenwirkungsfrei, und genau
+  deshalb an den Callbacks vorbei. Der Router bediente weiter eine Route-Tabelle,
+  die kompiliert wurde, bevor die Regel existierte.
+
+  Alle drei Schreibwege lösen jetzt **die Invalidierung des Bundles selbst** aus.
+  Nicht nachgebaut: Deren Routine wärmt die Router danach wieder auf und setzt
+  OPcache zurück, und sie ist diejenige, die bei Änderungen des Fremd-Bundles
+  richtig bleiben muss. Eine zweite Kopie wäre auseinandergelaufen — derselbe
+  Fehler, den dieses Bundle in dieser Runde dreimal entfernt hat. Der Service ist
+  in deren `listener.yml` als `public: true` deklariert, der Zugriff also
+  vorgesehen.
+
+  **Das Ergebnis sagt es jetzt.** Jede Schreibantwort trägt
+  `router_cache_rebuilt: true|false`, im Fehlerfall dazu `router_cache_hint` mit
+  dem Befehl, der es von Hand erledigt. Eine gespeicherte, aber nicht geroutete
+  Regel sieht sonst genauso aus wie eine funktionierende — das war der Kern des
+  Problems.
+
+### Added
+- **`url_rewrite_cache_rebuild`.** Für den Fall, dass `tl_url_rewrite` anders
+  geändert wurde — Migration, Import, direktes SQL — und der Router eine veraltete
+  Tabelle bedient. `maintenance_run` und `page_cache_invalidate` erreichen nur den
+  HTTP-Cache, `dca_cache_clear` nur Contaos DCA-Cache; für die kompilierten Routen
+  gab es nichts.
+
+### Notes
+- Der Smoke-Test prüft nicht nur, dass `router_cache_rebuilt: true` gemeldet wird,
+  sondern dass die kompilierte Route-Tabelle **tatsächlich neu geschrieben** wurde
+  (mtime-Vergleich). Sich auf die eigene Erfolgsmeldung zu verlassen wäre genau
+  der Fehler, um den es hier geht.
+- Der Fehler ist so alt wie die Werkzeuge und betrifft alle Versionen vor 1.23.0,
+  nicht nur das gemeldete 1.12.0.
+
 ## [1.22.0] – 2026-09-10
 
 > **Sicherheitsrelease.** Der Default für `auth_mode` war `none`.
