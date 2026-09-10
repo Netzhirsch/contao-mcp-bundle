@@ -69,6 +69,12 @@ final class ToolPermissionMap
         'contao_describe_tool' => ['kind' => 'none'],
         'contao_call' => ['kind' => 'proxy'],
         'ping' => ['kind' => 'none'],
+        // Ends in no write verb, so the suffix heuristic would read it as a
+        // lookup. It rebuilds a process-wide cache — gate it like changing the
+        // rules themselves, since it is the second half of that same act. Not
+        // admin-only: that would strand the non-admin who just created a rule.
+        'url_rewrite_cache_rebuild' => ['kind' => 'dc', 'table' => 'tl_url_rewrite', 'op' => 'update'],
+
         'entity_query_options' => ['kind' => 'none'],
         'insert_tags_list' => ['kind' => 'none'],
         // Kept readable for any token ON PURPOSE: this bundle's own error
