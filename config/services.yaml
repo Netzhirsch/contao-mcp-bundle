@@ -341,6 +341,14 @@ services:
         arguments:
             $container: '@service_container'
 
+    # Makes a written Twig template take effect: rebuilds Contao's template
+    # hierarchy (a new override is invisible without it) and drops the
+    # compiled classes (an edited one keeps rendering its old markup in prod,
+    # because the Twig cache key is the path and auto_reload follows debug).
+    Netzhirsch\ContaoMcpBundle\Service\TwigTemplateCacheInvalidator:
+        arguments:
+            $cacheDir: '%kernel.cache_dir%'
+
     # Discovery proxy: needs the service_container to invoke other registered
     # tools via their handlers (each handler resolves its own dependencies
     # from the container at call time).
