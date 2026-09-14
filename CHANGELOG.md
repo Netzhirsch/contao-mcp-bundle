@@ -6,6 +6,54 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.24.0] – 2026-09-14
+
+> Der Server liefert jetzt einen Leitfaden mit. Keine Schemaänderung, keine
+> Migration.
+
+### Added
+- **`contao_guide` — ein MCP-Prompt, der die Orientierung liefert, die sich ein
+  Agent sonst durch Fehlschläge erarbeitet.** Jede bisher gemeldete Störung an
+  diesem Server war eine Wissenslücke, kein kaputtes Werkzeug:
+
+  - `languageMain` gesetzt, `master` nicht — die Übersetzung lag in der
+    Datenbank und nicht auf der Seite.
+  - „version undo history revert" gesucht, nichts gefunden, daraus „gibt es
+    nicht" geschlossen und ein Fremdfeld von Hand beschrieben.
+  - `field_not_writable` zweimal als „geht überhaupt nicht" gelesen.
+  - Weiterleitung gespeichert, Router-Cache nicht — 404 bei korrekter Tabelle.
+
+  Jede davon hat ihre eigene Reparatur bekommen: bessere Meldung, bessere
+  Suche, Hinweis im Ergebnis. Der Leitfaden ist dieselbe Reparatur einmal und
+  vorher.
+
+  **Er wird aus dem Live-Zustand erzeugt, nicht gepflegt.** Contao- und
+  Bundle-Version, tatsächliche Werkzeugzahl aus der Registry, Lazy-Mode,
+  welche optionalen Erweiterungen installiert sind — und die Abschnitte zu
+  changelanguage und DeepL erscheinen nur dort, wo es sie gibt. Sonst
+  verspräche der Text Werkzeuge, die anschließend `extension_not_available`
+  antworten.
+
+  Warum erzeugt statt geschrieben: Unsere eigene `composer.json` bewirbt bis
+  heute **175 Werkzeuge**, es sind 197. Genau so altert ein Text, den jemand
+  von Hand nachziehen muss.
+
+  **Was bewusst nicht drinsteht:** alles, was über *ein* Werkzeug gesagt werden
+  kann. Das gehört in dessen Beschreibung. Übrig bleibt, was keine
+  Einzelbeschreibung tragen kann — Reihenfolgen über mehrere Werkzeuge hinweg
+  und Fakten über die Instanz.
+
+  `php-mcp/server` bringt `#[McpPrompt]` seit jeher mit; das Bundle hatte den
+  Mechanismus bisher nicht genutzt. Client-Unterstützung für MCP-Prompts ist
+  ungleichmäßig — das ergänzt gute Tool-Beschreibungen, es ersetzt sie nicht.
+
+### Notes
+- Der Smoke-Test fährt `prompts/list` und `prompts/get` über den echten
+  Dispatcher und prüft, dass die Werkzeugzahl **aus der Registry** stammt und
+  nicht aus dem Text — sonst wäre der Leitfaden ein zweiter Ort, an dem eine
+  Zahl verrotten kann. Dazu eine Längenschranke: Was in den Kontext geladen
+  wird, darf nicht beliebig wachsen (derzeit 3.225 Zeichen).
+
 ## [1.23.0] – 2026-09-10
 
 > Weiterleitungen wurden geschrieben, aber nicht ausgeliefert. Keine
