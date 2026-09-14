@@ -3535,6 +3535,67 @@ final class McpSmokeTestCommand extends Command
 
         $this->connection->executeStatement('DELETE FROM tl_news_archive WHERE id = ?', [$dupArchiveId]);
 
+        // ═══════════════════ Twig-Override wirksam? ═══════════════════
+        //
+        // Reported from AL-09 as a blocker: template_create answered
+        // created:true, template_lookup then answered not_found, and the
+        // frontend kept rendering the base template. Two caches sit in the way
+        // and a file write bypasses both — the hierarchy decides whether an
+        // override EXISTS, Twig's compiled classes decide what is RENDERED.
+        //
+        // Invisible in dev, because Contao's AutoRefreshTemplateHierarchyListener
+        // warms the hierarchy on every request there and auto_reload recompiles.
+        // Which is exactly why it surfaced late in a project.
+        $output->writeln("
+<comment>Twig-Override wirksam?</comment>");
+
+        $probeId = 'mcp_smoke_'.bin2hex(random_bytes(4));
+        $probePath = 'content_element/'.$probeId.'.html.twig';
+
+        $tplCreated = $this->templateTool->templateCreate(
+            path: $probePath,
+            content: '{% block content %}mcp-smoke-v1{% endblock %}',
+        );
+
+        $expect('template_create writes the override', $tplCreated,
+            static fn ($r) => ($r['created'] ?? false) === true);
+
+        // The point of the fix. Before it, this said false-by-omission: the
+        // file existed and the loader had never heard of it.
+        $expect('...and reports that the template caches were rebuilt', $tplCreated,
+            static fn ($r) => ($r['template_cache_rebuilt'] ?? null) === true);
+
+        // The acceptance criterion from the briefing, verbatim: after
+        // template_create, template_lookup finds it in the same session with no
+        // further call.
+        $expect('template_lookup finds it in the same session, without a second call',
+            $this->templateTool->templateLookup('content_element/'.$probeId),
+            static fn ($r) => !isset($r['error']));
+
+        // Second criterion: an edited template must not keep its old compiled
+        // class. The cache key is the path, so nothing about the file itself
+        // forces a recompile.
+        $compiledDir = \Contao\System::getContainer()->getParameter('kernel.cache_dir').'/twig';
+        $this->templateTool->templateUpdate($probePath, '{% block content %}mcp-smoke-v2{% endblock %}');
+        $compiledAfter = is_dir($compiledDir)
+            ? \count(glob($compiledDir.'/*/*.php') ?: [])
+            : 0;
+
+        $expect('an edited template leaves no stale compiled class behind',
+            $compiledAfter,
+            static fn (int $n) => $n === 0);
+
+        $expect('the standalone rebuild tool works on its own',
+            $this->templateTool->templateCacheRebuild(),
+            static fn ($r) => ($r['rebuilt'] ?? false) === true && ($r['hierarchy'] ?? false) === true);
+
+        // Third criterion: a deleted override falls back to the bundle template
+        // immediately, rather than leaving a hole the hierarchy still points at.
+        $this->templateTool->templateDelete($probePath, confirm_destructive: true);
+        $expect('a deleted override disappears from the hierarchy at once',
+            $this->templateTool->templateLookup('content_element/'.$probeId),
+            static fn ($r) => ($r['error'] ?? '') === 'not_found');
+
         // ═══════════════════ Template-Auffindbarkeit ═══════════════════
         //
         // Modern Contao 5 templates are identified by group + name

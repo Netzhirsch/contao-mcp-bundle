@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Template;
 
 use Contao\CoreBundle\Twig\Finder\FinderFactory;
 use Contao\CoreBundle\Twig\Loader\ContaoFilesystemLoader;
+use Netzhirsch\ContaoMcpBundle\Service\TwigTemplateCacheInvalidator;
 use PhpMcp\Server\Attributes\McpTool;
 use Symfony\Component\Finder\Finder;
 use Twig\Environment as TwigEnvironment;
@@ -45,7 +46,61 @@ final class Tool
         private readonly TwigEnvironment $twig,
         private readonly ContaoFilesystemLoader $contaoLoader,
         private readonly FinderFactory $finderFactory,
+        private readonly TwigTemplateCacheInvalidator $templateCache,
     ) {
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'template_cache_rebuild',
+        description: <<<'DESC'
+            Rebuilds the Twig template hierarchy and drops the compiled template
+            classes, so overrides written outside this server take effect.
+
+            template_create / _update / _delete / _rename already do this
+            themselves and report it as `template_cache_rebuilt` — this tool is
+            for templates that arrived some other way: a deployment, a git
+            checkout, an editor writing straight into templates/.
+
+            Two caches are involved and a file write bypasses both. The
+            hierarchy decides whether an override EXISTS (a new file is
+            invisible without a rebuild — template_lookup answers not_found and
+            the base template keeps rendering), and Twig's compiled classes
+            decide what is RENDERED (an edited file keeps its compiled class in
+            prod, because the cache key is the path and auto_reload follows
+            debug).
+
+            Neither is Contao's DCA cache (dca_cache_clear) nor the HTTP page
+            cache (page_cache_invalidate).
+        DESC,
+    )]
+    public function templateCacheRebuild(): array
+    {
+        return $this->templateCache->rebuild();
+    }
+
+    /**
+     * The rebuild outcome, folded into every write result.
+     *
+     * Reported rather than done quietly: a template that is saved but not live
+     * looks exactly like one that works — the write says created, the read-back
+     * shows the new content, and only the browser disagrees.
+     *
+     * @return array<string, mixed>
+     */
+    private function templateCacheResult(): array
+    {
+        $result = $this->templateCache->rebuild();
+
+        $out = ['template_cache_rebuilt' => (bool) ($result['rebuilt'] ?? false)];
+
+        if (isset($result['hint'])) {
+            $out['template_cache_hint'] = $result['hint'];
+        }
+
+        return $out;
     }
 
     /**
@@ -297,7 +352,7 @@ final class Tool
             'copied_from' => $copy_from !== null ? $sourceAbs : null,
             'theme' => $theme ?: null,
             'is_component' => str_starts_with(basename($effectivePath), '_'),
-        ];
+        ] + $this->templateCacheResult();
     }
 
     /**
@@ -327,7 +382,7 @@ final class Tool
             return ['error' => 'write_failed', 'message' => "Could not write override to {$target}"];
         }
 
-        return $this->readFile($target, $path, 'override') + ['updated' => true];
+        return $this->readFile($target, $path, 'override') + ['updated' => true] + $this->templateCacheResult();
     }
 
     /**
@@ -368,7 +423,7 @@ final class Tool
             $parent = \dirname($parent);
         }
 
-        return ['deleted' => true, 'path' => $path];
+        return ['deleted' => true, 'path' => $path] + $this->templateCacheResult();
     }
 
     /**
@@ -416,7 +471,7 @@ final class Tool
             'renamed' => true,
             'from' => $path,
             'to' => $new_path,
-        ];
+        ] + $this->templateCacheResult();
     }
 
     /**

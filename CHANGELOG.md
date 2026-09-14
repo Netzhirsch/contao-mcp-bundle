@@ -6,6 +6,54 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.25.0] – 2026-09-14
+
+> Geschriebene Twig-Overrides wurden in `prod` nicht wirksam. Aus dem
+> AL-09-Briefing, dort als Blocker geführt. Keine Schemaänderung.
+
+### Fixed
+- **`template_create`/`_update`/`_delete`/`_rename` schrieben die Datei, ohne
+  dass sie griff.** Gemeldet mit drei Gegenproben: eine neue Datei wurde von
+  `template_lookup` nicht gefunden, eine geänderte rendert weiter die alte
+  Fassung, während `component_template_update(scss:)` am selben Datensatz
+  sofort wirkte und ein `file_upload` ebenfalls.
+
+  Es sind **zwei** Caches, und der Dateischreibvorgang geht an beiden vorbei:
+
+  1. **Die Template-Hierarchie.** `ContaoFilesystemLoader` baut die
+     Vererbungsketten einmal und **persistiert** sie in einem PSR-6-Pool. Ein
+     Override, das die Hierarchie nie gesehen hat, existiert für den Loader
+     nicht — daher `not_found` und das Basis-Template.
+  2. **Twigs kompilierte Klassen.** `getCacheKey()` liefert `'c:'.$path` — den
+     Pfad, keinen Hash des Inhalts. Eine **geänderte** Datei behält damit ihren
+     Cache-Key, und Twig kompiliert nur neu, wenn es `isFresh()` befragt, was
+     es nur bei `auto_reload` tut. `auto_reload` folgt Debug.
+
+  Das erklärt auch, warum es in `dev` nie auffällt: Contao registriert dort
+  `AutoRefreshTemplateHierarchyListener`, der bei jedem Hauptrequest
+  `warmUp(true)` ruft. In `prod` läuft davon nichts — und genau deshalb fällt
+  es im Projekt erst spät auf.
+
+  Alle vier Schreibwege bauen jetzt beides neu: `warmUp(true)` ist Contaos
+  eigene Routine und schreibt die Hierarchie zurück, und die kompilierten
+  Klassen werden verworfen. Jede Schreibantwort trägt
+  `template_cache_rebuilt`, im Fehlerfall `template_cache_hint` mit dem
+  Befehl von Hand.
+
+### Added
+- **`template_cache_rebuild`** für Templates, die anders ankamen — Deployment,
+  Git-Checkout, ein Editor direkt in `templates/`.
+
+### Notes
+- Die kompilierten Klassen werden **vollständig** verworfen, nicht einzeln:
+  Twig hat keine öffentliche API, um ein Template gezielt zu invalidieren. Der
+  nächste Request kompiliert lazy nach. Template-Schreibvorgänge sind selten
+  und absichtlich, der Tausch ist also vertretbar — auf einer Instanz unter
+  Last kostet er einen Kompilier-Schub, wie jedes Deployment.
+- Der Smoke-Test fährt die Abnahmekriterien des Briefings der Reihe nach: neue
+  Datei sofort auffindbar, geänderte ohne altes Kompilat, gelöschte sofort aus
+  der Hierarchie.
+
 ## [1.24.0] – 2026-09-14
 
 > Der Server liefert jetzt einen Leitfaden mit. Keine Schemaänderung, keine
