@@ -3096,6 +3096,58 @@ final class McpSmokeTestCommand extends Command
             $this->discoveryTool->searchTools('tl_news_archive'),
             static fn ($r) => \in_array('news_archives_list', array_column($r['matches'] ?? [], 'name'), true));
 
+        // ── Der ausgelieferte Leitfaden ──────────────────────────────────
+        //
+        // Every incident reported against this server was a knowledge gap, not
+        // a broken tool. The guide is that repair made once, up front — and it
+        // is generated from live state so it cannot drift the way a text
+        // maintained on the client side does.
+        $promptList = $dispatcher->handlePromptsList(
+            new \PhpMcp\Schema\Request\ListPromptsRequest(90));
+
+        $expect('the server advertises its guide as an MCP prompt',
+            array_map(static fn ($p) => $p->name, $promptList->prompts),
+            static fn (array $names) => \in_array('contao_guide', $names, true));
+
+        $guide = $dispatcher->handlePromptGet(
+            new \PhpMcp\Schema\Request\GetPromptRequest(91, 'contao_guide'));
+        $guideText = '';
+        foreach ($guide->messages as $m) {
+            $guideText .= $m->content->text ?? '';
+        }
+
+        $expect('it reports THIS instance, not a generic blurb',
+            $guideText,
+            static fn (string $t) => str_contains($t, 'Contao ')
+                && preg_match('/\d+ tools registered/', $t) === 1);
+
+        // The number has to come from the registry. Our own composer.json still
+        // says 175 where there are 197 — a hand-maintained count is how that
+        // happens, and the guide must not become a second place it can rot.
+        $expect('the tool count is the real one, not a written-down one',
+            [$guideText, \count($this->registryAccessor->getToolsCached())],
+            static fn (array $r) => str_contains($r[0], $r[1].' tools registered'));
+
+        $expect('it names the three caches apart',
+            $guideText,
+            static fn (string $t) => str_contains($t, 'page_cache_invalidate')
+                && str_contains($t, 'dca_cache_clear')
+                && str_contains($t, 'url_rewrite_cache_rebuild'));
+
+        // A guide is loaded into the caller's context, so its length is part of
+        // the contract. Cheap to let it grow one useful paragraph at a time
+        // until it costs more than it saves.
+        $expect(sprintf('it stays short enough to be worth loading (%d chars)', mb_strlen($guideText)),
+            $guideText,
+            static fn (string $t) => mb_strlen($t) > 800 && mb_strlen($t) < 6000);
+
+        // Extension-dependent passages appear only where the extension does,
+        // or the guide would promise tools that answer extension_not_available.
+        $hasChangeLanguage = class_exists('Terminal42\ChangeLanguage\EventListener\CallbackSetupListener');
+        $expect(sprintf('the changelanguage passage matches reality (installed: %s)', $hasChangeLanguage ? 'yes' : 'no'),
+            $guideText,
+            static fn (string $t) => str_contains($t, 'languageMain') === $hasChangeLanguage);
+
         // Post-call hook — the second half of the old patch. Observable side
         // effect: it clears the per-call identity context.
         $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
