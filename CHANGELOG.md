@@ -6,6 +6,57 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.26.0] – 2026-09-14
+
+> Die Lizenzerneuerung meldet jetzt drei Versionsangaben mit. Keine
+> Schemaänderung.
+
+### Added
+- **Bundle-, Contao- und PHP-Version gehen bei `/trial` und `/renew` mit.**
+  Der Lizenzserver konnte bisher nicht feststellen, welche Bundle-Version bei
+  einem Kunden läuft — das einzige Signal war indirekt (wer `instance_secret`
+  schickt, hat mindestens 1.0.9), also ein Schwellwert und keine Version. Damit
+  blieb bei jedem Supportfall offen, womit man es zu tun hat, und ein
+  Kompatibilitätszweig in `/renew` ließ sich nie abräumen, weil niemand
+  nachweisen konnte, dass ihn keiner mehr braucht.
+
+  Eingebaut in `RenewalClient::post()`, durch das **nur** `/trial` und `/renew`
+  laufen — `/checkout-session` und `/portal-session` gehen einen anderen Weg und
+  bekommen die Felder folglich nicht. Mit `+=` statt Überschreiben, damit ein
+  späterer Umbau `product` oder `token` nicht verdrängen kann.
+
+### Privacy
+- **Was die Erneuerung überträgt, vollständig:** Produkt, Domain, ein zufälliges
+  Instanz-Geheimnis als Eigentumsnachweis — und neu die drei Versionsangaben.
+  **Mehr nicht.** Keine Inhalte, keine Benutzerdaten, keine Seiten- oder
+  Nutzungszahlen, keine Liste installierter Erweiterungen; der Server nimmt
+  solche Felder auch nicht an. Steht jetzt auch in beiden READMEs, damit es
+  nachlesbar ist, ohne den Code zu lesen.
+
+### Notes
+- **Werte werden vor dem Senden auf die Serverregeln geprüft** (getrimmt,
+  höchstens 32 Zeichen, nur `[A-Za-z0-9._+-]`). Der Server verwirft
+  Unpassendes stillschweigend und behält den alten Wert — auf seiner Seite
+  richtig, aber ein fehlerhafter Wert käme damit als „diese Instanz meldet
+  nicht" an, ununterscheidbar von einer alten Installation. Ein Feld, das nicht
+  gültig zu machen ist, wird deshalb hier weggelassen: **was gesendet wird, wird
+  auch angenommen.**
+- **`php_version` ist nicht `PHP_VERSION`.** Auf manchen Distributionen trägt
+  die Konstante ein Paket-Suffix (`8.3.14-1+deb12u1`). Der Server nähme es an —
+  die Zeichen sind erlaubt —, aber in der Spalte stünde dann eine Debian-Build-Id
+  statt einer PHP-Version, und zwei Instanzen auf demselben PHP würden nicht
+  zusammenfallen. Gesendet wird `PHP_MAJOR.PHP_MINOR.PHP_RELEASE`.
+
+### Fixed
+- **Beide READMEs behaupteten „Standardkonfig läuft unauthentifiziert".** Seit
+  1.22.0 ist der Default `oauth`, und eine nie konfigurierte Instanz antwortet
+  mit 503. Die Dokumentation widersprach damit dem ausgelieferten Verhalten —
+  bei einer Sicherheitsvorgabe die unangenehmste Stelle dafür.
+- Werkzeugzahl in beiden READMEs und in der `composer.json` berichtigt (186
+  bzw. 175 → **197**), und die Paketbeschreibung nennt Contao **5 und 6** statt
+  nur 5. Die `composer.json` ist der Text, den Packagist und die
+  Contao-Erweiterungsliste anzeigen.
+
 ## [1.25.0] – 2026-09-14
 
 > Geschriebene Twig-Overrides wurden in `prod` nicht wirksam. Aus dem

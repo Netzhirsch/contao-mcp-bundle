@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\License;
 
+use Composer\InstalledVersions;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -197,6 +198,68 @@ final class RenewalClient
     }
 
     /**
+     * The three version fields the license server accepts on /trial and /renew.
+     *
+     * Why they exist: the server had no way to tell which bundle version runs
+     * at a customer. The only signal was indirect — whoever sends
+     * `instance_secret` is at least 1.0.9 — which is a threshold, not a
+     * version. That left two questions open on every support case, and left a
+     * compatibility fallback in /renew that nobody could prove was still
+     * needed.
+     *
+     * This is NOT a telemetry channel. Three fields, nothing else: no installed
+     * bundles, no page or usage counts, no content, no user data. The server
+     * does not accept more either. It is written up in the CHANGELOG so a
+     * customer can read what leaves their installation without reading code.
+     *
+     * Values are sanitised to the server's own rules before sending. The server
+     * silently discards what does not fit and keeps the previous value — which
+     * is the right behaviour there, but it means a malformed value would show
+     * up as "this instance never reported", indistinguishable from an old
+     * installation. So a field that cannot be made valid is omitted here
+     * instead: a field that IS sent is a field that will be accepted.
+     *
+     * @return array<string, string>
+     */
+    private function versionFields(): array
+    {
+        $fields = [
+            'bundle_version' => InstalledVersions::isInstalled('netzhirsch/contao-mcp-bundle')
+                ? (string) InstalledVersions::getPrettyVersion('netzhirsch/contao-mcp-bundle')
+                : 'dev',
+            'contao_version' => InstalledVersions::isInstalled('contao/core-bundle')
+                ? (string) InstalledVersions::getPrettyVersion('contao/core-bundle')
+                : 'unknown',
+            // Deliberately not PHP_VERSION: on some distributions it carries a
+            // packaging suffix (8.3.14-1+deb12u1). The server would take it —
+            // the characters are allowed — but the column then holds a Debian
+            // build id rather than a PHP version, and two instances on the same
+            // PHP would not group.
+            'php_version' => PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION.'.'.PHP_RELEASE_VERSION,
+        ];
+
+        return array_filter(
+            array_map(self::sanitiseVersion(...), $fields),
+            static fn (string $value): bool => $value !== '',
+        );
+    }
+
+    /**
+     * The server's rules, applied here: trimmed, at most 32 characters, only
+     * [A-Za-z0-9._+-]. Anything else comes back empty and is left out.
+     */
+    private static function sanitiseVersion(string $value): string
+    {
+        $value = trim($value);
+
+        if ($value === '' || mb_strlen($value) > 32) {
+            return '';
+        }
+
+        return preg_match('/^[A-Za-z0-9._+-]+$/', $value) === 1 ? $value : '';
+    }
+
+    /**
      * @param array<string, mixed> $body
      *
      * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
@@ -204,6 +267,11 @@ final class RenewalClient
     private function post(string $endpoint, array $body, ?int $timeoutSeconds = null): array
     {
         $server = $this->serverUrl();
+
+        // `+=` rather than overwriting: a caller could set these itself, and a
+        // later rewrite of post() must not be able to displace `product` or
+        // `token` by accident.
+        $body += $this->versionFields();
 
         try {
             $response = $this->httpClient->request('POST', $server.$endpoint, [
