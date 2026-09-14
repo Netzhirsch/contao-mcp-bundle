@@ -5,7 +5,7 @@
 *🇩🇪 [Deutsche Fassung](README.md) — the German README is the reference version and
 carries additional development notes.*
 
-**Status:** Stable — `v1.8.2`
+**Status:** Stable — `v1.25.0`
 **License:** proprietary, commercially licensed — 30-day free trial, then
 €49/month per Contao installation (see [License & trial](#license--trial) and
 [LICENSE](LICENSE))
@@ -18,7 +18,7 @@ no REST endpoints of your own, no middleware and no extra port.
 Instead of building a bespoke API endpoint for every AI task, the AI session gets
 structured access to the whole DCA stack: editors can create content by
 describing it, pipelines can populate pages from third-party systems, developers
-can script structural migrations — all through the same **186 tools**, and all
+can script structural migrations — all through the same **197 tools**, and all
 constrained by exactly the same backend permissions that apply when a person
 clicks through the backend.
 
@@ -28,7 +28,7 @@ URL rewrites, form leads, maintenance and system settings.
 
 ## What you get
 
-- **186 tools** across Contao core entities plus popular extensions.
+- **197 tools** across Contao core entities plus popular extensions.
 - **Lazy-mode discovery**: three meta tools (`contao_search_tools`,
   `contao_describe_tool`, `contao_call`) hide the rest from `tools/list` — worth
   roughly 12 KB of system-prompt overhead per turn in Claude Desktop.
@@ -125,9 +125,11 @@ vendor/bin/contao-console contao:migrate --env=prod
 ```
 
 This creates the OAuth tables (`tl_mcp_oauth_*`) and adds the external-ID columns
-to 24 entity tables. The default configuration runs **unauthenticated** — for
-production, switch `auth_mode` to `oauth` (backend module or
-`var/mcp/config.json`).
+to 24 entity tables. **The endpoint is closed out of the box.** Since 1.22.0 `auth_mode` defaults to
+`oauth`; an instance whose configuration has never been saved answers `/mcp`
+with **503** and names the backend module. That is where the mode is chosen —
+`none` is still available, but only as a deliberate choice for a private or
+loopback host.
 
 The MCP endpoint is live immediately after the migration at
 `https://<backend_url>/mcp` — Apache/PHP-FPM serves it like any other Symfony
@@ -189,6 +191,14 @@ vendor/bin/contao-console contao:mcp:license status           # current state
 vendor/bin/contao-console contao:mcp:license trial <email>    # start the trial
 vendor/bin/contao-console contao:mcp:license activate <token> # install a token
 ```
+
+**What the renewal reports.** Four things: the product, the domain, a random
+instance secret as proof of ownership — and, since 1.26.0, three version
+values: **bundle, Contao and PHP version.** Nothing else. No content, no user
+data, no page or usage counts, no list of installed extensions; the server does
+not accept such fields either. The versions answer two questions that otherwise
+accompany every support case: which version a customer runs, and whether a
+compatibility branch for old bundles is still needed.
 
 **Renewal is automatic.** The `LicenseRenewalCron` job (hourly, throttled)
 refreshes the token, while verification itself is **offline** (Ed25519). An
