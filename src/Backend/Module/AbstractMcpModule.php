@@ -71,9 +71,7 @@ abstract class AbstractMcpModule extends BackendModule
         $this->Template->configDefaults = $configStorage->defaults();
         $this->Template->endpointUrl = rtrim((string) ($config['backend_url'] ?? ''), '/').'/'.ltrim((string) $config['path'], '/');
         $this->Template->locale = $this->resolveLocale();
-        $this->Template->bundleVersion = (string) (InstalledVersions::isInstalled('netzhirsch/contao-mcp-bundle')
-            ? InstalledVersions::getPrettyVersion('netzhirsch/contao-mcp-bundle')
-            : 'dev');
+        $this->Template->bundleVersion = self::installedVersion();
         $this->Template->messages = Message::generate();
         $this->Template->referer = $this->getReferer(true);
         $this->Template->backTitle = StringUtil::specialchars($GLOBALS['TL_LANG']['MSC']['backBTTitle'] ?? '');
@@ -166,6 +164,17 @@ abstract class AbstractMcpModule extends BackendModule
         $short = strtolower(substr($locale, 0, 2));
 
         return \in_array($short, ['de', 'en'], true) ? $short : 'en';
+    }
+
+    /**
+     * The bundle version actually running here — 'dev' when Composer has no
+     * record of the package (a path repository during development).
+     */
+    protected static function installedVersion(): string
+    {
+        return (string) (InstalledVersions::isInstalled('netzhirsch/contao-mcp-bundle')
+            ? InstalledVersions::getPrettyVersion('netzhirsch/contao-mcp-bundle')
+            : 'dev');
     }
 
     protected function translate(string $key, string $fallback = ''): string

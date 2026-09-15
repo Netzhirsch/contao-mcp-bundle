@@ -205,14 +205,24 @@ solche Felder auch gar nicht an. Die Versionsangaben beantworten zwei Fragen,
 die sonst jeden Supportfall begleiten: welche Version bei einem Kunden läuft,
 und ob ein Kompatibilitäts-Zweig für alte Bundles noch gebraucht wird.
 
+**Was zurückkommt.** Neben dem Token seit 1.27.0 optional ein Hinweis auf eine
+neuere Version: Versionsnummer, Link auf die Release Notes und ob es sich um
+ein **Sicherheitsupdate** handelt. Der Hinweis steht dann im Backend unter
+MCP-Server → Status und in `contao:mcp:license status`. Er informiert und sonst
+nichts: Er aktualisiert nichts selbst, blockiert nichts, und auf einer
+Dev-Installation (`dev-master`) erscheint er gar nicht. Ob eine Version
+angekündigt wird, entscheidet Netzhirsch von Hand — ein neuer Tag ist nicht
+automatisch eine Ankündigung.
+
 **Verlängerung läuft automatisch.** Der Cron `LicenseRenewalCron` (stündlich,
 gedrosselt) erneuert das Token; die Prüfung selbst ist **offline** (Ed25519).
 Ein Ausfall des Lizenzservers sperrt daher niemanden aus — zusätzlich gelten
 3 Tage Kulanz nach Ablauf. Voraussetzung ist ein laufender Contao-Cron.
 
 > Verbindung zum Lizenzserver: `https://license.netzhirsch.de`, fest im Bundle
-> hinterlegt — **nichts zu konfigurieren**. Übertragen werden nur Domain,
-> Produkt und die E-Mail des bestellenden Backend-Users.
+> hinterlegt — **nichts zu konfigurieren**. Übertragen werden Domain, Produkt,
+> das Instanz-Geheimnis, die drei Versionsangaben und — nur beim Bestellen —
+> die E-Mail des bestellenden Backend-Users.
 
 ## Anforderungen
 

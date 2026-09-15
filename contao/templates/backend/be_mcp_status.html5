@@ -67,6 +67,29 @@ $actionLink = static fn (string $action): string => $actionUrl.'&action='.$actio
     <p class="tl_error">⚠ <?= $t('http_warning', 'OAuth is active but the Backend URL is plain http:// on a non-loopback host — access tokens travel in clear text. Use HTTPS in production.') ?></p>
 </div>
 <?php endif; ?>
+<?php
+// "A newer version is available", announced by the license server on the last
+// renewal. Shown ONCE, here — not on every backend page and never by mail. It
+// informs and nothing else: no update is triggered from here, and nothing is
+// blocked. Null (nothing announced, or this install is already current) is the
+// normal state, and a development installation never gets a notice at all.
+$update = $this->updateNotice instanceof \Netzhirsch\ContaoMcpBundle\License\UpdateNotice ? $this->updateNotice : null;
+?>
+<?php if ($update !== null): ?>
+<div class="tl_message">
+    <p class="<?= $update->securityRelease ? 'tl_error' : 'tl_info' ?>">
+        <?php if ($update->securityRelease): ?>
+            ⚠ <?= \sprintf($t('update_security_available', 'Security update: version %s closes a security issue — you are running %s. Please update soon.'), htmlspecialchars($update->latestVersion), htmlspecialchars((string) $this->bundleVersion)) ?>
+        <?php else: ?>
+            <?= \sprintf($t('update_available', 'Version %s of the MCP bundle is available — you are running %s.'), htmlspecialchars($update->latestVersion), htmlspecialchars((string) $this->bundleVersion)) ?>
+        <?php endif; ?>
+        <?= $t('update_how', 'Update it the usual way: Contao Manager, or composer update netzhirsch/contao-mcp-bundle.') ?>
+        <?php if ($update->releaseNotesUrl !== ''): ?>
+            <a href="<?= htmlspecialchars($update->releaseNotesUrl) ?>" target="_blank" rel="noreferrer noopener"><?= $t('update_release_notes', 'Release notes') ?></a>
+        <?php endif; ?>
+    </p>
+</div>
+<?php endif; ?>
 <?php if ($isOauth && !$regRestricted): ?>
 <div class="tl_message">
     <p class="tl_error">⚠ <?= $t('open_reg_warning', 'Client registration is set to "Open" — any MCP client can register without a token. Change this to "Restricted" in the Configuration page unless you are on a private/localhost setup.') ?></p>

@@ -16,6 +16,13 @@ use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
  *                           license (issued once, on the claim that binds it)
  *   hwm             int     forward-only "highest time ever seen" (clock-rollback guard)
  *   last_renew_at   int     unix ts of the last successful renewal (renew throttle)
+ *
+ * Plus the release announcement from the last successful call — informational
+ * only, never consulted by the license gate:
+ *
+ *   latest_version    string  announced release ('' = nothing announced)
+ *   release_notes_url string  https URL for that release ('' = no link)
+ *   security_release  bool    whether that release closes a security issue
  */
 final class LicenseStore
 {
@@ -77,6 +84,58 @@ final class LicenseStore
     {
         $data = $this->load();
         $data['plan'] = trim($plan);
+
+        return $this->write($data);
+    }
+
+    /**
+     * The release the server announced on the last successful call, '' when
+     * nothing is announced. Purely informational — {@see UpdateNotice} decides
+     * whether it is worth showing, and nothing here touches the license gate.
+     */
+    public function getLatestVersion(): string
+    {
+        return (string) ($this->load()['latest_version'] ?? '');
+    }
+
+    public function getReleaseNotesUrl(): string
+    {
+        return (string) ($this->load()['release_notes_url'] ?? '');
+    }
+
+    public function isSecurityRelease(): bool
+    {
+        return (bool) ($this->load()['security_release'] ?? false);
+    }
+
+    /**
+     * Stores the announcement from the last successful server call.
+     *
+     * All three values are written together, empty ones included: an
+     * announcement can be WITHDRAWN at the server, and the withdrawal arrives
+     * as `null`. Writing only non-empty values would leave the retracted
+     * version standing in the backend forever.
+     *
+     * Skips the write when nothing changed. The cron renews every few hours and
+     * the normal case is "nothing announced" — no reason to rewrite
+     * license.json each time, and every read-modify-write is a window in which
+     * a concurrently renewed token could be clobbered.
+     */
+    public function setUpdateNotice(string $latestVersion, string $releaseNotesUrl, bool $securityRelease): bool
+    {
+        $data = $this->load();
+
+        $unchanged = $latestVersion === (string) ($data['latest_version'] ?? '')
+            && $releaseNotesUrl === (string) ($data['release_notes_url'] ?? '')
+            && $securityRelease === (bool) ($data['security_release'] ?? false);
+
+        if ($unchanged) {
+            return true;
+        }
+
+        $data['latest_version'] = $latestVersion;
+        $data['release_notes_url'] = $releaseNotesUrl;
+        $data['security_release'] = $securityRelease;
 
         return $this->write($data);
     }

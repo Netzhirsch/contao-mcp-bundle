@@ -13,6 +13,12 @@
       <trans-unit id="mcp_server.status_auth_mode"><source>Auth</source></trans-unit>
       <trans-unit id="mcp_server.status_bundle_version"><source>Bundle version</source></trans-unit>
 
+      <!-- Update notice (announced by the license server, informational only) -->
+      <trans-unit id="mcp_server.update_available"><source>Version %s of the MCP bundle is available — you are running %s.</source></trans-unit>
+      <trans-unit id="mcp_server.update_security_available"><source>Security update: version %s closes a security issue — you are running %s. Please update soon.</source></trans-unit>
+      <trans-unit id="mcp_server.update_how"><source>Update it the usual way: Contao Manager, or composer update netzhirsch/contao-mcp-bundle.</source></trans-unit>
+      <trans-unit id="mcp_server.update_release_notes"><source>Release notes</source></trans-unit>
+
       <!-- License (trial → paid subscription) -->
       <trans-unit id="mcp_server.license_label"><source>License</source></trans-unit>
       <trans-unit id="mcp_server.license_days_left"><source>%d days left</source></trans-unit>

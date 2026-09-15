@@ -8,7 +8,6 @@ use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseStore;
 use Netzhirsch\ContaoMcpBundle\License\RenewalClient;
 use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -25,47 +24,13 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * indistinguishable from an installation that predates the feature. So a field
  * that cannot be made valid is left out here instead, and a field that IS sent
  * is one that will be accepted.
+ *
+ * The rule itself is tested in {@see VersionStringTest}; this is about the two
+ * endpoints carrying the fields.
  */
 #[CoversClass(RenewalClient::class)]
 final class RenewalClientVersionFieldsTest extends TestCase
 {
-    private static function sanitise(string $value): string
-    {
-        $method = new \ReflectionMethod(RenewalClient::class, 'sanitiseVersion');
-
-        return (string) $method->invoke(null, $value);
-    }
-
-    /**
-     * @return iterable<string, array{string, string}>
-     */
-    public static function values(): iterable
-    {
-        // What Composer actually hands back, from the briefing.
-        yield 'release' => ['1.0.10', '1.0.10'];
-        yield 'prerelease with build' => ['v1.2.0-beta.1+build.7', 'v1.2.0-beta.1+build.7'];
-        yield 'branch alias' => ['5.7.x-dev', '5.7.x-dev'];
-        yield 'branch' => ['dev-master', 'dev-master'];
-        yield 'fallback' => ['dev', 'dev'];
-
-        // Trimmed rather than rejected — leading whitespace is not a reason to
-        // lose a perfectly good version.
-        yield 'padded' => ['  1.0.10  ', '1.0.10'];
-
-        // The briefing's own counter-example: a space inside the string.
-        yield 'space inside' => ['1.0.10 beta', ''];
-        yield 'empty' => ['', ''];
-        yield 'slash' => ['1.0/10', ''];
-        yield 'too long' => [str_repeat('9', 33), ''];
-        yield 'exactly at the limit' => [str_repeat('9', 32), str_repeat('9', 32)];
-    }
-
-    #[DataProvider('values')]
-    public function testSanitiser(string $input, string $expected): void
-    {
-        self::assertSame($expected, self::sanitise($input));
-    }
-
     /**
      * A PHP built with a distribution suffix — 8.3.14-1+deb12u1 — passes the
      * server's character rules, so it would be stored. The column would then
@@ -109,9 +74,8 @@ final class RenewalClientVersionFieldsTest extends TestCase
 
         $client = $this->clientWith($http);
 
-        // The token cannot be stored without a real signing key, so both calls
-        // end in a storage failure — by which point the request has gone out,
-        // which is what this test is about.
+        // Both calls go out; what comes back is a stub token. This test is
+        // about the request body, not the response.
         $client->startTrial('a@example.com');
         $client->renew(force: true);
 
