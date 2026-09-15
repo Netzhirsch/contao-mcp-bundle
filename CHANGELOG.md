@@ -6,6 +6,66 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.27.0] – 2026-09-15
+
+> Der Lizenzserver darf jetzt auf eine neuere Version hinweisen. Optional,
+> additiv, ohne Einfluss auf die Lizenz. Keine Schemaänderung.
+
+### Added
+- **„Version X ist verfügbar" im Backend-Modul MCP-Server → Status.** Der
+  Contao Manager zeigt Updates zwar an, aber er wird selten geöffnet — und bei
+  kaputter Composer-Auth fürs private Repo zeigt er gar nichts. Der Hinweis
+  steht jetzt dort, wo gerade jemand mit MCP arbeitet. Dazu kommt ein Signal,
+  das Composer-Metadaten nicht transportieren: ob ein Release
+  **sicherheitsrelevant** ist — dann in Warnfarbe statt als Info.
+
+  Quelle sind drei optionale Felder in der Antwort von `/trial` und `/renew`
+  (`latest_version`, `release_notes_url`, `security_release`). Sie werden in
+  `var/mcp/license.json` abgelegt, damit der Hinweis auch ohne Server-Call
+  steht — der Cron läuft höchstens alle sechs Stunden.
+
+  Was der Hinweis **nicht** tut: nichts selbst aktualisieren (kein
+  `composer`-Aufruf, kein Anstoßen des Contao Managers), nichts blockieren,
+  nicht auf jeder Backend-Seite erscheinen, keine Mail schicken. Und er fasst
+  die Lizenzprüfung nicht an — fehlende oder unsinnige Felder heißen schlicht
+  „keine Ankündigung".
+- **Derselbe Hinweis in `contao:mcp:license status`**, für alle, die die
+  Installation über SSH betreuen und das Backend nie öffnen. Nur auf
+  ausdrückliche Abfrage, nicht bei `renew`.
+
+### Notes
+- **Auf einer Dev-Installation erscheint nichts.** Bei `dev-master`, `1.27.x-dev`
+  oder einem Checkout ohne Tag liefert `version_compare()` zwar eine Antwort,
+  aber eine sinnlose — sie würde dem Entwickler sagen, er hänge hinter dem
+  Release her, an dem er gerade arbeitet. Keine Aussage ist besser als eine
+  falsche.
+- **Versionsvergleich über `version_compare()`, nicht per String.** Als String
+  sortiert `1.0.9` über `1.0.10`. Das führende `v` fällt auf beiden Seiten weg,
+  weil Composer je nach Tag `1.0.10` oder `v1.0.10` meldet und die beiden
+  Seiten sich darin unterscheiden können.
+- **Eine zurückgezogene Ankündigung verschwindet.** Die drei Werte werden immer
+  gemeinsam geschrieben, leere eingeschlossen — sonst bliebe eine zurückgenommene
+  Version bis zur nächsten Ankündigung in jedem Kundenbackend stehen.
+- **Ein kaputtes Feld darf die Lizenz nicht mitreißen.** Ein Array in
+  `latest_version` löst sonst „Array to string conversion" aus, und PHPs
+  Error-Handler macht daraus im Dev-Modus und unter PHPUnit eine Exception: die
+  Erneuerung käme als `unreachable` zurück. Ein reines Anzeigefeld hätte die
+  Lizenzierung lahmgelegt. Alle drei Felder werden deshalb defensiv gelesen.
+- **`release_notes_url` wird nur verlinkt, wenn sie eine echte `https://`-URL
+  ist**, sonst erscheint der Hinweis ohne Link. Der Host ist bewusst **nicht**
+  auf github.com festgenagelt — Release Notes dürfen auf eine Doku-Domain
+  umziehen, ohne dass der Link stillschweigend verschwindet.
+
+### Changed
+- Die Regel für Versionsstrings (getrimmt, ≤ 32 Zeichen, `[A-Za-z0-9._+-]`)
+  liegt jetzt in `License\VersionString` und gilt in beide Richtungen —
+  ausgehend für die drei gemeldeten Versionen, eingehend für `latest_version`.
+  Eine zweite, leicht abweichende Kopie derselben Serverregel wäre irgendwann
+  auseinandergelaufen.
+- Beide READMEs sagen jetzt auch, was **zurück**kommt. Dabei fiel ein
+  Widerspruch auf: der Kasten am Ende des Lizenzabschnitts nannte noch „nur
+  Domain, Produkt und E-Mail" — seit 1.26.0 gehen drei Versionsangaben mit.
+
 ## [1.26.0] – 2026-09-14
 
 > Die Lizenzerneuerung meldet jetzt drei Versionsangaben mit. Keine

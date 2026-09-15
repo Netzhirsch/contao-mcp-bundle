@@ -200,15 +200,24 @@ not accept such fields either. The versions answer two questions that otherwise
 accompany every support case: which version a customer runs, and whether a
 compatibility branch for old bundles is still needed.
 
+**What comes back.** Besides the token, since 1.27.0 an optional pointer to a
+newer release: the version number, a link to the release notes, and whether it
+is a **security release**. It then shows in the backend under MCP server →
+Status and in `contao:mcp:license status`. It informs and nothing else: it
+updates nothing by itself, blocks nothing, and on a development installation
+(`dev-master`) it does not appear at all. Whether a version is announced is
+decided by hand at Netzhirsch — a new tag is not automatically an announcement.
+
 **Renewal is automatic.** The `LicenseRenewalCron` job (hourly, throttled)
 refreshes the token, while verification itself is **offline** (Ed25519). An
 outage of the license server therefore locks nobody out — and there are 3 days of
 grace after expiry on top. A running Contao cron is the prerequisite.
 
 > The license server is `https://license.netzhirsch.de`, baked into the bundle —
-> **nothing to configure**. Only the domain, the product id, an installation
-> secret and the ordering backend user's e-mail address are transmitted. No
-> content, no editorial data, no visitor data, no telemetry.
+> **nothing to configure**. Transmitted are the domain, the product id, an
+> installation secret, the three version values and — only when ordering — the
+> ordering backend user's e-mail address. No content, no editorial data, no
+> visitor data, no telemetry.
 
 ## Requirements
 

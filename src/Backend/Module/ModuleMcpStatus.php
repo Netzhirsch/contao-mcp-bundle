@@ -13,6 +13,7 @@ use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseGate;
 use Netzhirsch\ContaoMcpBundle\License\LicenseStore;
 use Netzhirsch\ContaoMcpBundle\License\RenewalClient;
+use Netzhirsch\ContaoMcpBundle\License\UpdateNotice;
 use Netzhirsch\ContaoMcpBundle\OAuth\InitialAccessTokenManager;
 use Netzhirsch\ContaoMcpBundle\OAuth\OAuthClientAdministration;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -64,9 +65,23 @@ class ModuleMcpStatus extends AbstractMcpModule
         // operator can see whether the tools are currently unlocked — see
         // License\LicenseGate.
         $this->Template->license = $container->get(LicenseGate::class)->state();
+        $store = $container->get(LicenseStore::class);
         // Internal licenses renew indefinitely — showing "35 days left" (the
         // token lifetime) reads like an expiry date and confuses operators.
-        $this->Template->licensePlan = $container->get(LicenseStore::class)->getPlan();
+        $this->Template->licensePlan = $store->getPlan();
+
+        // "A newer version is available", from the last license-server answer.
+        // The Contao Manager shows updates too, but it is opened rarely, and a
+        // broken Composer auth for the private repository hides them there
+        // entirely — while whoever works with MCP is looking at this page. It
+        // also carries one thing Composer metadata cannot: whether the release
+        // is a security release. Null (nothing to say) is the normal state.
+        $this->Template->updateNotice = UpdateNotice::evaluate(
+            $store->getLatestVersion(),
+            self::installedVersion(),
+            $store->isSecurityRelease(),
+            $store->getReleaseNotesUrl(),
+        );
 
         // OAuth admin data only when the gate is actually active — under
         // auth_mode=none there are no clients/IATs to manage.

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Command;
 
+use Composer\InstalledVersions;
 use Netzhirsch\ContaoMcpBundle\License\LicenseGate;
 use Netzhirsch\ContaoMcpBundle\License\LicenseStore;
 use Netzhirsch\ContaoMcpBundle\License\LicenseToken;
 use Netzhirsch\ContaoMcpBundle\License\RenewalClient;
+use Netzhirsch\ContaoMcpBundle\License\UpdateNotice;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -78,6 +80,29 @@ final class McpLicenseCommand extends Command
             ['Days left' => (string) $s['days_left']],
             ['In grace' => $s['in_grace'] ? 'yes' : 'no'],
         );
+
+        // The same notice the backend status page shows, for whoever
+        // administers this install over SSH and never opens it. Printed on an
+        // explicit `status` call only — it is not a nag, and it is not part of
+        // the license state above.
+        $update = UpdateNotice::evaluate(
+            $this->store->getLatestVersion(),
+            InstalledVersions::isInstalled('netzhirsch/contao-mcp-bundle')
+                ? (string) InstalledVersions::getPrettyVersion('netzhirsch/contao-mcp-bundle')
+                : '',
+            $this->store->isSecurityRelease(),
+            $this->store->getReleaseNotesUrl(),
+        );
+
+        if ($update !== null) {
+            $line = sprintf('Version %s is available. Update via the Contao Manager or composer.', $update->latestVersion);
+            if ('' !== $update->releaseNotesUrl) {
+                $line .= "\n".$update->releaseNotesUrl;
+            }
+            $update->securityRelease
+                ? $io->warning('Security update. '.$line)
+                : $io->note($line);
+        }
 
         return self::SUCCESS;
     }

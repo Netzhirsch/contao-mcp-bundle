@@ -56,7 +56,7 @@ final class RenewalClient
      * Request a fresh trial token. The server rejects a second trial for the
      * same domain/account (HTTP 409) — that is where "no restart" lives.
      *
-     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
+     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string, latest_version?: string, release_notes_url?: string, security_release?: bool}
      */
     public function startTrial(string $accountEmail): array
     {
@@ -79,7 +79,7 @@ final class RenewalClient
      * connectivity failure ('unreachable') never lands here, so a server outage
      * cannot brick a paying install.
      *
-     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
+     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string, latest_version?: string, release_notes_url?: string, security_release?: bool}
      */
     public function renew(bool $force = false, ?int $timeoutSeconds = null): array
     {
@@ -212,7 +212,8 @@ final class RenewalClient
      * does not accept more either. It is written up in the CHANGELOG so a
      * customer can read what leaves their installation without reading code.
      *
-     * Values are sanitised to the server's own rules before sending. The server
+     * Values are sanitised to the server's own rules before sending
+     * ({@see VersionString}). The server
      * silently discards what does not fit and keeps the previous value — which
      * is the right behaviour there, but it means a malformed value would show
      * up as "this instance never reported", indistinguishable from an old
@@ -239,30 +240,15 @@ final class RenewalClient
         ];
 
         return array_filter(
-            array_map(self::sanitiseVersion(...), $fields),
+            array_map(VersionString::sanitise(...), $fields),
             static fn (string $value): bool => $value !== '',
         );
     }
 
     /**
-     * The server's rules, applied here: trimmed, at most 32 characters, only
-     * [A-Za-z0-9._+-]. Anything else comes back empty and is left out.
-     */
-    private static function sanitiseVersion(string $value): string
-    {
-        $value = trim($value);
-
-        if ($value === '' || mb_strlen($value) > 32) {
-            return '';
-        }
-
-        return preg_match('/^[A-Za-z0-9._+-]+$/', $value) === 1 ? $value : '';
-    }
-
-    /**
      * @param array<string, mixed> $body
      *
-     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string}
+     * @return array{ok: bool, error?: string, message?: string, expires_at?: int, type?: string, plan?: string, latest_version?: string, release_notes_url?: string, security_release?: bool}
      */
     private function post(string $endpoint, array $body, ?int $timeoutSeconds = null): array
     {
@@ -316,12 +302,43 @@ final class RenewalClient
         $plan = (string) ($data['plan'] ?? '');
         $this->store->setPlan($plan);
 
+        // Optional and additive: the server MAY announce a newer release. The
+        // fields can be absent, null or nonsense — none of that is allowed to
+        // affect the license, so everything below is read defensively and the
+        // result is only ever displayed. See UpdateNotice.
+        $latestVersion = VersionString::sanitise(self::stringField($data, 'latest_version'));
+        $releaseNotesUrl = UpdateNotice::safeUrl(self::stringField($data, 'release_notes_url'));
+        $securityRelease = filter_var(self::stringField($data, 'security_release'), FILTER_VALIDATE_BOOLEAN);
+        $this->store->setUpdateNotice($latestVersion, $releaseNotesUrl, $securityRelease);
+
         return [
             'ok' => true,
             'expires_at' => (int) ($data['expires_at'] ?? 0),
             'type' => (string) ($data['type'] ?? ''),
             'plan' => $plan,
+            'latest_version' => $latestVersion,
+            'release_notes_url' => $releaseNotesUrl,
+            'security_release' => $securityRelease,
         ];
+    }
+
+    /**
+     * A response field as a string, or '' when it is not a scalar.
+     *
+     * The plain `(string)` cast used for the license fields is fine for those,
+     * because the license is void without them anyway. Here it would not be: an
+     * array or object in `latest_version` raises "Array to string conversion",
+     * and PHP's error handler turns that warning into an exception in dev and
+     * under PHPUnit. The renewal would then fail as 'unreachable' — a malformed
+     * announcement taking down the licensing it must not touch.
+     *
+     * @param array<mixed> $data
+     */
+    private static function stringField(array $data, string $key): string
+    {
+        $value = $data[$key] ?? null;
+
+        return \is_scalar($value) ? (string) $value : '';
     }
 
     private function serverUrl(): string
