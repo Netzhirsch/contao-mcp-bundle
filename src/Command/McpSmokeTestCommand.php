@@ -4057,6 +4057,15 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => ($r['known'] ?? false) === true
                 && ($r['dynamic_palette'] ?? false) === true
                 && str_contains((string) ($r['message'] ?? ''), 'no STATIC palette'));
+        // …and names BOTH ways out. Saying only "the extension ships its own
+        // tools" read as "there is no other way", and a report came back
+        // calling this a deliberate security boundary. It is a validation
+        // limit, and an extension can lift it itself with a FieldProvider.
+        $expect('and names the FieldProvider route, not just extension tools',
+            $this->contentTool->paletteGet('smoke_dynamic_palette'),
+            static fn ($r) => str_contains((string) ($r['message'] ?? ''), 'FieldProvider')
+                && str_contains((string) ($r['message'] ?? ''), 'netzhirsch.field_provider')
+                && str_contains((string) ($r['message'] ?? ''), 'not a permission check'));
         $expect('while an unregistered type is named as unregistered', $this->contentTool->paletteGet('smoke_no_such_type'),
             static fn ($r) => ($r['known'] ?? true) === false
                 && str_contains((string) ($r['message'] ?? ''), 'not registered')
@@ -4097,6 +4106,22 @@ final class McpSmokeTestCommand extends Command
                 $this->contentTool->update((int) $paletteElement['id'], ['linkTitle' => 'nope']),
                 static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
                     && str_contains((string) ($r['message'] ?? ''), 'linkTitle'));
+
+            // The write-side twin of the palette answer above, and the message
+            // an agent actually meets. apply() throws before anything is
+            // saved, so the element keeps its own type — the probe leaves no
+            // trace.
+            $GLOBALS['TL_CTE']['texts']['smoke_dynamic_palette'] = 'stdClass';
+            $expect('a dynamic-palette write refusal explains how to lift it',
+                $this->contentTool->update((int) $paletteElement['id'], ['type' => 'smoke_dynamic_palette', 'netzhirschNoSuchField' => 'x']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'no static palette')
+                    && str_contains((string) ($r['message'] ?? ''), 'netzhirsch.field_provider')
+                    && str_contains((string) ($r['message'] ?? ''), 'not a permission check'));
+            unset($GLOBALS['TL_CTE']['texts']['smoke_dynamic_palette']);
+            $expect('and the refused write really changed nothing',
+                $this->contentTool->get((int) $paletteElement['id'], ['type']),
+                static fn ($r) => ($r['type'] ?? '') === 'text');
 
             // A content element carries around 120 columns. Reading four image
             // elements just to collect four singleSRC uuids cost thousands of
