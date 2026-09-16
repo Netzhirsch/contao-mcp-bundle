@@ -10,6 +10,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\StringUtil;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
+use Netzhirsch\ContaoMcpBundle\Extension\ExtensionToolInventory;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
@@ -37,6 +38,7 @@ final class Tool
         private readonly AuthorResolver $authorResolver,
         private readonly McpServerConfigStorage $configStorage,
         private readonly QueryFilterResolver $queryFilterResolver,
+        private readonly ExtensionToolInventory $extensionTools,
         private readonly string $projectDir,
     ) {
     }
@@ -297,7 +299,7 @@ final class Tool
      */
     #[McpTool(
         name: 'installed_bundles',
-        description: 'Lists which Symfony bundles, Contao packages and MCP field-extensions are present in this Contao installation. Use this when an extension-specific field is rejected with "extension_not_available" to confirm what is actually available.',
+        description: 'Lists which Symfony bundles, Contao packages, MCP field-extensions and extension tools are present in this Contao installation. Use this when an extension-specific field is rejected with "extension_not_available" to confirm what is actually available — and before concluding that something cannot be done here, because `mcp_extension_tools` also lists tools that are installed but switched off, which never appear in tools/list.',
     )]
     public function installedBundles(): array
     {
@@ -306,7 +308,40 @@ final class Tool
             'contao_packages' => $this->collectContaoPackages(),
             'mcp_field_extensions' => $this->collectFieldExtensions(),
             'mcp_entity_extensions' => $this->collectEntityExtensions(),
+            'mcp_extension_tools' => $this->collectExtensionTools(),
         ];
+    }
+
+    /**
+     * Tools contributed by other bundles — including the ones that are present
+     * but switched off, which is the whole point of the section.
+     *
+     * Extension tools are opt-in: installed does not mean callable. A disabled
+     * tool is absent from tools/list by design, so from the outside it looks
+     * identical to a tool that was never written — and that misreading has
+     * already been reported to a customer as "this cannot be done". Saying
+     * "installed, not enabled" turns a dead end into a question for the
+     * operator.
+     *
+     * @return array{tools: list<array{name: string, description: string, class: string, enabled: bool}>, disabled?: list<string>, hint?: string}
+     */
+    private function collectExtensionTools(): array
+    {
+        $tools = $this->extensionTools->all();
+        $disabled = $this->extensionTools->disabledNames();
+
+        $out = ['tools' => $tools];
+        if ($disabled !== []) {
+            $out['disabled'] = $disabled;
+            $out['hint'] = sprintf(
+                '%d extension tool(s) are installed here but not enabled, so they are absent from tools/list and cannot be called. '
+                .'They are opt-in: a Contao administrator enables them under MCP-Server → Tools (config key extension_tools_enabled). '
+                .'Before concluding that something cannot be done through MCP, check whether one of these would do it.',
+                \count($disabled),
+            );
+        }
+
+        return $out;
     }
 
     /**

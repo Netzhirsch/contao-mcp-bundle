@@ -140,4 +140,101 @@ final class ProviderFieldsTest extends TestCase
 
         self::assertSame(['a' => 1], $subject->serialize('tl_theme', $this->model()));
     }
+
+    /**
+     * A provider whose declared fields span several types — the bootstrap
+     * bundle's components are the real case. getDeclaredFields() is the union,
+     * getAllowedFields() narrows it per type.
+     *
+     * @param array<string, list<string>> $allowedByType
+     */
+    private function typedProvider(string $table, array $allowedByType, bool &$applied = null): FieldProvider
+    {
+        $union = array_values(array_unique(array_merge(...array_values($allowedByType))));
+
+        $p = $this->createMock(FieldProvider::class);
+        $p->method('getTable')->willReturn($table);
+        $p->method('getDeclaredFields')->willReturn($union);
+        $p->method('getAllowedFields')->willReturnCallback(
+            static fn (?string $type): array => $allowedByType[(string) $type] ?? [],
+        );
+        $p->method('isAvailable')->willReturn(true);
+        $p->method('getRequiredExtension')->willReturn('netzhirsch/contao-bootstrap-bundle');
+        $p->method('serialize')->willReturn([]);
+        $p->method('apply')->willReturnCallback(
+            static function (Model $m, array $input) use (&$applied, $union): array {
+                $applied = true;
+
+                return array_values(array_intersect(array_keys($input), $union));
+            },
+        );
+
+        return $p;
+    }
+
+    /**
+     * The gate the contract always promised. Before it existed here, only the
+     * page mapper honoured getAllowedFields(); on tl_content every declared
+     * field of every provider reached apply() on every type. A provider that
+     * trusted the contract instead of re-checking wrote to the wrong record,
+     * without an error — reported by the bootstrap bundle, whose fields belong
+     * to one component each.
+     */
+    public function testAFieldOfAnotherTypeIsRefusedBeforeTheProviderIsCalled(): void
+    {
+        $wasApplied = false;
+        $subject = $this->fields($this->typedProvider('tl_content', [
+            'netzhirsch_component_card' => ['component_headline'],
+            'netzhirsch_component_quote' => ['component_quote'],
+        ], $wasApplied));
+
+        $result = $subject->apply(
+            'tl_content',
+            $this->model(),
+            ['component_quote' => 'x'],
+            true,
+            'netzhirsch_component_card',
+        );
+
+        self::assertSame([], $result['applied']);
+        self::assertFalse($wasApplied, 'apply() must not be reached for a field of another type');
+        self::assertStringContainsString('component_quote', $result['errors'][0]);
+        self::assertStringContainsString('netzhirsch_component_card', $result['errors'][0]);
+        self::assertStringContainsString('netzhirsch/contao-bootstrap-bundle', $result['errors'][0]);
+    }
+
+    public function testAFieldOfTheMatchingTypeStillGoesThrough(): void
+    {
+        $subject = $this->fields($this->typedProvider('tl_content', [
+            'netzhirsch_component_card' => ['component_headline'],
+            'netzhirsch_component_quote' => ['component_quote'],
+        ]));
+
+        $result = $subject->apply(
+            'tl_content',
+            $this->model(),
+            ['component_headline' => 'x'],
+            true,
+            'netzhirsch_component_card',
+        );
+
+        self::assertSame(['component_headline'], $result['applied']);
+        self::assertSame([], $result['errors']);
+    }
+
+    /**
+     * tl_theme and tl_layout have no type concept, so there is nothing to gate
+     * on. Passing no type must not turn into "allowed for type ''".
+     */
+    public function testWithoutATypeTheGateIsSkipped(): void
+    {
+        $subject = $this->fields($this->typedProvider('tl_theme', [
+            'some_type' => ['netzhirsch_bootstrap_scss'],
+        ]));
+
+        $result = $subject->apply('tl_theme', $this->model(), ['netzhirsch_bootstrap_scss' => '$a: 1;']);
+
+        self::assertSame(['netzhirsch_bootstrap_scss'], $result['applied']);
+        self::assertSame([], $result['errors']);
+    }
 }

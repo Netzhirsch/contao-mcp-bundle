@@ -74,7 +74,7 @@ final class ProviderFields
      *
      * @return array{applied: list<string>, errors: list<string>}
      */
-    public function apply(string $table, Model $model, array $input, bool $detectChanges = true): array
+    public function apply(string $table, Model $model, array $input, bool $detectChanges = true, ?string $type = null): array
     {
         $applied = [];
         $errors = [];
@@ -92,6 +92,29 @@ final class ProviderFields
                     $provider->getRequiredExtension(),
                 );
                 continue;
+            }
+
+            // The per-type gate the contract promises. It used to be honoured
+            // only by the page mapper, so a provider that filtered correctly in
+            // getAllowedFields() still had its apply() called on every type
+            // here — and a provider that trusted the contract instead of
+            // re-checking wrote to the wrong record. Silently: no error, a
+            // value in the wrong place. Reported by the bootstrap bundle,
+            // whose fields span several component types.
+            //
+            // $type is null for tables that have no type concept (tl_theme,
+            // tl_layout); there is nothing to gate on there.
+            if ($type !== null) {
+                $wrongType = array_values(array_diff($claims, $provider->getAllowedFields($type)));
+                if ($wrongType !== []) {
+                    $errors[] = sprintf(
+                        'Field(s) %s are provided by %s but are not valid for type "%s".',
+                        implode(', ', $wrongType),
+                        $provider->getRequiredExtension(),
+                        $type,
+                    );
+                    continue;
+                }
             }
 
             try {

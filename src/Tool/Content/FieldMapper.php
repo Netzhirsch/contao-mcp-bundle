@@ -188,7 +188,7 @@ final class FieldMapper
         // Providers last. Unlike the theme mapper this one signals failure by
         // throwing, so a rejected value keeps that contract — the Tool layer
         // catches it and nothing is saved.
-        $fromProviders = $this->providerFields->apply('tl_content', $content, $input, $detectChanges);
+        $fromProviders = $this->providerFields->apply('tl_content', $content, $input, $detectChanges, $type);
         if ($fromProviders['errors'] !== []) {
             throw new \InvalidArgumentException(implode(' ', $fromProviders['errors']));
         }
