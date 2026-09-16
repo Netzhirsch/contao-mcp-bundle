@@ -153,8 +153,10 @@ final class FieldMapper
 
                 throw new \InvalidArgumentException(sprintf(
                     $dynamic
-                        ? 'Field "%s" cannot be written on content type "%s": that type has no static palette (it is assembled at edit time), so only the base fields and extension-declared fields are writable here — %5$s. '
-                            .'The extension providing this type usually ships its own tools; see installed_bundles and enable them under MCP-Server → Tools.'
+                        ? 'Field "%1$s" cannot be written on content type "%2$s": that type has no static palette (it is assembled at edit time), so only the base fields and extension-declared fields are writable here — %5$s. '
+                            .'This is a validation limit, not a permission check — nothing here can tell what a valid value for that field would be, so it is refused rather than guessed at. '
+                            .'Two ways to make it writable, both on the extension that owns the type: it can ship its own tools (see installed_bundles, enable them under MCP-Server → Tools), '
+                            .'or it can declare the field by implementing Netzhirsch\ContaoMcpBundle\Tool\Contract\FieldProvider and tagging that service `netzhirsch.field_provider` — declared fields skip the palette check and are validated by the extension itself.'
                         : 'Field "%1$s" is not valid for content type "%2$s". Use content_palette_get("%3$s") to see allowed fields. Currently allowed: %4$s.',
                     $field,
                     $type,

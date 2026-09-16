@@ -709,8 +709,9 @@ final class Tool
                 'dynamic_palette' => true,
                 'message' => sprintf(
                     'Type "%s" exists but has no STATIC palette: it is assembled at edit time (an onload callback, or virtual fields backed by a serialised column), so it cannot be read here. '
-                    .'Through content_create / content_update only the fields below plus any extension-declared fields are writable. '
-                    .'The extension providing this type usually ships its own tools for it — check installed_bundles (mcp_entity_extensions) and the tool panel under MCP-Server → Tools, where extension tools have to be enabled before they appear.',
+                    .'Through content_create / content_update only the fields below plus any extension-declared fields are writable. That is a validation limit, not a permission check. '
+                    .'The extension that owns the type can lift it in either of two ways: ship its own tools for it (check installed_bundles (mcp_entity_extensions) and the tool panel under MCP-Server → Tools, where extension tools have to be enabled before they appear), '
+                    .'or declare its fields by implementing Netzhirsch\ContaoMcpBundle\Tool\Contract\FieldProvider and tagging that service `netzhirsch.field_provider`.',
                     $type,
                 ),
                 'fields' => $fields,

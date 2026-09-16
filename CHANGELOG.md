@@ -6,6 +6,42 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.28.0] – 2026-09-16
+
+> Zwei Fehlermeldungen sagen jetzt, wie man die Grenze aufhebt, die sie melden.
+> Keine Verhaltens-, keine Schemaänderung.
+
+### Fixed
+- **„Typ ohne statische Palette" nannte nur einen von zwei Auswegen** — und
+  wurde deshalb als Sicherheitsgrenze gelesen. Ein Agent erklärte einem Kunden,
+  `netzhirsch_component_*`-Elemente seien über MCP strukturell nicht
+  beschreibbar, das sei „eine bewusste Sicherheitsgrenze […] keine Lücke, die
+  ich mit einem anderen Ansatz hätte schließen können", und der einzige denkbare
+  Umweg wären eigene Werkzeuge der Erweiterung.
+
+  Das ist keine Rechteprüfung. `content_update` prüft jedes Feld gegen die
+  Palette des Typs; eine erst beim Öffnen des Formulars zusammengebaute Palette
+  liefert dieser Prüfung keine Feldliste, also bleiben die Basisfelder übrig.
+  Eine Validierungsgrenze — mehr Rechte ändern daran nichts.
+
+  Und es gibt den zweiten, kleineren Weg schon lange: Die Erweiterung
+  implementiert `Tool\Contract\FieldProvider` und taggt den Service
+  `netzhirsch.field_provider`. Deklarierte Felder umgehen die Paletten-Prüfung
+  (`FieldMapper::allowedFieldsFor()`), und validiert wird der Wert von der
+  Erweiterung, die das Format besitzt. Beide Meldungen — die Schreib-Abweisung
+  und die Antwort von `content_palette_get` — nennen jetzt beide Wege und sagen
+  ausdrücklich, dass keine Rechteprüfung dahintersteht.
+
+  Festgenagelt im Smoke-Test (511 statt 508 Prüfungen), auch die Zusicherung,
+  dass die abgewiesene Schreiboperation wirklich nichts verändert.
+
+### Added
+- `docs/briefings/component-bundle-field-provider.md` — Umsetzungsbriefing für
+  das Component-Bundle: Provider-Gerüst, Service-Tag, und die drei Punkte, an
+  denen es schiefgehen kann (Einzelfelder statt Rohspalte, Teil-Updates dürfen
+  Geschwisterwerte nicht verlieren, `getAllowedFields()` pro Komponententyp).
+  Wie alle Briefings `export-ignore` — es geht nicht an Kunden mit.
+
 ## [1.27.0] – 2026-09-15
 
 > Der Lizenzserver darf jetzt auf eine neuere Version hinweisen. Optional,
