@@ -669,6 +669,17 @@ final class McpSmokeTestCommand extends Command
                 && \is_array($r['warnings'])
                 && \in_array($r['overall_health'] ?? null, ['ok', 'warnings'], true));
 
+        // Extension tools are opt-in, so a disabled one is missing from
+        // tools/list — indistinguishable from one that was never written
+        // unless something says otherwise. installed_bundles is that something;
+        // the section must exist even where no extension ships tools at all.
+        $expect('installed_bundles reports extension tools, enabled or not',
+            $this->systemTool->installedBundles(),
+            fn ($r) => isset($r['mcp_extension_tools']['tools'])
+                && \is_array($r['mcp_extension_tools']['tools'])
+                // hint only when there is something to act on
+                && (($r['mcp_extension_tools']['disabled'] ?? []) === []) === !isset($r['mcp_extension_tools']['hint']));
+
         // ═══════════════════════ Page-Cache invalidation ════════════
         $output->writeln("\n<comment>Page cache</comment>");
 

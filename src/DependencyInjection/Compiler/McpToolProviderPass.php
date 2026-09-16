@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\DependencyInjection\Compiler;
 
+use Netzhirsch\ContaoMcpBundle\Extension\ExtensionToolInventory;
 use Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -77,6 +78,14 @@ final class McpToolProviderPass implements CompilerPassInterface
         if ($container->hasDefinition(HttpDispatcherFactory::class)) {
             $container->getDefinition(HttpDispatcherFactory::class)
                 ->setArgument('$extensionToolClasses', $classes);
+        }
+
+        // Same list for the inventory, which answers "what is installed here
+        // but switched off" — a question the registry cannot answer, because a
+        // disabled tool never enters it.
+        if ($container->hasDefinition(ExtensionToolInventory::class)) {
+            $container->getDefinition(ExtensionToolInventory::class)
+                ->setArgument('$providerClasses', $classes);
         }
     }
 }

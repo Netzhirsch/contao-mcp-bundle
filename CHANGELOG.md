@@ -6,6 +6,48 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.29.0] – 2026-09-16
+
+> Drei Befunde aus der Antwort des Bootstrap-Bundles auf das Provider-Briefing.
+> Einer davon war ein Vertragsbruch bei uns. Keine Schemaänderung.
+
+### Fixed
+- **`getAllowedFields()` war als Typ-Prüfung dokumentiert, wurde aber nur vom
+  Page-Mapper ausgewertet.** Auf `tl_content` schnitt `ProviderFields` nur gegen
+  `getDeclaredFields()` — die Vereinigungsmenge **aller** Provider. Wer die
+  Methode sauber implementierte und daraus schloss, die Typ-Zuordnung sei
+  erledigt, bekam sein `apply()` trotzdem auf **jedem** Inhaltselementtyp
+  aufgerufen. Prüfte er nicht selbst nach, schrieb er in das falsche Element:
+  kein Fehler, ein Wert an der falschen Stelle.
+
+  `ProviderFields::apply()` bekommt jetzt den aufgelösten Typ und fragt
+  `getAllowedFields($type)`, **bevor** der Provider aufgerufen wird; abgewiesen
+  wird mit einer Meldung, die Erweiterung und Typ nennt — dieselbe Form wie im
+  Page-Mapper. Tabellen ohne Typ-Konzept (`tl_theme`, `tl_layout`) übergeben
+  `null` und überspringen die Prüfung.
+
+  Für unsere eigenen Provider ist das ein No-op: alle vier changelanguage-
+  Provider geben ihre Deklaration unverändert zurück. Für Fremd-Provider ist es
+  das, was der Vertrag immer versprochen hat.
+
+### Added
+- **`installed_bundles` nennt vorhandene, aber deaktivierte Erweiterungs-
+  werkzeuge** — neuer Abschnitt `mcp_extension_tools` mit `enabled`-Flag je
+  Werkzeug, der Liste der abgeschalteten und einem Hinweis, wie man sie
+  einschaltet. Grund: Erweiterungswerkzeuge sind opt-in, ein abgeschaltetes
+  fehlt in `tools/list`, und von außen ist das nicht von „gibt es nicht" zu
+  unterscheiden. Genau das führte dazu, dass einem Kunden erklärt wurde,
+  Komponenten-Elemente seien über MCP nicht beschreibbar — während die passenden
+  Werkzeuge installiert und abgeschaltet danebenlagen.
+
+### Changed
+- **`FieldProvider` dokumentiert die Präfix-Regel.** Provider-Felder umgehen die
+  Paletten-Prüfung — damit auch die Frage, ob der Name schon eine Spalte der
+  Zieltabelle ist. Ein Feld `headline` auf `tl_content` wird nicht als Dublette
+  abgewiesen: Der Kern-Mapper schreibt die Spalte, danach schreibt der Provider
+  sie erneut. Der Kernwert verschwindet lautlos. Wer Feldnamen aus
+  Redaktionseingaben ableitet, muss präfixen.
+
 ## [1.28.0] – 2026-09-16
 
 > Zwei Fehlermeldungen sagen jetzt, wie man die Grenze aufhebt, die sie melden.

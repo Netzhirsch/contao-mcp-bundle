@@ -21,6 +21,24 @@ use Contao\Model;
  *
  * Fields declared by a provider are *not* restricted by the entity's own type palette
  * (the provider takes responsibility for any per-type filtering inside getAllowedFields).
+ *
+ * Two consequences of that exemption, both of which have bitten a provider author:
+ *
+ *   1. FIELD NAMES MUST BE UNIQUE TO YOUR BUNDLE. Skipping the palette check also
+ *      means skipping the "is this a column of that table?" question. A declared
+ *      field named like an existing column — `headline`, `text`, `url`, `cssID` on
+ *      tl_content — is not rejected as a duplicate: the core mapper writes the
+ *      column, then your provider runs last and writes it again. The core value is
+ *      quietly replaced. Prefix your fields (`mybundle_headline`), and prefix them
+ *      especially when the names come from editor input rather than from your code.
+ *
+ *   2. getAllowedFields() IS the type gate, and it is honoured — the mapper calls
+ *      it wherever the table has a type concept (tl_page, tl_content) and refuses
+ *      a field your provider does not allow for that type, before apply() is
+ *      reached. Tables without a type (tl_theme, tl_layout) pass null and skip it.
+ *      Re-checking inside apply() is still good practice, since your provider is
+ *      the only place that can tell a field of type A from a field of type B when
+ *      getDeclaredFields() is the union over all of them.
  */
 interface FieldProvider
 {
@@ -53,6 +71,12 @@ interface FieldProvider
      * Fields that should be accepted on create/update for the given resolved type.
      * Return [] when the provider's fields aren't valid for that type (e.g.
      * languageMain on a root page).
+     *
+     * Consulted for every table that has a type concept; a field left out here is
+     * refused with a message naming your extension and the type, and apply() is
+     * not called for it. On a table without a type concept (tl_theme, tl_layout)
+     * there is nothing to gate on, so the gate is skipped entirely and what you
+     * return for a null type does not decide anything.
      *
      * Implementations MAY return non-empty results even when isAvailable() is false —
      * the caller is expected to gate on isAvailable() before actually applying.
