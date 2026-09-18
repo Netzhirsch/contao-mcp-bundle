@@ -8,11 +8,13 @@ use Doctrine\DBAL\Connection;
 use League\OAuth2\Server\Entities\AuthCodeEntityInterface;
 use League\OAuth2\Server\Repositories\AuthCodeRepositoryInterface;
 use Netzhirsch\ContaoMcpBundle\OAuth\Entity\AuthCodeEntity;
+use Netzhirsch\ContaoMcpBundle\OAuth\TokenFamilyRevoker;
 
 final class AuthCodeRepository implements AuthCodeRepositoryInterface
 {
     public function __construct(
         private readonly Connection $connection,
+        private readonly TokenFamilyRevoker $familyRevoker,
     ) {
     }
 
@@ -67,23 +69,10 @@ final class AuthCodeRepository implements AuthCodeRepositoryInterface
         // client + user. The legit client is locked out (they'll need to
         // re-authorize) but the attacker can't pivot any further.
         if ($revoked) {
-            $clientId = (string) $row['client_id'];
-            $userId = (int) $row['user_id'];
-
-            $this->connection->executeStatement(
-                'UPDATE tl_mcp_oauth_access_token SET is_revoked = 1, tstamp = ?
-                 WHERE client_id = ? AND user_id = ? AND is_revoked = 0',
-                [time(), $clientId, $userId],
-            );
-            // Refresh tokens reference access tokens by identifier — kill
-            // anything pointing at one of this client+user's tokens.
-            $this->connection->executeStatement(
-                'UPDATE tl_mcp_oauth_refresh_token SET is_revoked = 1, tstamp = ?
-                 WHERE access_token_identifier IN (
-                     SELECT identifier FROM tl_mcp_oauth_access_token
-                     WHERE client_id = ? AND user_id = ?
-                 )',
-                [time(), $clientId, $userId],
+            $this->familyRevoker->revoke(
+                (string) $row['client_id'],
+                (int) $row['user_id'],
+                TokenFamilyRevoker::TRIGGER_AUTH_CODE_REUSE,
             );
         }
 
