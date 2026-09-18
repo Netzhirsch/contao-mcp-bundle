@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Faq;
 
 use Contao\FaqModel;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 
 final class Serializer
@@ -55,6 +56,6 @@ final class Serializer
             $core = array_merge($core, $provider->serialize($f));
         }
 
-        return $core;
+        return UntrustedContent::annotate('tl_faq', $core);
     }
 }

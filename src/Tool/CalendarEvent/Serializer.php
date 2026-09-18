@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\CalendarEvent;
 
 use Contao\CalendarEventsModel;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 
 final class Serializer
@@ -92,6 +93,6 @@ final class Serializer
             $core = array_merge($core, $provider->serialize($e));
         }
 
-        return $core;
+        return UntrustedContent::annotate('tl_calendar_events', $core);
     }
 }

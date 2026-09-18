@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\News;
 
 use Contao\NewsModel;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 
 /**
@@ -87,6 +88,6 @@ final class Serializer
             $core = array_merge($core, $provider->serialize($n));
         }
 
-        return $core;
+        return UntrustedContent::annotate('tl_news', $core);
     }
 }

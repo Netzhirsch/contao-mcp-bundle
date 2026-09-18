@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Article;
 
 use Contao\ArticleModel;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 use Netzhirsch\ContaoMcpBundle\Service\ForeignFieldReader;
 
@@ -66,7 +67,10 @@ final class Serializer
 
         // …and every other field the tl_article palette declares that
         // article_update accepts — see the same merge in Page\Serializer.
-        return array_merge($core, ForeignFieldReader::extra('tl_article', $a, 'default', $core));
+        return UntrustedContent::annotate(
+            'tl_article',
+            array_merge($core, ForeignFieldReader::extra('tl_article', $a, 'default', $core)),
+        );
     }
 
     /**

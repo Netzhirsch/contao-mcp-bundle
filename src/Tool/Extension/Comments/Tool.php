@@ -10,6 +10,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\Versions;
 use Doctrine\DBAL\Connection;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use PhpMcp\Server\Attributes\McpTool;
@@ -152,7 +153,9 @@ final class Tool
             return ['error' => 'not_found', 'message' => sprintf('No comment with id %d', $id)];
         }
 
-        return $this->summary($c) + [
+        // Re-annotated after the merge: the detail view adds fields the
+        // summary never saw, and the reply is visitor text as well.
+        return UntrustedContent::annotate('tl_comments', $this->summary($c) + [
             'website' => (string) $c->website,
             'add_reply' => (bool) $c->addReply,
             'reply_author' => (string) $c->author,
@@ -160,7 +163,7 @@ final class Tool
             'ip' => (string) $c->ip,
             'notified' => (bool) $c->notified,
             'notified_reply' => (bool) $c->notifiedReply,
-        ];
+        ]);
     }
 
     /**
@@ -325,7 +328,9 @@ final class Tool
      */
     private function summary(CommentsModel $c): array
     {
-        return [
+        // A comment is written by a visitor, so every word of it reaches the
+        // model as foreign text — see UntrustedContent.
+        return UntrustedContent::annotate('tl_comments', [
             'id' => (int) $c->id,
             'source' => (string) $c->source,
             'parent' => (int) $c->parent,
@@ -336,7 +341,7 @@ final class Tool
             'comment' => (string) $c->comment,
             'published' => (bool) $c->published,
             'tstamp' => (int) $c->tstamp,
-        ];
+        ]);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Page;
 
 use Contao\PageModel;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 use Netzhirsch\ContaoMcpBundle\Service\ForeignFieldReader;
 
@@ -151,7 +152,10 @@ final class Serializer
         // accepts. Without this the two sides disagree: a value could be
         // written through `extras` and then not read back, so a caller could
         // neither prepare a change nor check one afterwards.
-        return array_merge($core, ForeignFieldReader::extra('tl_page', $p, (string) $p->type, $core));
+        return UntrustedContent::annotate(
+            'tl_page',
+            array_merge($core, ForeignFieldReader::extra('tl_page', $p, (string) $p->type, $core)),
+        );
     }
 
     /**

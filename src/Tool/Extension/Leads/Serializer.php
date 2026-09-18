@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tool\Extension\Leads;
 
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
+
 /**
  * Shapes raw tl_lead / tl_lead_data rows into the flat, JSON-friendly API the
  * MCP tools expose.
@@ -23,7 +25,9 @@ final class Serializer
     {
         $post = $row['post_data'] ?? null;
 
-        return [
+        // A lead IS a form submission: every value in it was typed by a
+        // stranger. See UntrustedContent.
+        return UntrustedContent::annotate('tl_lead', [
             'id' => (int) ($row['id'] ?? 0),
             'tstamp' => (int) ($row['tstamp'] ?? 0),
             'created' => (int) ($row['created'] ?? 0),
@@ -35,7 +39,7 @@ final class Serializer
             'language' => (string) ($row['language'] ?? ''),
             'member_id' => (int) ($row['member_id'] ?? 0),
             'has_post_data' => \is_string($post) && $post !== '',
-        ];
+        ]);
     }
 
     /**
@@ -47,12 +51,12 @@ final class Serializer
     {
         $value = $row['value'] ?? null;
 
-        return [
+        return UntrustedContent::annotate('tl_lead_data', [
             'field_id' => (int) ($row['field_id'] ?? 0),
             'name' => (string) ($row['name'] ?? ''),
             'label' => (string) ($row['label'] ?? ''),
             'value' => $value === null ? null : (string) $value,
-        ];
+        ]);
     }
 
     private static function nullableString(mixed $value): ?string
