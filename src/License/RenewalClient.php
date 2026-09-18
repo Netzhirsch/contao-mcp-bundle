@@ -190,11 +190,36 @@ final class RenewalClient
         }
 
         $url = (string) ($data['url'] ?? '');
-        if ($url === '' || !str_starts_with($url, 'https://')) {
-            return ['ok' => false, 'error' => 'bad_response', 'message' => 'License server did not return a valid https URL.'];
+        if ($url === '' || !self::isStripeUrl($url)) {
+            return ['ok' => false, 'error' => 'bad_response', 'message' => 'License server did not return a valid Stripe URL.'];
         }
 
         return ['ok' => true, 'url' => $url];
+    }
+
+    /**
+     * Whether a URL is one the backend may send an administrator to.
+     *
+     * The checkout and portal endpoints return a link the backend redirects to
+     * immediately, so the license server decides where a logged-in Contao
+     * administrator lands. `https://` alone was not much of a check: an
+     * https URL anywhere is still an open redirect out of the backend, and a
+     * payment page is exactly the context in which a convincing one pays off.
+     *
+     * Stripe hosts both pages, so the host can simply be required to be
+     * Stripe's — matched on the parsed host, never with str_ends_with alone,
+     * because `notstripe.com` ends with `stripe.com`.
+     */
+    private static function isStripeUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        if (!\is_array($parts) || ($parts['scheme'] ?? '') !== 'https') {
+            return false;
+        }
+
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        return $host === 'stripe.com' || str_ends_with($host, '.stripe.com');
     }
 
     /**

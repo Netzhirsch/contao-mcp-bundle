@@ -282,13 +282,18 @@ final class McpServerConfigStorage
         }
 
         $dir = \dirname($this->filePath());
-        if (!is_dir($dir) && !mkdir($dir, 0o775, true) && !is_dir($dir)) {
+        if (!is_dir($dir) && !mkdir($dir, 0o700, true) && !is_dir($dir)) {
             return ['saved' => false, 'errors' => ['dir_unwritable'], 'values' => $values];
         }
 
+        // 0600, like the licence file and the OAuth keys beside it. This one
+        // carries the backend URL, the auth mode and the operator's tool
+        // allowlist — the shape of the attack surface, readable by every other
+        // account on a shared host as long as it stayed at the umask default.
         $written = AtomicFile::write(
             $this->filePath(),
             json_encode($values, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}',
+            0o600,
         );
 
         return [

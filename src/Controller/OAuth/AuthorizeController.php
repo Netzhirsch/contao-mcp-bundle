@@ -101,6 +101,27 @@ final class AuthorizeController
             }
         }
 
+        // PKCE, and only the strong variant.
+        //
+        // league accepts `plain` as well — the challenge IS the verifier, so a
+        // stolen authorization code carries its own proof and PKCE protects
+        // nothing. Our metadata advertises S256 alone, and a client reading it
+        // will never ask for anything else; a client that asks anyway is either
+        // broken or trying its luck. Refusing here keeps the advertised
+        // contract and the real one the same.
+        // Note the absent case is a rejection too, not a pass: RFC 7636 makes
+        // `plain` the DEFAULT when a challenge is sent without a method, and
+        // league follows the RFC. Leaving the parameter out was the cheapest
+        // way to get the weak variant.
+        $challengeMethod = (string) ($request->query->get('code_challenge_method') ?? '');
+        $hasChallenge = (string) ($request->query->get('code_challenge') ?? '') !== '';
+        if ($hasChallenge && $challengeMethod !== 'S256') {
+            return $this->renderOAuthError(OAuthServerException::invalidRequest(
+                'code_challenge_method',
+                'Only S256 is supported, as advertised in the authorization server metadata.',
+            ));
+        }
+
         // Validate query params (client_id, redirect_uri, scope, PKCE, …).
         try {
             $authRequest = $server->validateAuthorizationRequest($psrRequest);

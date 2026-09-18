@@ -572,8 +572,18 @@ Lazy-Mode.
 
 ## Bekannte Einschränkungen
 
-Stand `v1.8.2`:
+Stand `v1.32.0`:
 
+- **Ein MCP-Zugang mit dem Recht `tpl_editor` ist ein Zugang zur
+  Codeausführung.** Ein `.html5`-Template ist reines PHP, das Contao beim
+  Rendern ausführt; wer Templates schreiben darf, kann `fe_page.html5`
+  überschreiben. Das ist keine Lücke des Bundles, sondern dieselbe Grenze wie
+  im Backend — dort gilt genau dasselbe für denselben Benutzer. Der Unterschied
+  ist die Reichweite: Ein Backend-Benutzer klickt selbst, ein Agent kann durch
+  Text, den er irgendwo gelesen hat, dazu gebracht werden. **Gebt `tpl_editor`
+  nur Benutzern, deren Token ihr auch für einen Deploy hergeben würdet.**
+  Dasselbe gilt für die Layout-Felder `head`, `script` und `onload`: Sie landen
+  wörtlich auf jeder Seite des Layouts.
 - **PHPUnit-Coverage** deckt OAuth-Crypto, die Permission-Map und den
   Usage-Scanner ab. Der Tool-Layer wird stattdessen end-to-end vom Smoke-Test
   exerziert.

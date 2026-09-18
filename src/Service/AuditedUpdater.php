@@ -4,22 +4,24 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Service;
 
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Tool\Article\Tool as ArticleTool;
-use Netzhirsch\ContaoMcpBundle\Tool\Calendar\Tool as CalendarTool;
 use Netzhirsch\ContaoMcpBundle\Tool\CalendarEvent\Tool as CalendarEventTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Calendar\Tool as CalendarTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Content\Tool as ContentTool;
-use Netzhirsch\ContaoMcpBundle\Tool\Faq\Tool as FaqTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FaqCategory\Tool as FaqCategoryTool;
-use Netzhirsch\ContaoMcpBundle\Tool\Form\Tool as FormTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Faq\Tool as FaqTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FormField\Tool as FormFieldTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Form\Tool as FormTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Layout\Tool as LayoutTool;
-use Netzhirsch\ContaoMcpBundle\Tool\Member\Tool as MemberTool;
 use Netzhirsch\ContaoMcpBundle\Tool\MemberGroup\Tool as MemberGroupTool;
+use Netzhirsch\ContaoMcpBundle\Tool\Member\Tool as MemberTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Module\Tool as ModuleTool;
-use Netzhirsch\ContaoMcpBundle\Tool\News\Tool as NewsTool;
 use Netzhirsch\ContaoMcpBundle\Tool\NewsArchive\Tool as NewsArchiveTool;
+use Netzhirsch\ContaoMcpBundle\Tool\News\Tool as NewsTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Page\Tool as PageTool;
 use Netzhirsch\ContaoMcpBundle\Tool\Theme\Tool as ThemeTool;
+use Psr\Log\LoggerInterface;
 
 /**
  * Writes a set of fields to a record through the table's OWN `*_update` tool.
@@ -85,6 +87,7 @@ final class AuditedUpdater
         private readonly MemberTool $memberTool,
         private readonly MemberGroupTool $memberGroupTool,
         private readonly ExtensionFieldOwnerMap $fieldOwners,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -177,11 +180,7 @@ final class AuditedUpdater
 
             return $tool->update(...$named);
         } catch (\Throwable $e) {
-            return [
-                'error' => 'save_failed',
-                'message' => $e->getMessage(),
-                'class' => $e::class,
-            ];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'audited update failed');
         }
     }
 

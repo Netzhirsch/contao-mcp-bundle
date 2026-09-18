@@ -6,8 +6,8 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\File;
 
 use Contao\Config;
 use Contao\CoreBundle\Framework\ContaoFramework;
-use Contao\CoreBundle\Util\SymlinkUtil;
 use Contao\CoreBundle\Monolog\ContaoContext;
+use Contao\CoreBundle\Util\SymlinkUtil;
 use Contao\Dbafs;
 use Contao\File as ContaoFile;
 use Contao\FilesModel;
@@ -15,6 +15,7 @@ use Contao\Folder as ContaoFolder;
 use Contao\StringUtil;
 use Netzhirsch\ContaoMcpBundle\Security\OutboundUrlGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -546,6 +547,15 @@ final class Tool
             return $validation;
         }
 
+        // The name says what the server will serve it as; only the bytes say
+        // what it is. Checked before anything touches the filesystem.
+        $contentCheck = $validator->validateContent($name, $bytes);
+        if (!($contentCheck['ok'] ?? false)) {
+            unset($contentCheck['ok']);
+
+            return $contentCheck;
+        }
+
         // Validate meta BEFORE touching the filesystem — atomicity: a bad
         // meta payload must not leave a file orphaned in FS + DBAFS that a
         // retry then trips over ("file already exists"). Encode now, apply
@@ -672,7 +682,7 @@ final class Tool
             $file = new ContaoFile($dbafsPath);
             $file->delete();          // unlinks AND removes from tl_files
         } catch (\Throwable $e) {
-            return ['error' => 'delete_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'delete_failed', 'Tool/File/Tool delete_failed');
         }
         Dbafs::deleteResource($dbafsPath); // belt-and-braces
 
@@ -736,7 +746,7 @@ final class Tool
             Dbafs::moveResource($oldDbafs, $newDbafs);
         } catch (\Throwable $e) {
             @rename($newAbs, $absolute);
-            return ['error' => 'rename_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'rename_failed', 'Tool/File/Tool rename_failed');
         }
 
         $this->log(sprintf('Renamed %s → %s via MCP', $oldDbafs, $newDbafs), __METHOD__);
@@ -797,7 +807,7 @@ final class Tool
             Dbafs::moveResource($oldDbafs, $newDbafs);
         } catch (\Throwable $e) {
             @rename($newAbs, $absolute);
-            return ['error' => 'move_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'move_failed', 'Tool/File/Tool move_failed');
         }
 
         $this->log(sprintf('Moved %s → %s via MCP', $oldDbafs, $newDbafs), __METHOD__);
@@ -847,7 +857,7 @@ final class Tool
             // The ContaoFolder constructor auto-creates the folder on disk.
             $folder->getModel(); // forces Dbafs sync
         } catch (\Throwable $e) {
-            return ['error' => 'create_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'create_failed', 'Tool/File/Tool create_failed');
         }
 
         $this->log(sprintf('Created folder %s via MCP', $this->paths->toDbafsPath($relative)), __METHOD__);
@@ -903,7 +913,7 @@ final class Tool
             $folder = new ContaoFolder($dbafsPath);
             $folder->delete();   // recursive on disk; clears tl_files entries
         } catch (\Throwable $e) {
-            return ['error' => 'delete_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'delete_failed', 'Tool/File/Tool delete_failed');
         }
         Dbafs::deleteResource($dbafsPath);
 

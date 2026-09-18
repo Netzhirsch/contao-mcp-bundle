@@ -17,6 +17,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Service\TranslationMaster;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -276,7 +277,7 @@ final class Tool
         try {
             $ev->save();
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/CalendarEvent/Tool save_failed');
         }
 
         $this->bootVersions((int) $ev->id)->create();
@@ -394,7 +395,7 @@ final class Tool
             $ev->save();
             $versions->create();
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/CalendarEvent/Tool save_failed');
         }
 
         $this->log(sprintf('Updated event ID %d via MCP (fields: %s)', $id, implode(', ', $changed)), __METHOD__);

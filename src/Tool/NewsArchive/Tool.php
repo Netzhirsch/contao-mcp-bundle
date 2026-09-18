@@ -16,6 +16,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -188,7 +189,7 @@ final class Tool
         try {
             $archive->save();
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/NewsArchive/Tool save_failed');
         }
 
         $this->bootVersions((int) $archive->id)->create();
@@ -261,7 +262,7 @@ final class Tool
             $archive->save();
             $versions->create();
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/NewsArchive/Tool save_failed');
         }
 
         $this->logGeneral(

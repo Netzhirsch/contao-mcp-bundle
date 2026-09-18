@@ -13,6 +13,7 @@ use Contao\Versions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -273,7 +274,7 @@ final class Tool
         try {
             $content->save();
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/Content/Tool save_failed');
         }
 
         $this->bootVersions((int) $content->id)->create();
@@ -344,7 +345,7 @@ final class Tool
             $content->save();
             $versions->create();
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/Content/Tool save_failed');
         }
 
         $this->logGeneral(

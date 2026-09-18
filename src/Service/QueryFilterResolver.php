@@ -102,6 +102,22 @@ final class QueryFilterResolver
      *
      * @return array{clause: string, params: list<string>}|null
      */
+    /**
+     * Makes a user's search term literal inside a LIKE pattern.
+     *
+     * Without this, a query like "100%" or "name_" is read as a wildcard: the
+     * caller asked for one thing and quietly got another. Not an injection —
+     * the value is bound either way — but a wrong answer, which is bad enough.
+     * Backslashes are doubled because MySQL's default LIKE escape is `\` too.
+     *
+     * Public and shared: the same term reaches LIKE from three places, and
+     * three copies of an escaping rule is how two of them end up wrong.
+     */
+    public static function escapeLike(string $q): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], trim($q));
+    }
+
     public function buildSearchClause(string $table, ?string $q, array $alsoSearch = []): ?array
     {
         if ($q === null || trim($q) === '') {
@@ -113,11 +129,7 @@ final class QueryFilterResolver
             return null;
         }
 
-        // Escape SQL LIKE metachars so a query like "100%" or "name_" matches
-        // literally instead of as a wildcard. Backslashes are doubled because
-        // MySQL's default LIKE escape is also `\`.
-        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], trim($q));
-        $needle = '%'.$escaped.'%';
+        $needle = '%'.self::escapeLike($q).'%';
 
         $tableId = $this->connection->quoteIdentifier($table);
         $clauses = [];

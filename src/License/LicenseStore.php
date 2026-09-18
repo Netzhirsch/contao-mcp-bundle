@@ -201,13 +201,19 @@ final class LicenseStore
     private function write(array $data): bool
     {
         $dir = \dirname($this->filePath());
-        if (!is_dir($dir) && !mkdir($dir, 0o775, true) && !is_dir($dir)) {
+        if (!is_dir($dir) && !mkdir($dir, 0o700, true) && !is_dir($dir)) {
             return false;
         }
 
+        // 0600: this file holds `instance_secret`, the proof that THIS
+        // installation owns the licence. The OAuth keys next to it are written
+        // 0600 already; leaving the licence at the umask default meant every
+        // other account on a shared host could read the one value that lets
+        // them pull this customer's token.
         return AtomicFile::write(
             $this->filePath(),
             json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}',
+            0o600,
         );
     }
 

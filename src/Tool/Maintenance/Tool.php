@@ -14,6 +14,7 @@ use Contao\System;
 use Doctrine\DBAL\Connection;
 use FOS\HttpCacheBundle\CacheManager;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
@@ -823,12 +824,7 @@ final class Tool
         try {
             $changeSet = $this->dbafsManager->sync(...$cleanPaths);
         } catch (\Throwable $e) {
-            $this->logger->error('dbafs_sync failed', ['exception' => $e]);
-            return [
-                'error' => 'sync_failed',
-                'message' => $e->getMessage(),
-                'class' => $e::class,
-            ];
+            return ToolError::opaque($this->logger, $e, 'sync_failed', 'dbafs_sync failed');
         }
 
         $durationMs = (int) round((microtime(true) - $start) * 1000);
