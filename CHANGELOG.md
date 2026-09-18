@@ -6,6 +6,94 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.32.0] – 2026-09-18
+
+> Die verbleibenden Härtungspunkte des Sicherheitsaudits. Keine
+> Schemaänderung; zwei Antwortformen ändern sich (siehe **Changed**).
+
+### Security
+- **F20 — `license.json` und `config.json` werden `0600` geschrieben**,
+  `var/mcp` als `0700` angelegt. Bisher galt die Umask, meist `0644`: Das
+  `instance_secret`, mit dem sich diese Installation als Eigentümerin der Lizenz
+  ausweist, lag neben `0600`-gehärteten OAuth-Schlüsseln und war auf einem
+  geteilten Host für jedes andere Konto lesbar. **Bestehende Dateien werden beim
+  nächsten Schreiben mitgezogen, nicht rückwirkend.**
+- **F09 — `/mcp/healthz` sagt einem anonymen Aufrufer nur noch das Urteil.**
+  Der Endpunkt hat keine Authentifizierung, gab aber die exakte Bundle-Version
+  (Advisory-Zuordnung), den `auth_mode` (ein Orakel dafür, ob `/mcp` überhaupt
+  offen ist), freien Plattenplatz und Datenbanklatenz preis. Jetzt `{status}`,
+  bei Fehlschlag zusätzlich die **Namen** der gefallenen Prüfungen. Die Details
+  liefert `system_health_check` — mit Adminrecht.
+- **F11 — Uploads werden am Inhalt geprüft, nicht nur an der Endung.** Zwei
+  Fragen, die eine Endungs-Whitelist offenlässt: Enthält ein `.png` wirklich ein
+  Bild (sonst hostet die Seite fremdes Markup auf der eigenen Domain)? Und trägt
+  ein SVG oder HTML Skript? Contaos Standard-Uploadtypen enthalten `svg`, und
+  ein SVG ist ein Dokument — `<script>`, Event-Handler und externe Entities
+  laufen beim direkten Aufruf. Beides wird jetzt **abgewiesen**, nicht
+  saniert: Ein SVG-Sanitizer, der zu 95 % stimmt, ist schlimmer als eine
+  Abweisung, weil danach alle die Datei für sauber halten. Dazu Doppelendungen
+  wie `rechnung.php.jpg`, die eine Whitelist passieren, die nur die letzte
+  Endung ansieht.
+- **F14 — PKCE `plain` wird abgelehnt.** Die Metadaten bewarben nur `S256`, der
+  Server nahm aber beides. Bei `plain` ist die Challenge der Verifier, ein
+  gestohlener Code bringt seinen eigenen Beweis mit. Das **Fehlen** des
+  Parameters zählt ebenfalls als Ablehnung — RFC 7636 macht `plain` zum
+  Standardwert, das Weglassen war der billigste Weg zur schwachen Variante.
+- **F21 — Die Weiterleitung nach Stripe wird gegen den Host geprüft.** Checkout
+  und Portal liefern einen Link, auf den das Backend eine angemeldete
+  Administratorin sofort weiterleitet; geprüft wurde nur das Präfix `https://`.
+  Jetzt muss der Host `stripe.com` sein oder darauf enden — am geparsten Host,
+  nie per `str_ends_with` allein, weil `notstripe.com` ebenfalls darauf endet.
+- **F05 — Symlink-Containment für Template-Schreibvorgänge.** Die Pfadprüfung
+  fing `..` und absolute Pfade ab, aber nicht einen symbolisch verlinkten
+  Ordner unter `templates/`. Jetzt wird der nächste existierende
+  Elternordner per `realpath()` aufgelöst und muss innerhalb von `templates/`
+  liegen.
+
+### Changed
+- **F17 — Schreibfehler antworten nicht mehr mit der rohen DBAL-Meldung.** 32
+  Stellen in 16 Klassen gaben `$e->getMessage()` plus `$e::class` heraus. Eine
+  DBAL-Meldung ist kein Satz über die Eingabe des Aufrufers: Sie kann das
+  Statement, die gebundenen Werte und bei einem Verbindungsfehler Host,
+  Datenbank und Benutzer enthalten. Der Dispatcher eine Ebene höher antwortet
+  seit jeher mit einer undurchsichtigen Referenz — die Werkzeuge darunter
+  redeten weiter.
+
+  Was der Aufrufer jetzt bekommt: denselben `error`-Code wie bisher (Aufrufer
+  verzweigen darauf), eine Referenz, die einen Logeintrag findet, und — wo es
+  einen gibt — den **SQLSTATE**. Der bleibt drin, sonst wäre das für einen
+  Agenten ein reiner Rückschritt: fünf Standardzeichen, die „meine Eingabe war
+  falsch" von „der Server hat ein Problem" trennen, ohne Tabelle, Wert oder Host.
+- **F22 — `%` und `_` in einem Suchbegriff sind wieder Zeichen.** Die beiden
+  Alt-Parameter `search` in `forms_list` und `members_list` bauten ihr
+  LIKE-Muster ungeschützt: Eine Suche nach „100%" fand alles. Keine Injection —
+  der Wert war immer gebunden —, aber eine falsche Antwort. Die Regel liegt
+  jetzt einmal in `QueryFilterResolver::escapeLike()`.
+- **F23 — Tabellenbezeichner werden auch dort gequotet**, wo eine Allowlist die
+  Frage bereits entscheidet (DeepL). Die Allowlist ist der Schutz; das Quoting
+  hält die Zeile richtig, falls jemand die Allowlist aufweicht.
+- **F05/F18 — dokumentiert statt eingeschränkt:** Ein MCP-Zugang mit dem Recht
+  `tpl_editor` ist ein Zugang zur **Codeausführung** (ein `.html5`-Template ist
+  PHP, das Contao beim Rendern ausführt), und die Layout-Felder `head`,
+  `script` und `onload` landen wörtlich auf jeder Seite. Beides ist
+  Backend-Parität, kein Fehler — der Unterschied ist die Reichweite: Ein
+  Backend-Benutzer klickt selbst, ein Agent kann durch gelesenen Text dazu
+  gebracht werden. Steht jetzt in beiden READMEs und in den Werkzeug-
+  Beschreibungen.
+
+### Notes
+- **Bewusst nicht umgesetzt: F15** (Pairing-Fenster nach der ersten
+  Registrierung schließen). Das ist eine absichtliche Produktentscheidung aus
+  einem früheren Release — schließt das Fenster nach dem ersten Erfolg, läuft
+  ein wiederholender Client mitten im Ablauf gegen eine verschlossene Tür und
+  die Administratorin muss für jeden Versuch neu öffnen. Wer das anders
+  gewichtet, soll es entscheiden, nicht ein Changelog.
+- **F19** (`search_query` auf Pagemounts einschränken) und **F25/F27** brauchen
+  eine Entwurfsentscheidung und bleiben offen.
+- `license_server_url` bleibt ohne `PrivateAddressCheck`: Der Wert wird vom
+  Betreiber gesetzt, nicht von einem Angreifer, und auf `localhost` zu zeigen
+  ist genau sein Zweck.
+
 ## [1.31.0] – 2026-09-18
 
 > Sicherheitsaudit F12: Antworten kennzeichnen, welche Werte von anderen

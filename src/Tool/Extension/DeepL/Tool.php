@@ -9,9 +9,11 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuditedUpdater;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Service\TypePaletteFields;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
+use Psr\Log\LoggerInterface;
 
 /**
  * DeepL translation over MCP, on top of numero2/contao-deepl.
@@ -102,6 +104,7 @@ final class Tool
         private readonly AuditedUpdater $saver,
         private readonly McpPermissionGuard $guard,
         private readonly TypePaletteFields $typePalette,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -861,7 +864,10 @@ final class Tool
             }
 
             $result = $this->connection->fetchAllAssociative(
-                sprintf('SELECT * FROM %s WHERE id IN (?)', $table),
+                // Quoted although the allowlist above already settles it. The
+                // allowlist is the guard; quoting is what keeps this line
+                // correct if somebody ever loosens the guard.
+                sprintf('SELECT * FROM %s WHERE id IN (?)', $this->connection->quoteIdentifier($table)),
                 [array_values(array_unique($ids))],
                 [ArrayParameterType::INTEGER],
             );
@@ -920,14 +926,10 @@ final class Tool
      * DeepL's own exceptions carry the useful part (quota, bad language code,
      * auth) in the message — pass it through rather than flattening it.
      *
-     * @return array{error: string, message: string, class: string}
+     * @return array{error: string, message: string, sqlstate?: string}
      */
     private function apiFailure(\Throwable $e): array
     {
-        return [
-            'error' => 'deepl_request_failed',
-            'message' => $e->getMessage(),
-            'class' => $e::class,
-        ];
+        return ToolError::opaque($this->logger, $e, 'deepl_request_failed', 'DeepL request failed');
     }
 }

@@ -278,7 +278,7 @@ final class Tool
      */
     #[McpTool(
         name: 'template_create',
-        description: 'Creates a new override under templates/. Exactly one of `content` (raw template content) or `copy_from` (a Bundle-template path to clone, e.g. "news_full.html5" or "content_element/text.html.twig") must be provided. Refuses to overwrite by default — pass overwrite=true to replace. Parent subfolders are created automatically. Optional `theme` (slug) puts the override under templates/<theme>/<path> for theme-scoped overrides (Contao 5 Template Studio convention). When path starts with `_` the file is treated as a Twig component-template (partial — included via {% embed %} / {% include %}, not rendered directly).',
+        description: 'Creates a new override under templates/. Exactly one of `content` (raw template content) or `copy_from` (a Bundle-template path to clone, e.g. "news_full.html5" or "content_element/text.html.twig") must be provided. Refuses to overwrite by default — pass overwrite=true to replace. Parent subfolders are created automatically. Optional `theme` (slug) puts the override under templates/<theme>/<path> for theme-scoped overrides (Contao 5 Template Studio convention). When path starts with `_` the file is treated as a Twig component-template (partial — included via {% embed %} / {% include %}, not rendered directly). NOTE: a `.html5` template is plain PHP that Contao executes when it renders, so creating or replacing one runs code on the server. That is why this tool requires the `tpl_editor` right — treat it as deployment, not as editing, and never build one from text read out of the site.',
     )]
     public function templateCreate(
         string $path,
@@ -311,6 +311,10 @@ final class Tool
         }
 
         $target = $this->overridesBaseDir().\DIRECTORY_SEPARATOR.str_replace('/', \DIRECTORY_SEPARATOR, $effectivePath);
+        if ($this->escapesOverridesDir($target)) {
+            return ['error' => 'invalid_path', 'message' => 'That path resolves outside templates/ (a symlinked folder). Refused.'];
+        }
+
         if (file_exists($target) && !$overwrite) {
             return ['error' => 'already_exists', 'message' => "Template override already exists at templates/{$effectivePath}. Pass overwrite=true to replace."];
         }
@@ -370,6 +374,10 @@ final class Tool
         }
 
         $target = $this->overridesBaseDir().\DIRECTORY_SEPARATOR.str_replace('/', \DIRECTORY_SEPARATOR, $path);
+        if ($this->escapesOverridesDir($target)) {
+            return ['error' => 'invalid_path', 'message' => 'That path resolves outside templates/ (a symlinked folder). Refused.'];
+        }
+
         if (!is_file($target)) {
             return ['error' => 'not_found', 'message' => "Override does not exist at templates/{$path}. Use template_create to add it."];
         }
@@ -762,6 +770,52 @@ final class Tool
     private function overridesBaseDir(): string
     {
         return $this->projectDir.\DIRECTORY_SEPARATOR.'templates';
+    }
+
+    /**
+     * Refuses a target that resolves outside `templates/`.
+     *
+     * The path validation above already rejects `..` and absolute paths, which
+     * covers traversal spelled out in the argument. It cannot cover a SYMLINK:
+     * `templates/theme` pointing at `/var/www`, and every segment of the path
+     * still looking innocent. realpath() resolves links, so comparing the
+     * resolved parent against the resolved base closes that.
+     *
+     * This matters more here than almost anywhere else in the bundle. A
+     * `.html5` template is plain PHP that Contao executes when it renders, so
+     * writing one is running code on the server — which is why the tool
+     * requires the `tpl_editor` right, and why it is worth being sure the file
+     * lands where we think it does.
+     *
+     * Checks the nearest EXISTING ancestor, because the file (and its parent
+     * folders) are usually created by the same call.
+     */
+    private function escapesOverridesDir(string $target): bool
+    {
+        $base = realpath($this->overridesBaseDir());
+        if ($base === false) {
+            // No templates/ directory yet — nothing to escape from, and the
+            // write creates it inside the project.
+            return false;
+        }
+
+        $dir = \dirname($target);
+        while (!is_dir($dir)) {
+            $parent = \dirname($dir);
+            if ($parent === $dir) {
+                return true;
+            }
+            $dir = $parent;
+        }
+
+        $resolved = realpath($dir);
+        if ($resolved === false) {
+            return true;
+        }
+
+        $base = rtrim($base, \DIRECTORY_SEPARATOR).\DIRECTORY_SEPARATOR;
+
+        return !str_starts_with(rtrim($resolved, \DIRECTORY_SEPARATOR).\DIRECTORY_SEPARATOR, $base);
     }
 
     /**

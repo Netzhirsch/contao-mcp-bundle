@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Controller;
 
-use Composer\InstalledVersions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\OAuth\KeyManager;
@@ -24,8 +23,12 @@ use Symfony\Component\Routing\Annotation\Route;
  *     instantiation, no Contao model discovery, no tool-registry walk
  *     — the Symfony kernel boots, this controller runs, the response
  *     goes out. That's it.
- *   - 200 when everything checks pass; 503 with detailed JSON when at
- *     least one check fails. Standard liveness-probe convention.
+ *   - 200 when everything checks pass; 503 naming the failed check when at
+ *     least one fails. Standard liveness-probe convention.
+ *   - Says as little as an unauthenticated endpoint can while still being
+ *     useful: `{status}` plus, on failure, the NAMES of the failing checks.
+ *     Versions, auth mode, latencies and free space are reported by the
+ *     `system_health_check` tool instead, which requires an administrator.
  *   - Never throws on a bad check — every probe path is wrapped in
  *     try/catch so a transient sub-system failure surfaces as JSON,
  *     not as a 500 with a stack trace.
@@ -81,22 +84,32 @@ final class McpHealthzController
             $this->checkDiskFree(),
         ];
 
-        $anyFailed = false;
+        $failed = [];
         foreach ($checks as $c) {
             if (($c['ok'] ?? null) === false) {
-                $anyFailed = true;
-                break;
+                $failed[] = (string) $c['name'];
             }
         }
 
-        $body = [
-            'status' => $anyFailed ? 'degraded' : 'ok',
-            'checks' => $checks,
-            'bundle_version' => InstalledVersions::isInstalled('netzhirsch/contao-mcp-bundle')
-                ? (string) InstalledVersions::getPrettyVersion('netzhirsch/contao-mcp-bundle')
-                : 'dev',
-            'checked_at' => (new \DateTimeImmutable())->format(\DATE_ATOM),
-        ];
+        // Answer the question a probe asks, and only that.
+        //
+        // This endpoint has no authentication, so everything in the body is
+        // public. It used to carry the exact bundle version (pick the matching
+        // advisory), the auth mode (an oracle for whether the /mcp endpoint is
+        // open at all), free disk space and database latency. None of that is
+        // needed to decide "restart this container", and all of it is useful to
+        // somebody deciding whether to bother attacking the host.
+        //
+        // The detail has a home behind authentication: the `system_health_check`
+        // tool reports the same checks in full, to an administrator.
+        //
+        // A FAILING probe still names which check failed — a bare "degraded"
+        // sends the operator reading logs to learn something the probe already
+        // knows. The name is all: no latency, no paths, no versions.
+        $body = ['status' => $failed === [] ? 'ok' : 'degraded'];
+        if ($failed !== []) {
+            $body['failed'] = $failed;
+        }
 
         // 503 is the right "I see your request, but I can't serve real
         // traffic right now" code for liveness probes. 500 would imply
@@ -104,7 +117,7 @@ final class McpHealthzController
         // reporting it as data.
         return new JsonResponse(
             $body,
-            $anyFailed ? 503 : 200,
+            $failed === [] ? 200 : 503,
             [
                 // Cache-Control: no-store — every probe must see fresh
                 // results. A 5-second CDN cache here would be a foot-gun

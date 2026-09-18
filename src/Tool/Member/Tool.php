@@ -70,7 +70,9 @@ final class Tool
             $columns[] = "tl_member.disable = ''";
         }
         if ($search !== null && trim($search) !== '') {
-            $like = '%'.trim($search).'%';
+            // Escaped, so a term containing % or _ matches literally — see
+            // QueryFilterResolver::escapeLike().
+            $like = '%'.QueryFilterResolver::escapeLike($search).'%';
             $columns[] = '(tl_member.username LIKE ? OR tl_member.email LIKE ? OR tl_member.firstname LIKE ? OR tl_member.lastname LIKE ?)';
             $values[] = $like;
             $values[] = $like;

@@ -701,8 +701,17 @@ Both apply to direct `tools/call` **and** to the lazy-mode `contao_call` proxy.
 
 ## Known limitations
 
-As of `v1.8.2`:
+As of `v1.32.0`:
 
+- **An MCP token with the `tpl_editor` right is a token for running code.** A
+  `.html5` template is plain PHP that Contao executes when it renders, so
+  whoever may write templates may replace `fe_page.html5`. This is not a gap in
+  the bundle — the same is true in the backend for the same user. What differs
+  is reach: a backend user clicks themselves, an agent can be talked into it by
+  text it read somewhere. **Grant `tpl_editor` only to users whose token you
+  would also hand out for a deployment.** The same goes for the layout fields
+  `head`, `script` and `onload`, which are rendered verbatim into every page of
+  that layout.
 - **PHPUnit coverage** focuses on OAuth crypto, the permission map and the usage
   scanner. The tool layer is exercised end-to-end by the smoke test instead.
 - **Encryption-key rotation** is not implemented. `var/mcp/oauth/encryption.key`

@@ -11,6 +11,7 @@ use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\RecordDuplicator;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -207,7 +208,7 @@ final class Tool
             // error rather than being reported as a failed copy.
             return ['error' => 'invalid_input', 'message' => $e->getMessage()];
         } catch (\Throwable $e) {
-            return ['error' => 'duplicate_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'duplicate_failed', 'Tool/Duplicate/Tool duplicate_failed');
         }
 
         // Versions snapshot for the primary new record, attributed to the

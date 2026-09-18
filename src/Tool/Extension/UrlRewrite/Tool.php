@@ -9,6 +9,7 @@ use Contao\CoreBundle\Monolog\ContaoContext;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Service\UrlRewriteCacheInvalidator;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -184,7 +185,7 @@ final class Tool
         try {
             $this->connection->insert('tl_url_rewrite', $values);
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/Extension/UrlRewrite/Tool save_failed');
         }
 
         $id = (int) $this->connection->lastInsertId();
@@ -263,7 +264,7 @@ final class Tool
         try {
             $this->connection->update('tl_url_rewrite', $values, ['id' => $id]);
         } catch (\Throwable $e) {
-            return ['error' => 'save_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'save_failed', 'Tool/Extension/UrlRewrite/Tool save_failed');
         }
 
         $this->log(sprintf('Updated URL rewrite ID %d via MCP (fields: %s)', $id, implode(', ', $changed)), __METHOD__);
@@ -306,7 +307,7 @@ final class Tool
         try {
             $this->connection->delete('tl_url_rewrite', ['id' => $id]);
         } catch (\Throwable $e) {
-            return ['error' => 'delete_failed', 'message' => $e->getMessage(), 'class' => $e::class];
+            return ToolError::opaque($this->logger, $e, 'delete_failed', 'Tool/Extension/UrlRewrite/Tool delete_failed');
         }
 
         $name = (string) ($row['name'] ?? '');

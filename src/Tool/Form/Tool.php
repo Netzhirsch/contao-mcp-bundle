@@ -69,7 +69,9 @@ final class Tool
         $values = [];
         if ($search !== null && trim($search) !== '') {
             $columns[] = 'tl_form.title LIKE ?';
-            $values[] = '%'.trim($search).'%';
+            // Escaped, so "100%" searches for that string instead of matching
+            // everything — see QueryFilterResolver::escapeLike().
+            $values[] = '%'.QueryFilterResolver::escapeLike($search).'%';
         }
 
         $newSearch = $this->filterResolver->buildSearchClause('tl_form', $q);

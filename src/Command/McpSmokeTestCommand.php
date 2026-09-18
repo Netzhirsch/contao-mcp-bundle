@@ -1846,17 +1846,25 @@ final class McpSmokeTestCommand extends Command
         $healthzBody = json_decode($healthzRaw, true);
         $expect('healthz body parses as JSON',
             $healthzBody,
-            fn ($r) => \is_array($r) && isset($r['status'], $r['checks'], $r['bundle_version']));
+            fn ($r) => \is_array($r) && isset($r['status']));
         $expect('healthz reports status=ok',
             $healthzBody['status'] ?? null,
             fn ($r) => $r === 'ok');
-        $expect('healthz includes all four checks',
-            $healthzBody['checks'] ?? [],
-            fn ($r) => \count($r) === 4
-                && array_column($r, 'name') === ['database', 'var_mcp_dir', 'oauth_keys', 'disk_free']);
-        $expect('healthz database check ok=true',
-            $healthzBody['checks'][0] ?? null,
-            fn ($r) => ($r['ok'] ?? null) === true);
+        // The endpoint answers without authentication, so the body is public.
+        // A probe needs the verdict; it does not need the exact version to
+        // match against an advisory, nor the auth mode, nor how full the disk
+        // is. Those moved to system_health_check, which requires an admin.
+        $expect('healthz tells an anonymous caller nothing beyond the verdict',
+            $healthzBody,
+            fn ($r) => !isset($r['checks'], $r['bundle_version'])
+                && array_keys((array) $r) === ['status']);
+        // The detail did not disappear, it moved behind authentication. If this
+        // ever stops holding, the operator lost the diagnosis rather than
+        // gaining privacy — which would make the change above a regression.
+        $expect('the detail healthz no longer shows is reported by system_health_check',
+            $this->systemTool->systemHealthCheck(),
+            fn ($r) => isset($r['php'], $r['storage'], $r['oauth'], $r['config'])
+                && \in_array($r['overall_health'] ?? null, ['ok', 'warnings'], true));
 
         // The endpoint answers without authentication, so its whole body is
         // public. Checking for the project directory covers the class rather
