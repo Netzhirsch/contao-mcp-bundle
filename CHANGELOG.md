@@ -6,6 +6,46 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.30.0] – 2026-09-18
+
+> Sicherheitsaudit F10: Wiederverwendung eines Refresh-Tokens wird erkannt.
+> Dabei kam ein Fehler ans Licht, der die schon vorhandene Auth-Code-Erkennung
+> eine Minute lang wirkungslos machte. Keine Schemaänderung.
+
+### Security
+- **Ein Refresh-Token, das nach der Rotation erneut vorgelegt wird, beendet die
+  ganze Sitzung** (OAuth 2.1 §4.14.2). Wer ein Einmal-Credential ein zweites Mal
+  vorlegt, hat entweder einen verlorenen Retry oder eine gestohlene Kopie — und
+  das Protokoll kann beides nicht unterscheiden. Also verlieren beide Seiten den
+  Zugang und der Benutzer meldet sich neu an.
+
+  Das **Kulanzfenster von 60 Sekunden bleibt** und entscheidet, was als Replay
+  zählt: innerhalb passiert weiterhin nichts (ein Retry ist ein Unfall, kein
+  Angriff), außerhalb greift die Kaskade. Ohne das Fenster wäre jeder verlorene
+  HTTP-Response ein Sicherheitsvorfall mit Zwangs-Logout.
+
+- **Die vorhandene Auth-Code-Kaskade war 60 Sekunden lang wirkungslos.** Sie
+  setzte beim Widerruf `tstamp = time()` auf die Refresh-Tokens — und genau
+  dieser Zeitstempel steuert das Kulanzfenster. Ein Token, das die Kaskade
+  gerade getötet hatte, galt dadurch für eine weitere Minute als „eben
+  rotiert", wurde also akzeptiert; wer es hielt, konnte in dieser Minute ein
+  frisches, nicht widerrufenes Token rotieren und die Sitzung behalten. Die
+  Kaskade setzt jetzt `tstamp = 0`, womit eine solche Zeile nie in das Fenster
+  fallen kann. Ein Integrationstest hält genau das fest.
+
+### Changed
+- Die Kaskade liegt jetzt einmal in `OAuth\TokenFamilyRevoker` statt zweimal in
+  den Repositories. Die beiden Kopien waren bereits auseinandergelaufen — eine
+  filterte auf `is_revoked = 0`, die andere nicht.
+
+### Notes
+- **Grenze der Erkennung, bewusst:** Das Aufräum-Kommando löscht widerrufene
+  Refresh-Tokens. Ist die Zeile weg, landet ein Replay im Zweig „unbekanntes
+  Token" — abgewiesen, aber ohne Spur zur Sitzung, also ohne Kaskade. Die
+  Erkennung wirkt so lange, wie die rotierte Zeile existiert.
+- Andere Verbinder desselben Benutzers sind eigene Clients und bleiben
+  angemeldet; betroffen ist nur die Kombination aus Client und Benutzer.
+
 ## [1.29.0] – 2026-09-16
 
 > Drei Befunde aus der Antwort des Bootstrap-Bundles auf das Provider-Briefing.
