@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Member;
 use Contao\FilesModel;
 use Contao\MemberModel;
 use Contao\StringUtil;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 
 /**
  * Renders MemberModel rows. We NEVER expose `password`, `secret` or `session`
@@ -20,7 +21,9 @@ final class Serializer
      */
     public static function summary(MemberModel $m): array
     {
-        return [
+        // Members register themselves — name, company and address are text a
+        // stranger typed into a frontend form. See UntrustedContent.
+        return UntrustedContent::annotate('tl_member', [
             'id' => (int) $m->id,
             'username' => (string) $m->username,
             'email' => (string) $m->email,
@@ -29,7 +32,7 @@ final class Serializer
             'login' => (bool) $m->login,
             'active' => !(bool) $m->disable,
             'date_added' => (int) $m->dateAdded,
-        ];
+        ]);
     }
 
     /**

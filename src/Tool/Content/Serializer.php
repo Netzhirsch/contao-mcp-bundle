@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Content;
 
 use Contao\ContentModel;
-use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Contao\StringUtil;
+use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
 /**
  * Flattens a ContentModel into a JSON-friendly array. Because tl_content has ~100
@@ -150,7 +151,10 @@ final class Serializer
 
         // Provider representation wins over the raw column: an extension
         // may store serialised data a caller cannot use as-is.
-        return $this->providerFields->serialize('tl_content', $c) + $row;
+        return UntrustedContent::annotate(
+            'tl_content',
+            $this->providerFields->serialize('tl_content', $c) + $row,
+        );
     }
 
     /**

@@ -4141,6 +4141,16 @@ final class McpSmokeTestCommand extends Command
             $full = $this->contentTool->get($elementId);
             $expect('content_get still returns the whole row by default', $full,
                 static fn ($r) => \count($r) > 40);
+
+            // Editorial text reaches a model as foreign input. The mark is what
+            // lets it be read as content rather than as instruction — and it
+            // sits BESIDE the value, so every existing caller keeps working.
+            $expect('editorial text is marked as untrusted, without changing the value', $full,
+                static fn ($r) => \in_array('text', $r['_untrusted_fields'] ?? [], true)
+                    && $r['text'] === '<p>x</p>');
+            $expect('and structure is not marked', $full,
+                static fn ($r) => !\in_array('id', $r['_untrusted_fields'] ?? [], true)
+                    && !\in_array('type', $r['_untrusted_fields'] ?? [], true));
             $expect('fields narrows it, keeping the row identifiable',
                 $this->contentTool->get($elementId, ['text']),
                 static fn ($r) => \count($r) === 3 && isset($r['id'], $r['type'], $r['text']));
