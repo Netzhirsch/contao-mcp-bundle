@@ -13,6 +13,7 @@ use Lcobucci\JWT\Validation\Validator;
 use Netzhirsch\ContaoMcpBundle\OAuth\KeyManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 
 /**
  * Covers the OAuth RSA key lifecycle that's the load-bearing crypto for
@@ -303,7 +304,7 @@ final class KeyManagerTest extends TestCase
 
     private function makeKeyManager(): KeyManager
     {
-        return new KeyManager($this->tmpProjectDir);
+        return new KeyManager($this->tmpProjectDir, new NullLogger());
     }
 
     private function mintToken(string $privateKeyPath): \Lcobucci\JWT\UnencryptedToken

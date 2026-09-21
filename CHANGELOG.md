@@ -6,6 +6,39 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.33.0] – 2026-09-21
+
+> Die beiden letzten umsetzbaren Auditpunkte. Eine Antwortform ändert sich:
+> `search_query` liefert einem eingeschränkten Benutzer weniger als vorher.
+
+### Security
+- **F19 — `search_query` ist auf die eigenen Seitenstartpunkte eingegrenzt.**
+  Der Suchindex hält den **gerenderten Text** einer Seite, also gab ein Treffer
+  einem eingeschränkten Redakteur einen lesbaren Auszug jeder Seite der
+  Installation — auch solcher, die er im Backend nicht öffnen kann. Geschützte
+  Seiten waren schon draußen, die Mountgrenze fehlte. Contaos `tl_page`-Voter
+  prüft den Seiten**typ**, nicht den Mount, deshalb fragt die Suche jetzt
+  dieselbe Quelle wie die Listenwerkzeuge (`accessiblePageIds()`).
+
+  Neu in der Antwort: `out_of_scope_skipped`. Administratoren und der
+  Trusted-Modus sehen unverändert alles und bekommen dort 0.
+- **F26 — nach dem Schreiben eines Schlüssels wird geprüft, ob er wirklich
+  privat ist.** `chmod()` fragt nur, es meldet nichts: unter Windows ein No-op,
+  auf manchen Mounts wirkungslos, und es scheitert, wenn der Webserver-Benutzer
+  die Datei nicht besitzt. Jeder dieser Fälle lässt einen Schlüssel lesbar,
+  während der schreibende Code das Gegenteil annimmt. league/oauth2-server hat
+  deshalb früher den **Start verweigert** — genau deswegen ist die Prüfung dort
+  abgeschaltet, sie sperrte Leute von Hosts aus, auf denen chmod nicht wirken
+  kann. Die andere Hälfte dieses Tauschs ist jetzt da: nicht verweigern, aber
+  auch nicht so tun als ob.
+
+  `system_health_check` meldet dasselbe für `license.json`, `config.json`,
+  `private.pem` und `encryption.key` — und macht damit sichtbar, was vor 1.32.0
+  mit der Umask geschrieben wurde, weil Rechte nur beim nächsten Schreiben
+  nachgezogen werden. Unter Windows schweigt die Prüfung: NTFS-Rechte sind echt,
+  aber `fileperms()` zeigt sie nicht, und eine Warnung bei jeder Datei jeder
+  Installation bringt nur bei, Warnungen zu ignorieren.
+
 ## [1.32.0] – 2026-09-18
 
 > Die verbleibenden Härtungspunkte des Sicherheitsaudits. Keine

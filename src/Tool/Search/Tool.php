@@ -8,6 +8,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\Search;
 use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
+use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use PhpMcp\Server\Attributes\McpTool;
 
 /**
@@ -26,6 +27,11 @@ use PhpMcp\Server\Attributes\McpTool;
  * member groups, which say nothing about what the calling backend user may
  * see — so the safe answer is to leave them out and report how many were
  * suppressed.
+ *
+ * Neither are pages outside the caller's own pagemounts. The index holds the
+ * rendered text of a page, so an unscoped result set handed a restricted editor
+ * a readable excerpt of every page on the site — the listing tools scope, this
+ * one did not.
  */
 final class Tool
 {
@@ -38,6 +44,7 @@ final class Tool
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly Connection $connection,
+        private readonly McpPermissionGuard $guard,
     ) {
     }
 
@@ -67,8 +74,11 @@ final class Tool
             within one result set. `snippet` shows the text around the first match.
 
             Protected pages are ALWAYS excluded (their access depends on frontend member
-            groups) — `protected_skipped` tells you how many were dropped. If results are
-            empty, check `search_index_status`: an index that was never crawled is empty.
+            groups) — `protected_skipped` tells you how many were dropped. Pages outside your
+            own pagemounts are excluded too and counted in `out_of_scope_skipped`; the index
+            holds the rendered text, so a hit would otherwise read out a page you cannot open.
+            Administrators see everything and get 0 there. If results are empty, check
+            `search_index_status`: an index that was never crawled is empty.
         DESC,
     )]
     public function query(
@@ -99,16 +109,34 @@ final class Tool
             return ['error' => 'search_failed', 'message' => $e->getMessage()];
         }
 
-        // Drop protected hits and count them, so the caller knows the result is
-        // incomplete rather than silently missing pages.
-        $skipped = 0;
-        $result->applyFilter(static function (array $row) use (&$skipped): bool {
-            if (empty($row['protected'])) {
-                return true;
-            }
-            ++$skipped;
+        // Drop what this caller may not see and count both reasons, so the
+        // caller knows the result is incomplete rather than silently missing
+        // pages.
+        //
+        // The pagemount scoping is the second filter, and it was missing: the
+        // index stores the RENDERED text of a page, so an unscoped hit handed
+        // an editor a readable excerpt of a page they cannot open in the
+        // backend. Contao's tl_page voter checks the page TYPE, not the mount,
+        // which is why this asks the guard for the mounted subtree instead.
+        $accessible = $this->guard->accessiblePageIds();
 
-            return false;
+        $skipped = 0;
+        $outOfScope = 0;
+        $result->applyFilter(static function (array $row) use (&$skipped, &$outOfScope, $accessible): bool {
+            if (!empty($row['protected'])) {
+                ++$skipped;
+
+                return false;
+            }
+
+            // null = admin or trusted mode: no restriction to apply.
+            if ($accessible !== null && !\in_array((int) ($row['pid'] ?? 0), $accessible, true)) {
+                ++$outOfScope;
+
+                return false;
+            }
+
+            return true;
         });
 
         $rows = $result->getResults($limit, $offset);
@@ -119,6 +147,7 @@ final class Tool
             'offset' => $offset,
             'limit' => $limit,
             'protected_skipped' => $skipped,
+            'out_of_scope_skipped' => $outOfScope,
             'results' => array_map(fn (array $row): array => $this->serialize($row), $rows),
         ];
     }

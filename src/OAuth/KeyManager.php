@@ -6,6 +6,8 @@ namespace Netzhirsch\ContaoMcpBundle\OAuth;
 
 use League\OAuth2\Server\CryptKey;
 use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
+use Netzhirsch\ContaoMcpBundle\Service\FilePermissions;
+use Psr\Log\LoggerInterface;
 
 /**
  * Auto-provisions an RSA-2048 keypair on first use, stored as PEM files
@@ -36,7 +38,31 @@ final class KeyManager
 {
     public function __construct(
         private readonly string $projectDir,
+        private readonly LoggerInterface $logger,
     ) {
+    }
+
+    /**
+     * Checks that a freshly written secret really is private, and says so when
+     * it is not.
+     *
+     * chmod() reports nothing useful: it is a no-op on Windows, ignored on some
+     * mounts, and refused when the web-server user does not own the file. Each
+     * of those leaves a key world-readable while this code believes it asked
+     * for 0600. league/oauth2-server used to REFUSE to start in that case,
+     * which is why the check is disabled here — it locked people out of hosts
+     * where chmod cannot work. This is the other half of that trade: do not
+     * refuse, but do not pretend either.
+     *
+     * system_health_check reports the same thing for an operator who did not
+     * happen to read the log at the moment the key was created.
+     */
+    private function verifyPrivate(string $path): void
+    {
+        $problem = FilePermissions::tooOpen($path);
+        if ($problem !== null) {
+            $this->logger->warning('MCP OAuth: a key file is more permissive than intended. '.$problem);
+        }
     }
 
     public function privateKeyPath(): string
@@ -140,6 +166,8 @@ final class KeyManager
                     $this->publicKeyPath(),
                 ));
             }
+
+            $this->verifyPrivate($this->privateKeyPath());
         }
 
         if (!is_file($this->encryptionKeyPath())) {
@@ -153,6 +181,8 @@ final class KeyManager
                     $this->encryptionKeyPath(),
                 ));
             }
+
+            $this->verifyPrivate($this->encryptionKeyPath());
         }
     }
 
