@@ -13,6 +13,7 @@ use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\Extension\ExtensionToolInventory;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\FilePermissions;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use PhpMcp\Server\Attributes\McpTool;
 use Psr\Log\LoggerInterface;
@@ -885,6 +886,26 @@ final class Tool
                     'public/%1$s is missing or broken — every /%1$s/… URL will 404 (frontend CSS/JS/images fail to load). Fix: run `vendor/bin/contao-console contao:symlinks`.',
                     $link,
                 );
+            }
+        }
+
+        // chmod is best-effort and never says so: a no-op on Windows, ignored
+        // on some mounts, refused when the web-server user does not own the
+        // file. Every one of those leaves a secret world-readable while the
+        // code that wrote it believes otherwise. Also the place where a file
+        // written before 1.32.0 — when these were created at the umask —
+        // becomes visible, because tightening only happens on the next write.
+        $mcpDir = $this->projectDir.\DIRECTORY_SEPARATOR.'var'.\DIRECTORY_SEPARATOR.'mcp';
+        $privateFiles = [
+            $mcpDir.\DIRECTORY_SEPARATOR.'license.json',
+            $mcpDir.\DIRECTORY_SEPARATOR.'config.json',
+            $mcpDir.\DIRECTORY_SEPARATOR.'oauth'.\DIRECTORY_SEPARATOR.'private.pem',
+            $mcpDir.\DIRECTORY_SEPARATOR.'oauth'.\DIRECTORY_SEPARATOR.'encryption.key',
+        ];
+        foreach ($privateFiles as $file) {
+            $problem = FilePermissions::tooOpen($file);
+            if ($problem !== null) {
+                $warnings[] = $problem;
             }
         }
 
