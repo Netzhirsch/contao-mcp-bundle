@@ -148,7 +148,7 @@ final class ProviderFieldsTest extends TestCase
      *
      * @param array<string, list<string>> $allowedByType
      */
-    private function typedProvider(string $table, array $allowedByType, bool &$applied = null): FieldProvider
+    private function typedProvider(string $table, array $allowedByType, ?bool &$applied = null): FieldProvider
     {
         $union = array_values(array_unique(array_merge(...array_values($allowedByType))));
 
