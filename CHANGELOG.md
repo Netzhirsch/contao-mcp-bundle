@@ -6,6 +6,42 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.33.1] – 2026-09-22
+
+> Nur Paketmetadaten, kein Code. Eine Installation zieht künftig fünf kleine
+> Pakete mehr — und verliert dafür eine Falle, die an ganz anderer Stelle
+> zugeschnappt wäre.
+
+### Fixed
+- **`react/http` wird nicht mehr vorgetäuscht, sondern verlangt.** Das Bundle
+  trug bisher `"replace": { "react/http": "*" }` — eine Zusage an Composer,
+  dieses Paket in jeder Version selbst zu liefern. Das tut es nicht. Verlangte
+  irgendein anderes Paket im Kundenprojekt `react/http`, hielt Composer den
+  Bedarf damit für gedeckt, installierte nichts **und meldete Erfolg**. Das
+  andere Paket starb erst zur Laufzeit an einer fehlenden Klasse — ohne jede
+  Spur, die zu uns zurückgeführt hätte.
+
+  Wie es dazu kam: `php-mcp/server` führte `react/http` bis 3.2.2 als `suggest`
+  und machte es in 3.3.0 zur harten Abhängigkeit. Wir haben auf diese
+  Verschlechterung mit `replace` reagiert statt mit einer Zeile Wahrheit.
+
+  Jetzt steht `"react/http": "^1.11"` im `require` — dieselbe Spanne, die
+  `php-mcp/server` ohnehin fordert, also keine einzige neue Einschränkung für
+  das Kundenprojekt. Geladen wird davon weiterhin nichts: der Transport läuft
+  über Symfony, der ReactPHP-Weg ist unbenutzt. Belegt durch den Smoke-Test,
+  der ohne `react/http` im vendor vollständig durchläuft.
+
+  Neu im vendor: `react/http`, `react/socket`, `react/dns`, `react/cache`,
+  `evenement/evenement`. Alles reines PHP, alles klein.
+
+  Nebenbefund, der bleibt: `php-mcp/server` hält `symfony/finder` auf
+  `^6.4 || ^7.2`. Auf Contao 6 löst das sauber auf — Symfony geht auf 8.x,
+  nur `symfony/finder` bleibt auf 7.4 (LTS, Support bis Ende 2028). Eine
+  Komponente eine Major zurück, kein Handlungsbedarf.
+- Ein implizit nullbarer Parameter in `ProviderFieldsTest` ist jetzt explizit
+  `?bool` — unter PHP 8.4 eine Deprecation in jedem Testlauf, unter PHP 9 ein
+  Fehler.
+
 ## [1.33.0] – 2026-09-21
 
 > Die beiden letzten umsetzbaren Auditpunkte. Eine Antwortform ändert sich:
