@@ -35,8 +35,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   `suggest` wandert — wo es hingehört: es existiert für
   `StreamableHttpServerTransport`, und dieses Bundle instanziiert weder diesen
   noch den Stdio-Transport. Wir steuern `Server`, `Dispatcher`, `Protocol` und
-  `Session` direkt und machen HTTP selbst im `McpController`. Bis dahin hält
-  der Test die Entscheidung fest, samt Begründung im Klassenkommentar.
+  `Session` direkt und machen HTTP selbst im `McpController`.
+
+  Genau das liegt jetzt als [php-mcp/server#87](https://github.com/php-mcp/server/pull/87)
+  vor. Wird er angenommen und veröffentlicht, können der `replace`-Eintrag,
+  dieser Test und der README-Abschnitt zu `psr/http-message` alle verschwinden.
+  Bis dahin hält der Test die Entscheidung fest, samt Begründung im
+  Klassenkommentar.
 
 ## [1.33.0] – 2026-09-21
 
