@@ -10,10 +10,11 @@ use PHPUnit\Framework\TestCase;
  * `replace: { "react/http": "*" }` is a claim to Composer that this bundle
  * ships react/http itself. It does not. The entry has to stay anyway.
  *
- * php-mcp/server carried react/http as a `suggest` up to 3.2.2 and turned it
- * into a hard requirement in 3.3.0. react/http in turn has required
- * `psr/http-message ^1.0` since 1.9 (2023) and still does in 1.11.1 — no
- * released version accepts ^2.0. Contao runs on 2.0.
+ * php-mcp/server has required react/http outright in every release since 2.0.1
+ * — 3.3.0 only deleted a stale duplicate `suggest` line that had sat beside the
+ * require for years. There is no version to downgrade to that escapes it.
+ * react/http in turn has required `psr/http-message ^1.0` since 1.9 (2023) and
+ * still does in 1.11.1; no released version accepts ^2.0. Contao runs on 2.0.
  *
  * Letting react/http in therefore costs the host project its PSR-7 interfaces.
  * Both directions were measured against real resolutions:
@@ -32,10 +33,15 @@ use PHPUnit\Framework\TestCase;
  * path is dead code here, which is why the smoke test passes with react/http
  * absent from the vendor directory.
  *
- * The only clean fix is upstream: react/http back to `suggest`, where it lived
- * until 3.3.0. Until that lands, this test exists so the replace is not removed
- * a second time. It was removed once, in good faith, by someone who read the
- * manifest but not the commit that put the entry there.
+ * The only clean fix is upstream, moving react/http to `suggest` — which is
+ * where it belongs: it exists for StreamableHttpServerTransport, and this
+ * bundle instantiates neither that transport nor StdioServerTransport. We
+ * drive Server, Dispatcher, Protocol and Session directly and do our own HTTP
+ * in McpController, so not one line of ReactPHP is ever reached.
+ *
+ * Until that lands, this test exists so the replace is not removed a second
+ * time. It was removed once, in good faith, by someone who read the manifest
+ * but not the commit that put the entry there.
  *
  * @see https://github.com/Netzhirsch/contao-mcp-bundle/commit/de80242dbf1118b5c6e60d9226f6760ac034b1ff
  */

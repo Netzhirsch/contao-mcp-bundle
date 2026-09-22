@@ -17,10 +17,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   deshalb gefährdet: Er behauptet gegenüber Composer, das Bundle liefere
   `react/http` selbst. Er muss trotzdem bleiben.
 
-  `php-mcp/server` führte `react/http` bis 3.2.2 als `suggest` und machte es in
-  3.3.0 zur harten Abhängigkeit. `react/http` verlangt seinerseits seit 1.9
-  (2023) `psr/http-message ^1.0` und tut das in 1.11.1 immer noch — es gibt
-  keine Fassung, die `^2.0` akzeptiert. Contao läuft auf 2.0.
+  `php-mcp/server` verlangt `react/http` in jeder Fassung seit 2.0.1 hart —
+  3.3.0 hat lediglich einen veralteten Doppel-Eintrag aus `suggest` gelöscht,
+  der jahrelang neben dem `require` stand. Es gibt also keine Version, auf die
+  man ausweichen könnte. `react/http` verlangt seinerseits seit 1.9 (2023)
+  `psr/http-message ^1.0` und tut das in 1.11.1 immer noch; keine Fassung
+  akzeptiert `^2.0`. Contao läuft auf 2.0.
 
   Gemessen an echten Auflösungen: eine frische Contao-6-Installation zieht
   `psr/http-message` still auf 1.1 zurück, eine bestehende Installation mit 2.0
@@ -29,9 +31,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Dateien bekommt und erst zur Laufzeit scheitert — das kleinere von zwei
   Übeln, kein harmloser Tausch.
 
-  Sauber lösen lässt sich das nur stromaufwärts: `react/http` zurück auf
-  `suggest`. Bis dahin hält der Test die Entscheidung fest, samt Begründung im
-  Klassenkommentar.
+  Sauber lösen lässt sich das nur stromaufwärts, indem `react/http` nach
+  `suggest` wandert — wo es hingehört: es existiert für
+  `StreamableHttpServerTransport`, und dieses Bundle instanziiert weder diesen
+  noch den Stdio-Transport. Wir steuern `Server`, `Dispatcher`, `Protocol` und
+  `Session` direkt und machen HTTP selbst im `McpController`. Bis dahin hält
+  der Test die Entscheidung fest, samt Begründung im Klassenkommentar.
 
 ## [1.33.0] – 2026-09-21
 
