@@ -39,11 +39,19 @@ use PHPUnit\Framework\TestCase;
  * drive Server, Dispatcher, Protocol and Session directly and do our own HTTP
  * in McpController, so not one line of ReactPHP is ever reached.
  *
- * Until that lands, this test exists so the replace is not removed a second
- * time. It was removed once, in good faith, by someone who read the manifest
- * but not the commit that put the entry there.
+ * That fix is now proposed upstream as php-mcp/server#87, together with a
+ * declaration of psr/http-message at `^1.0 || ^2.0` — on their main branch
+ * `src/Context.php` type-hints `ServerRequestInterface` outside any transport,
+ * so the dependency already exists there and is merely undeclared. If the pull
+ * request is merged and released, the replace entry, this test and the
+ * README section on psr/http-message can all go.
+ *
+ * Until then, this test exists so the replace is not removed a second time. It
+ * was removed once, in good faith, by someone who read the manifest but not the
+ * commit that put the entry there.
  *
  * @see https://github.com/Netzhirsch/contao-mcp-bundle/commit/de80242dbf1118b5c6e60d9226f6760ac034b1ff
+ * @see https://github.com/php-mcp/server/pull/87
  */
 final class ReactHttpReplaceTest extends TestCase
 {
