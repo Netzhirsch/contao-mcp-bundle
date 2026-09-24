@@ -182,6 +182,17 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   ein Abschnitt abbricht. Lokal gemessen auf einer frischen Datenbank: vorher
   412 bestandene Prüfungen, jetzt 505. Übersprungen wird nur noch, was eine
   nicht installierte Erweiterung braucht (changelanguage, url-rewrite, DeepL).
+- **`html_filter_preview` und der Smoke-Test kennen die Voreinstellung von
+  Contao 6.0.1.** 6.0.1 richtet `allowedTags` nach der „safe default
+  configuration" der HTML-Spezifikation aus und nimmt dabei die
+  Formular-Elemente (`input`, `label`, `button`, `form`, `select`, `textarea`
+  und weitere) ganz heraus. Das Burger-Beispiel (`<input type>` plus
+  `<label for>`) verliert dort also nicht mehr nur die Attribute, sondern beide
+  Tags. Die Tool-Beschreibung sagt das jetzt. Der Smoke-Test, der auf Contao
+  6.0.1 deshalb rot war, prüft den Attribut-Fall jetzt an Markup, das auf allen
+  unterstützten Versionen gleich gefiltert wird
+  (`<a role>`, `<img fetchpriority>`). Die Werkzeuge selbst lesen die
+  Einstellungen der Installation und waren nicht betroffen.
 - **`sectionHeadline` auf den Kindern eines Akkordeons**
   ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)). Contao legt
   das Feld (den Titel eines Akkordeon-Abschnitts) über den `AccordionListener`

@@ -4385,19 +4385,26 @@ final class McpSmokeTestCommand extends Command
                 && \in_array('a', $r['allowed_tags'] ?? [], true)
                 && \in_array('href', $r['allowed_attributes']['a'] ?? [], true));
 
-        // The exact case that killed the mobile burger: both tags are allowed,
-        // both attributes are not, and the read-back showed neither.
-        $burger = $this->htmlTool->filterPreview(
-            '<input type="checkbox" id="nav-toggle"><label for="nav-toggle">Menu</label>',
+        // The failure that killed the mobile burger: the tag stays, the
+        // attribute that made it work goes, and the read-back shows neither.
+        // The burger itself (<input type> + <label for>) no longer shows it
+        // everywhere: Contao 6.0.1 follows the HTML spec's safe default and
+        // drops form elements as a whole. A link with role="button" and an
+        // image with fetchpriority are filtered the same on every supported
+        // version.
+        $dropped = $this->htmlTool->filterPreview(
+            '<a href="#nav" id="nav-toggle" role="button">Menu</a><img src="files/menu.png" alt="" fetchpriority="high">',
         );
-        $expect('a dropped attribute is named with its tag', $burger,
+        $expect('a dropped attribute is named with its tag', $dropped,
             static fn ($r) => ($r['changed'] ?? false) === true
-                && \in_array(['tag' => 'input', 'attribute' => 'type'], $r['removed_attributes'] ?? [], true)
-                && \in_array(['tag' => 'label', 'attribute' => 'for'], $r['removed_attributes'] ?? [], true));
-        $expect('and the output shows what actually renders', $burger,
-            static fn ($r) => !str_contains((string) $r['output'], 'type=')
-                && !str_contains((string) $r['output'], 'for=')
-                && str_contains((string) $r['output'], 'id='));
+                && ($r['removed_tags'] ?? ['x']) === []
+                && \in_array(['tag' => 'a', 'attribute' => 'role'], $r['removed_attributes'] ?? [], true)
+                && \in_array(['tag' => 'img', 'attribute' => 'fetchpriority'], $r['removed_attributes'] ?? [], true));
+        $expect('and the output shows what actually renders', $dropped,
+            static fn ($r) => !str_contains((string) $r['output'], 'role=')
+                && !str_contains((string) $r['output'], 'fetchpriority=')
+                && str_contains((string) $r['output'], 'id=')
+                && str_contains((string) $r['output'], 'href='));
 
         $expect('a dropped tag is reported as a tag, not as its attributes',
             $this->htmlTool->filterPreview('<svg viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>'),
