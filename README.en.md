@@ -834,5 +834,11 @@ place as well.
 Release order: `composer verify` → smoke test → commit → push → **wait for CI to
 go green** → only then tag.
 
+Tag locally (`git tag -a vX.Y.Z -m "vX.Y.Z: …"`) or with the **Tag** workflow
+(Actions → Tag → Run workflow: version, summary, optionally the commit). It sets
+the annotated tag and nothing else, no GitHub release, and refuses when the
+commit is not on master, the tag exists already or CHANGELOG.md at that commit
+has no section for the version.
+
 ---
 *Maintainer: Jan-Philipp Kalus &lt;kalus@netzhirsch.de&gt; — Netzhirsch*

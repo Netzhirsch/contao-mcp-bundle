@@ -1,0 +1,96 @@
+name: Tag
+
+# Sets an annotated version tag, nothing else: no GitHub release, as for every
+# release before it. Cloud agent sessions may push branches but not tags, so
+# they, and anyone else with write access, dispatch this instead of running
+# `git tag -a` locally. The tagger is whoever started the run.
+#
+# It refuses unless the commit is on master, the tag is new and CHANGELOG.md at
+# that commit has a section for the version. A typo would otherwise publish a
+# version that Packagist serves at once.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v, e.g. 1.34.0'
+        required: true
+        type: string
+      message:
+        description: 'Summary; the tag message becomes "vX.Y.Z: <summary>"'
+        required: true
+        type: string
+      commit:
+        description: 'Commit to tag (default: the tip of master)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag v${{ inputs.version }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      # Inputs reach the script as environment variables only, never
+      # interpolated into it.
+      - name: Check and push the tag
+        env:
+          VERSION: ${{ inputs.version }}
+          MESSAGE: ${{ inputs.message }}
+          COMMIT: ${{ inputs.commit }}
+          ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::\"$VERSION\" is not a version like 1.34.0"
+            exit 1
+          fi
+          TAG="v$VERSION"
+
+          if [[ -z "${MESSAGE//[[:space:]]/}" ]]; then
+            echo "::error::The tag message is empty"
+            exit 1
+          fi
+
+          TARGET=$(git rev-parse --verify --quiet "${COMMIT:-HEAD}^{commit}") || {
+            echo "::error::\"$COMMIT\" is no commit of this repository"
+            exit 1
+          }
+          if ! git merge-base --is-ancestor "$TARGET" origin/master; then
+            echo "::error::$TARGET is not on master"
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "::error::$TAG exists already"
+            exit 1
+          fi
+
+          # Read whole, then searched: grep -q stops at the first match, and
+          # under pipefail the SIGPIPE that leaves `git show` would count as a
+          # failed search.
+          CHANGELOG=$(git show "$TARGET:CHANGELOG.md" 2> /dev/null || true)
+          if ! grep -qE "^## \[${VERSION//./\\.}\]" <<< "$CHANGELOG"; then
+            echo "::error::CHANGELOG.md at $TARGET has no section \"## [$VERSION]\""
+            exit 1
+          fi
+
+          git config user.name "$ACTOR"
+          git config user.email "$ACTOR_ID+$ACTOR@users.noreply.github.com"
+          git tag -a "$TAG" "$TARGET" -m "$TAG: $MESSAGE"
+          git push origin "refs/tags/$TAG"
+
+          echo "Tagged $(git rev-parse --short "$TARGET") as $TAG: $MESSAGE" >> "$GITHUB_STEP_SUMMARY"

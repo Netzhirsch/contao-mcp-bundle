@@ -715,6 +715,12 @@ vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 Reihenfolge für einen Release: `composer verify` → Smoke-Test → committen →
 pushen → **CI grün abwarten** → erst dann taggen.
 
+Getaggt wird lokal (`git tag -a vX.Y.Z -m "vX.Y.Z: …"`) oder über den Workflow
+**Tag** (Actions → Tag → Run workflow: Version, Kurztext, optional der Commit).
+Er setzt nur den annotierten Tag, kein GitHub-Release, und bricht ab, wenn der
+Commit nicht auf master liegt, der Tag schon existiert oder das CHANGELOG an
+diesem Commit keinen Abschnitt für die Version hat.
+
 ## Sicherheitslücken melden
 
 Bitte **nicht** über ein öffentliches Issue, sondern über die
