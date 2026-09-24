@@ -202,8 +202,8 @@ final class Tool
         // Create parity under the target parent, asked with what the copy WILL
         // be: its type (Contao's own copy button asks with the whole new row,
         // so a type the account may not create is refused there too) and every
-        // override — field-level rights included. Before, only pid/ptable went
-        // in, and an excluded field was writable through overrides alone.
+        // override. Before, only pid/ptable went in, and an excluded field was
+        // writable through overrides alone.
         $newData = ['pid' => $intoPid];
         if ($intoPtable !== null) {
             $newData['ptable'] = $intoPtable;
@@ -213,7 +213,25 @@ final class Tool
         }
         $newData += $overridesArr;
 
-        if (($denied = $this->guard->ensureCan($table, 'create', null, $newData)) !== null) {
+        // Field rights, though, only for what the CALLER writes: the overrides
+        // that change something. Copying does not edit the source's type or
+        // headline — the backend copies them without asking — and demanding
+        // the field right for them would make MCP stricter than the button.
+        $written = [];
+        foreach ($overridesArr as $column => $value) {
+            $column = (string) $column;
+            $before = $source[$column] ?? null;
+
+            if (\is_scalar($value) && \is_scalar($before) && (string) $value === (string) $before) {
+                continue; // the copy keeps the source's value — nothing is written
+            }
+
+            // null sets the column to NULL here; to the guard null means "not
+            // sent", so it is handed over as the empty value it writes.
+            $written[$column] = $value ?? '';
+        }
+
+        if (($denied = $this->guard->ensureCan($table, 'create', null, $newData, $written)) !== null) {
             return $denied;
         }
 

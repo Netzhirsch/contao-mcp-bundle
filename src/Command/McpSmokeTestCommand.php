@@ -1966,6 +1966,73 @@ final class McpSmokeTestCommand extends Command
                     ['denial' => $this->permissionGuard->ensureCan('tl_page', 'read', 1)],
                     fn ($r) => \is_array($r['denial']) && ($r['denial']['error'] ?? null) === 'permission_denied');
 
+                // (d4) Field rights, decided the way Contao decides them. Since
+                // Contao 5.0 every field with an input is excluded unless the
+                // DCA opts out, and the core DCAs no longer set the key — the
+                // guard read `exclude ?? false` and so checked no core field.
+                // An editor with the article module, a page of their own and
+                // the field right to `text` only; Contao's real voters decide.
+                $parentPageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type = 'regular' ORDER BY id LIMIT 1");
+                if ($parentPageId > 0) {
+                    $this->connection->insert('tl_user_group', [
+                        'tstamp' => time(),
+                        'name' => $stamp.'_fieldgroup',
+                        'modules' => serialize(['article']),
+                        'pagemounts' => serialize([$parentPageId]),
+                        'alexf' => serialize(['tl_content::text']),
+                        'elements' => serialize(['text', 'headline']),
+                        'netzhirschMcpAccess' => 1,
+                    ]);
+                    $fieldGroupId = (int) $this->connection->lastInsertId();
+
+                    $row['username'] = $stamp.'_fielduser';
+                    $row['email'] = $stamp.'_fields@example.invalid';
+                    $row['disable'] = 0;
+                    $row['inherit'] = 'group';
+                    $row['groups'] = serialize([$fieldGroupId]);
+                    $quotedField = [];
+                    foreach ($row as $col => $val) {
+                        $quotedField[$this->connection->quoteIdentifier((string) $col)] = $val;
+                    }
+                    $this->connection->insert('tl_user', $quotedField);
+                    $fieldUserId = (int) $this->connection->lastInsertId();
+
+                    // A page the editor owns (so its article rights are theirs),
+                    // with one article on it.
+                    $this->connection->insert('tl_page', [
+                        'pid' => $parentPageId, 'sorting' => 99999, 'tstamp' => time(), 'title' => $stamp.'_fieldpage',
+                        'alias' => $stamp.'-fieldpage', 'type' => 'regular', 'published' => 1,
+                        'includeChmod' => 1, 'cuser' => $fieldUserId, 'chmod' => serialize(['u1', 'u2', 'u3', 'u4', 'u5', 'u6']),
+                    ]);
+                    $fieldPageId = (int) $this->connection->lastInsertId();
+                    $this->connection->insert('tl_article', [
+                        'pid' => $fieldPageId, 'sorting' => 128, 'tstamp' => time(), 'title' => $stamp.'_fieldarticle',
+                        'alias' => $stamp.'-fieldarticle', 'inColumn' => 'main', 'published' => 1,
+                    ]);
+                    $fieldArticleId = (int) $this->connection->lastInsertId();
+
+                    $this->mcpCallContext->setIdentity($fieldUserId, 'smoke-fields', null, null);
+                    $inArticle = ['ptable' => 'tl_article', 'pid' => $fieldArticleId];
+
+                    $expect('an editor may write what their form shows (text, default type)',
+                        $this->permissionGuard->ensureCan('tl_content', 'create', null, $inArticle + ['type' => 'text', 'text' => '<p>x</p>']),
+                        fn ($r) => $r === null);
+                    $expect('but not a field their group does not allow',
+                        $this->permissionGuard->ensureCan('tl_content', 'create', null, $inArticle + ['type' => 'text', 'headline' => 'x']),
+                        fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), '"headline"'));
+                    $expect('nor another element type without the right to the type field',
+                        $this->permissionGuard->ensureCan('tl_content', 'create', null, $inArticle + ['type' => 'headline']),
+                        fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), '"type"'));
+                    $expect('and content_create_tree refuses that node before writing anything',
+                        $this->contentTool->createTree('tl_article', $fieldArticleId, [
+                            ['type' => 'text', 'fields' => ['text' => '<p>x</p>']],
+                            ['type' => 'text', 'fields' => ['text' => '<p>x</p>', 'headline' => 'x']],
+                        ]),
+                        fn ($r) => ($r['error'] ?? '') === 'permission_denied' && ($r['problems'][0]['path'] ?? '') === '2');
+                } else {
+                    $output->writeln('  <fg=yellow>⊝ no regular page — skipping the field-rights checks</>');
+                }
+
                 // (e) Trusted mode (auth_mode=none → no identity) allows everything.
                 $this->mcpCallContext->clear();
                 $expect('trusted mode (no identity) allows page create', $this->permissionGuard->ensureCan('tl_page', 'create', null, ['title' => 'x']), fn ($r) => $r === null);
@@ -1976,6 +2043,19 @@ final class McpSmokeTestCommand extends Command
                 }
                 if (($disabledUserId ?? 0) > 0) {
                     $this->connection->delete('tl_user', ['id' => $disabledUserId]);
+                }
+                if (($fieldArticleId ?? 0) > 0) {
+                    $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $fieldArticleId]);
+                    $this->connection->delete('tl_article', ['id' => $fieldArticleId]);
+                }
+                if (($fieldPageId ?? 0) > 0) {
+                    $this->connection->delete('tl_page', ['id' => $fieldPageId]);
+                }
+                if (($fieldUserId ?? 0) > 0) {
+                    $this->connection->delete('tl_user', ['id' => $fieldUserId]);
+                }
+                if (($fieldGroupId ?? 0) > 0) {
+                    $this->connection->delete('tl_user_group', ['id' => $fieldGroupId]);
                 }
             }
         } else {

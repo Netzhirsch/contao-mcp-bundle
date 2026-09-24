@@ -39,8 +39,12 @@ URL rewrites, form leads, maintenance and system settings.
   want it: in the default `restricted` mode only while the 15-minute pairing
   window is open.
 - **Permission parity**: every backend user's rights apply to the AI 1:1 —
-  enforced through Contao's own voters, not reimplemented. Writing a DCA field
-  marked `excluded` additionally requires the `alexf` right for that field.
+  enforced through Contao's own voters, not reimplemented. Writing a field
+  additionally requires its `alexf` right ("allowed fields" in the user group)
+  wherever Contao requires it — since Contao 5 that is every field with an input
+  unless its DCA opts out with `exclude => false`. A value that changes nothing
+  (a default on create, the stored value on update) needs no right, just as in
+  the backend.
 - **Full-text site search**: `search_query` queries Contao's own search index
   (`tl_search`), so it also finds text produced by modules, includes or
   extensions that the CRUD tools cannot see. Protected pages are always excluded;

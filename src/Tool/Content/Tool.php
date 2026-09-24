@@ -607,35 +607,33 @@ final class Tool
      * (its container is created by the same call, inside the parent the top
      * level was checked against).
      *
-     * @param array<int, mixed>                                  $nodes
-     * @param list<array<string, mixed>>                         $denials
-     * @param array<string, array{0: array<string, mixed>|null}> $asked   memo — a page of text elements asks once
+     * Not memoised by type and field names: whether a field counts as written
+     * depends on its value (sending a field's default is no write), so two
+     * nodes with the same keys can get different answers.
+     *
+     * @param array<int, mixed>          $nodes
+     * @param list<array<string, mixed>> $denials
      */
-    private function checkElementPermissions(array $nodes, string $path, ?string $ptable, ?int $pid, array &$denials, array &$asked = []): void
+    private function checkElementPermissions(array $nodes, string $path, ?string $ptable, ?int $pid, array &$denials): void
     {
         foreach ($nodes as $i => $node) {
             $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
             $type = (string) $node['type'];
             $fields = \is_array($node['fields'] ?? null) ? $node['fields'] : [];
 
-            $keys = array_map(strval(...), array_keys($fields));
-            sort($keys);
-            $memo = ($ptable === null ? 'nested' : 'top').'|'.$type.'|'.implode(',', $keys);
-
-            $asked[$memo] ??= [$this->guard->ensureCan(
+            $denied = $this->guard->ensureCan(
                 'tl_content',
                 'create',
                 null,
                 ($ptable === null ? [] : ['ptable' => $ptable, 'pid' => $pid]) + ['type' => $type] + $fields,
-            )];
+            );
 
-            $denied = $asked[$memo][0];
             if ($denied !== null) {
                 $denials[] = ['path' => $here, 'type' => $type, 'error' => (string) ($denied['message'] ?? 'permission_denied')];
             }
 
             if (\is_array($node['children'] ?? null) && $node['children'] !== []) {
-                $this->checkElementPermissions($node['children'], $here, null, null, $denials, $asked);
+                $this->checkElementPermissions($node['children'], $here, null, null, $denials);
             }
         }
     }

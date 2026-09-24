@@ -39,6 +39,13 @@ System-Einstellungen.
   Backend** — kein Pairing-Fenster, keine geöffnete Registrierung. Wer
   registrieren will, kann es weiterhin: im Default-Modus `restricted`
   ausschließlich im 15-Minuten-Pairing-Fenster.
+- **Rechte-Parität**: Die Rechte des Backend-Benutzers gelten für die KI 1:1,
+  durchgesetzt über Contaos eigene Voter statt nachgebaut. Ein Feld zu
+  schreiben braucht zusätzlich sein Feldrecht („Erlaubte Felder" in der
+  Benutzergruppe), wo Contao es verlangt. Seit Contao 5 ist das jedes Feld mit
+  Eingabe, sofern das DCA es nicht mit `exclude => false` freigibt. Ein Wert, der
+  nichts ändert (beim Anlegen der Default, beim Ändern der gespeicherte Wert),
+  braucht kein Recht, wie im Backend.
 - **Volltextsuche über die Website**: `search_query` durchsucht Contaos
   Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
   oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.

@@ -11,8 +11,40 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 > und alle Schreibwege prüfen nach denselben Regeln. Das heißt auch: Der
 > bisherige Umweg über `entity_duplicate` mit rohen Overrides nimmt nur noch,
 > was `content_update` nimmt.
+>
+> **Vor dem Update prüfen, wer eingeschränkte MCP-Zugänge hat:** Feldrechte
+> werden jetzt so geprüft wie im Backend. Eine Redakteursgruppe braucht für
+> jedes Feld, das die KI schreiben soll, das Feldrecht („Erlaubte Felder"),
+> so wie für die Bearbeitungsmaske. Administratoren und der Trusted-Modus sind
+> nicht betroffen.
 
 ### Security
+- **Feldrechte gelten so, wie Contao sie auslegt.** Ob ein Feld das Feldrecht
+  (`alexf`) braucht, las der Guard aus `exclude ?? false`, dem Default aus
+  Contao 4. Seit Contao 5.0 ist jedes Feld mit Eingabe ausgeschlossen, sofern
+  das DCA nicht `exclude => false` sagt, und die Kern-DCAs setzen den Schlüssel
+  gar nicht mehr. Geprüft wurde deshalb auf `tl_content`, `tl_article`,
+  `tl_news` und allen anderen Kerntabellen kein einziges Feld. Ein
+  eingeschränkter Redakteur konnte über MCP Felder schreiben, die ihm die
+  Bearbeitungsmaske nie zeigt. Entschieden wird jetzt mit Contaos eigener
+  Funktion (`DataContainer::isFieldExcluded`), unverändert von 5.0 bis 6.0.
+
+  Was nichts ändert, braucht kein Recht. Das ist beim Ändern der gespeicherte
+  Wert und beim Anlegen der Wert, mit dem ein neuer Datensatz ohnehin startet
+  (DCA-Default, sonst Spalten-Default). Das Backend setzt diese Werte ebenfalls
+  ohne Rückfrage, deshalb braucht `content_create(type: "text")` kein Recht auf
+  das Typ-Feld, genau wie der Knopf „Neues Element". Bei einer Kopie zählen
+  nur die Overrides, die etwas ändern. Den Typ und die übrigen Spalten der
+  Quelle übernimmt auch der Kopieren-Knopf, ohne nach Feldrechten zu fragen.
+
+  Geprüft, ob die strengere Prüfung Tool-Parameter trifft, die gar kein Feld
+  schreiben: Jeder Parameter der schreibenden Tools, der als
+  ausgeschlossenes Feld gilt, schreibt auch genau dieses Feld.
+- **`pages_create_tree` prüft die Rechte pro Knoten**, wie jetzt auch
+  `content_create_tree`. Der Enforcer sah nur `pid` und keinen einzigen Knoten.
+  Typ und Felder der Seiten gingen also in keine Prüfung ein. Jetzt durchläuft
+  jeder Knoten vor dem ersten Schreibvorgang dieselbe Prüfung wie ein
+  `page_create`-Aufruf.
 - **Overrides von `entity_duplicate` umgehen die Rechteprüfung nicht mehr.**
   Geprüft wurde „darf unter `into_pid` anlegen". Danach setzte ein Override
   `pid` oder `ptable` die Kopie unter einen anderen Elternteil, und dort fragte

@@ -1189,8 +1189,9 @@ final class Tool
             ~30 ms of actual work, plus a round-trip. A 25-page tree takes about a fifth
             of the server time this way.
 
-            Shape errors (missing title/type, unknown field) are reported for the WHOLE
-            tree before anything is written — nothing is created in that case. Runtime
+            Shape errors (missing title/type, unknown field) and your backend permissions
+            per node (page type, field rights) are checked for the WHOLE tree before
+            anything is written — nothing is created in that case. Runtime
             failures (alias collision, invalid value) can still happen mid-run: that node
             is reported with its error and its children are skipped, siblings continue.
             There is no transaction and no bulk undo — every page carries its own version
@@ -1237,6 +1238,17 @@ final class Tool
                 'message' => 'The tree was rejected before anything was created.',
                 'problems' => $problems,
                 'allowed_fields' => $allowed,
+            ];
+        }
+
+        $denials = [];
+        $this->checkNodePermissions($pages, '', $pid, $denials);
+
+        if ($denials !== []) {
+            return [
+                'error' => 'permission_denied',
+                'message' => 'The tree was rejected before anything was created: your backend account may not create every one of these pages.',
+                'problems' => $denials,
             ];
         }
 
@@ -1289,6 +1301,47 @@ final class Tool
             }
             if (\is_array($children) && $children !== []) {
                 self::validateNodes($children, $here, $allowed, $problems, $count);
+            }
+        }
+    }
+
+    /**
+     * Permission parity with page_create, node by node.
+     *
+     * The enforcer checks the tree call once, against `pid`. It never sees a
+     * node's type or fields — so a page type the backend account may not
+     * create, or an excluded field it may not edit, went through here and
+     * nowhere else. Each node is asked with what createNodes() hands to
+     * page_create: a top-level node with the tree's parent, a nested one
+     * without (its parent is created by the same call, under the parent the
+     * top level was checked against).
+     *
+     * @param array<int, mixed>          $nodes
+     * @param list<array<string, mixed>> $denials
+     */
+    private function checkNodePermissions(array $nodes, string $path, ?int $pid, array &$denials): void
+    {
+        $sorting = 128;
+
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            $children = $node['children'] ?? [];
+            unset($node['children']);
+
+            $newData = $node + ($pid === null ? [] : ['pid' => $pid]) + ['sorting' => $sorting];
+            $sorting += 128;
+
+            $denied = $this->guard->ensureCan('tl_page', 'create', null, $newData);
+            if ($denied !== null) {
+                $denials[] = [
+                    'path' => $here,
+                    'title' => (string) ($node['title'] ?? ''),
+                    'error' => (string) ($denied['message'] ?? 'permission_denied'),
+                ];
+            }
+
+            if (\is_array($children) && $children !== []) {
+                $this->checkNodePermissions($children, $here, null, $denials);
             }
         }
     }
