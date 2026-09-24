@@ -98,7 +98,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
     Tippfehler in der Datenbank, wird als angewendet gemeldet und nie gerendert.
     Schlüssel, die schon gespeichert sind, gehen auch durch, wenn die Config sie
     nicht mehr kennt, damit Lesen und Zurückschreiben nach einer Umbenennung
-    weiter funktioniert.
+    weiter funktioniert. Genauso werden die Werte von Select-, Radio- und
+    Checkbox-Feldern mit festen Optionen geprüft, wie es auch die
+    Backend-Widgets tun: `{"grid": "grid7Col"}` wird abgelehnt, wenn die Config
+    nur `grid1Col` bis `grid6Col` kennt, und die Meldung nennt die gültigen
+    Werte. Leer (keine Auswahl) und ein schon gespeicherter Wert gehen durch.
+    Optionen, die RSCE erst beim Bearbeiten berechnet (`options_callback`,
+    `foreignKey`), werden nicht geprüft.
   - **Wird gespeichert wie vom Backend.** Werte-Listen werden serialisiert,
     Dateien als Text-UUID abgelegt (die Hex-Form aus `content_get` wird
     umgerechnet), `true`/`false` wird zu `"1"`/`""`, ein Datumsfeld nimmt ISO 8601.

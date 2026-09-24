@@ -33,7 +33,11 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce;
  *     otherwise be stored, reported as applied, and never rendered. Keys that are
  *     already in the stored JSON pass even when the config no longer knows them,
  *     so reading an element and writing it back keeps working after a field was
- *     renamed.
+ *     renamed. The same goes for the value of a field with fixed options: the
+ *     backend's select and radio widgets refuse anything else, and a value
+ *     outside the options fails as quietly as a mistyped key. A value that is
+ *     already stored passes here too; options computed at edit time
+ *     (options_callback, foreignKey) cannot be known and are not checked.
  */
 final class RsceData
 {
@@ -43,6 +47,9 @@ final class RsceData
     private const FILE_TYPES = ['fileTree', 'fineUploader'];
 
     private const DATE_RGXPS = ['date', 'time', 'datim'];
+
+    /** Widgets whose value is one (or, with `multiple`, several) of their options. */
+    private const CHOICE_TYPES = ['select', 'radio', 'radioTable', 'checkbox', 'checkboxWizard'];
 
     /**
      * The caller's input as a key => value map: a JSON string, or the object
@@ -101,12 +108,13 @@ final class RsceData
      * @param array<array-key, mixed>|null $fields the type's `fields` config; null when it could not be read
      * @param array<string, mixed>      $stored the decoded column as it is now
      * @param string                    $paletteTool the tool that lists the type's keys, named in refusals
+     * @param array<string, list<mixed>> $alsoStored  inside a list: every value a stored item holds, per key
      *
      * @return array<string, mixed>
      *
      * @throws \InvalidArgumentException
      */
-    public static function convert(array $patch, ?array $fields, array $stored, string $type, string $path = '', string $paletteTool = 'content_palette_get'): array
+    public static function convert(array $patch, ?array $fields, array $stored, string $type, string $path = '', string $paletteTool = 'content_palette_get', array $alsoStored = []): array
     {
         $out = [];
 
@@ -131,7 +139,7 @@ final class RsceData
             }
 
             /** @var array<string, mixed> $config */
-            $out[$key] = self::convertValue($key, $value, $config, $stored[$key] ?? null, $type, $path, $paletteTool);
+            $out[$key] = self::convertValue($key, $value, $config, $stored[$key] ?? null, $type, $path, $paletteTool, $alsoStored[$key] ?? []);
         }
 
         return $out;
@@ -224,7 +232,7 @@ final class RsceData
                 $entry['options'] = $options;
             } elseif (isset($config['options_callback']) || isset($config['foreignKey'])) {
                 // Computed per record at edit time; nothing here can run it.
-                $entry['options'] = 'computed at edit time — not listable here';
+                $entry['options'] = 'computed at edit time — not listed or checked here';
             }
 
             if (\array_key_exists('default', $config) && (\is_scalar($config['default']) || \is_array($config['default']))) {
@@ -299,10 +307,11 @@ final class RsceData
 
     /**
      * @param array<string, mixed> $config
+     * @param list<mixed>          $alsoStored inside a list: the values the stored items hold for this key
      *
      * @throws \InvalidArgumentException
      */
-    private static function convertValue(string $key, mixed $value, array $config, mixed $stored, string $type, string $path, string $paletteTool): mixed
+    private static function convertValue(string $key, mixed $value, array $config, mixed $stored, string $type, string $path, string $paletteTool, array $alsoStored = []): mixed
     {
         $inputType = (string) ($config['inputType'] ?? '');
         $eval = \is_array($config['eval'] ?? null) ? $config['eval'] : [];
@@ -315,6 +324,10 @@ final class RsceData
 
         if (\in_array($inputType, self::FILE_TYPES, true)) {
             return self::fileValue($where, $value, $multiple);
+        }
+
+        if (\in_array($inputType, self::CHOICE_TYPES, true)) {
+            self::checkChoice($where, $value, $config, [$stored, ...$alsoStored], $type, $paletteTool);
         }
 
         if (\is_bool($value)) {
@@ -377,11 +390,16 @@ final class RsceData
 
         $itemFields = \is_array($config['fields'] ?? null) ? $config['fields'] : [];
 
-        // Stale-key tolerance for items, too: any key some stored item carries.
+        // Stale-key tolerance for items, too: any key some stored item carries,
+        // and for choices any value some stored item holds.
         $storedKeys = [];
+        $storedValues = [];
         foreach (\is_array($stored) ? $stored : [] as $item) {
             if (\is_array($item)) {
                 $storedKeys = array_merge($storedKeys, $item);
+                foreach ($item as $itemKey => $itemValue) {
+                    $storedValues[(string) $itemKey][] = $itemValue;
+                }
             }
         }
 
@@ -391,7 +409,7 @@ final class RsceData
                 throw new \InvalidArgumentException(sprintf('rsce_data: "%s[%d]" must be an object with the item\'s fields.', $where, $i));
             }
 
-            $converted = self::convert($item, $itemFields, $storedKeys, $type, sprintf('%s[%d].', $where, $i), $paletteTool);
+            $converted = self::convert($item, $itemFields, $storedKeys, $type, sprintf('%s[%d].', $where, $i), $paletteTool, $storedValues);
 
             // An item is written whole; a null inside it just leaves the key out.
             $items[] = array_filter($converted, static fn (mixed $v): bool => $v !== null);
@@ -487,18 +505,93 @@ final class RsceData
     }
 
     /**
+     * A choice field takes one of its options, as the backend widgets insist
+     * on. Also allowed: nothing chosen, and a value that is already stored, so
+     * an element whose option the config renamed can still be read and written
+     * back. Options computed at edit time are not known here and not checked.
+     *
+     * @param array<string, mixed> $config
+     * @param list<mixed>          $stored what this field holds now: its stored value, or those of the stored list items
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function checkChoice(string $where, mixed $value, array $config, array $stored, string $type, string $paletteTool): void
+    {
+        $options = self::options($config);
+        if ($options === null || $options === []) {
+            return;
+        }
+
+        $allowed = array_column($options, 'value');
+        $kept = self::choicesIn($stored);
+
+        foreach (self::choicesIn(\is_array($value) ? array_values($value) : [$value]) as $choice) {
+            if ($choice === '' || \in_array($choice, $allowed, true) || \in_array($choice, $kept, true)) {
+                continue;
+            }
+
+            $shown = \array_slice($allowed, 0, 30);
+            $more = \count($allowed) - \count($shown);
+
+            throw new \InvalidArgumentException(sprintf(
+                'rsce_data: "%s" has no option "%s". Its options are: %s. %s("%s") lists them with their labels.',
+                $where,
+                $choice,
+                implode(', ', $shown).($more > 0 ? sprintf(' and %d more', $more) : ''),
+                $paletteTool,
+                $type,
+            ));
+        }
+    }
+
+    /**
+     * The choices in a set of values: plain values, true/false the way a
+     * checkbox stores them, and the serialised list a multi-value field keeps.
+     * Anything else is no choice and left to the conversion to report.
+     *
+     * @param list<mixed> $values
+     *
+     * @return list<string>
+     */
+    private static function choicesIn(array $values): array
+    {
+        $out = [];
+
+        foreach ($values as $value) {
+            if (\is_string($value) && str_starts_with($value, 'a:')) {
+                $list = @unserialize($value, ['allowed_classes' => false]);
+                if (\is_array($list)) {
+                    $out = [...$out, ...self::choicesIn(array_values($list))];
+                    continue;
+                }
+            }
+
+            if (\is_bool($value)) {
+                $out[] = $value ? '1' : '';
+            } elseif (\is_scalar($value)) {
+                $out[] = (string) $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @param array<string, mixed> $config
      *
      * @return list<array<string, string>>|null
      */
     private static function options(array $config): ?array
     {
-        if (!\is_array($config['options'] ?? null)) {
+        // A callback or a foreign key replaces the fixed options at edit time,
+        // as in Widget::getAttributesFromDca().
+        if (!\is_array($config['options'] ?? null) || isset($config['options_callback']) || isset($config['foreignKey'])) {
             return null;
         }
 
         $reference = \is_array($config['reference'] ?? null) ? $config['reference'] : [];
-        $isList = array_is_list($config['options']);
+        $eval = \is_array($config['eval'] ?? null) ? $config['eval'] : [];
+        $isList = array_is_list($config['options']) && empty($eval['isAssociative']);
         $out = [];
 
         foreach ($config['options'] as $key => $option) {

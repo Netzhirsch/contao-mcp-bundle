@@ -595,8 +595,11 @@ module_create(theme_id: 1, type: "rsce_teaser", name: "Teaser Startseite", field
   entfernt einen, alles Nicht-Genannte bleibt. Eine Liste (`inputType: list`) wird
   als Ganzes ersetzt.
 - **Geprüft.** Einen Schlüssel, den der Typ laut `rsce_*_config.php` nicht hat,
-  lehnt das Tool ab und nennt dabei die vorhandenen. Was schon gespeichert ist,
-  geht auch dann durch, wenn die Config es nicht mehr kennt.
+  lehnt das Tool ab und nennt dabei die vorhandenen. Ebenso einen Wert, den ein
+  Select-, Radio- oder Checkbox-Feld mit festen Optionen nicht anbietet, wie im
+  Backend. Was schon gespeichert ist, geht auch dann durch, wenn die Config es
+  nicht mehr kennt. Optionen aus `options_callback` oder `foreignKey` entstehen
+  erst beim Bearbeiten und werden nicht geprüft.
 - **Gespeichert wie vom Backend.** Werte-Listen werden serialisiert, Dateien als
   UUID abgelegt (die Hex-Form aus `content_get` wird umgerechnet),
   `true`/`false` wird zu `"1"`/`""`, Datumsfelder werden zum Timestamp (ISO 8601

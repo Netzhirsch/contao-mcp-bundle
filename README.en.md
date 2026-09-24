@@ -715,8 +715,11 @@ module_create(theme_id: 1, type: "rsce_teaser", name: "Home teaser", fields: {"r
   one, and everything you leave out stays. A list (`inputType: list`) is replaced
   as a whole.
 - **Checked.** A key the type does not have according to its `rsce_*_config.php`
-  is refused, and the message names the ones it has. Keys that are already
-  stored pass even when the config no longer knows them.
+  is refused, and the message names the ones it has. So is a value a select,
+  radio or checkbox field with fixed options does not offer, as in the backend.
+  What is already stored passes even when the config no longer knows it.
+  Options from an `options_callback` or `foreignKey` only exist at edit time and
+  are not checked.
 - **Stored the way the backend stores it.** Lists of values are serialised,
   files become UUIDs (the hex form `content_get` prints is converted),
   `true`/`false` becomes `"1"`/`""`, and date fields become timestamps (ISO 8601

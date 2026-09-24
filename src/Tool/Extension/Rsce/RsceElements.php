@@ -155,6 +155,7 @@ final class RsceElements
             'format' => 'All settings of this element live in rsce_data, a JSON object with one key per field. '
                 .'Pass it as a JSON object (or a JSON string) inside `fields`. It is MERGED into what is stored: '
                 .'a key you send replaces that key, a key set to null is removed, keys you leave out stay as they are, and a list is replaced as a whole. '
+                .'A field with fixed options takes one of its listed option values, as in the backend. '
                 .'Values are stored as the backend stores them — lists of options are serialised, file references become UUIDs, true/false become "1"/"".',
         ];
 

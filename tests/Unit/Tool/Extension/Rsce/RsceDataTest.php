@@ -256,6 +256,117 @@ final class RsceDataTest extends TestCase
         self::assertStringNotContainsString('ü', $json);
     }
 
+    /**
+     * The gap from the test of the fix: grid7Col was stored although the
+     * select only offers the listed options — which the backend widget
+     * would have refused.
+     */
+    public function testAChoiceMustBeOneOfItsOptions(): void
+    {
+        self::assertSame('grid3Col', self::convert(['grid' => 'grid3Col'])['grid']);
+        self::assertSame('', self::convert(['grid' => ''])['grid'], 'nothing chosen is a choice too');
+
+        try {
+            self::convert(['grid' => 'grid7Col']);
+            self::fail('A value outside the options was accepted.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('"grid" has no option "grid7Col"', $e->getMessage());
+            self::assertStringContainsString('Its options are: grid2Col, grid3Col.', $e->getMessage());
+            self::assertStringContainsString('content_palette_get("rsce_themoreGrid")', $e->getMessage());
+        }
+    }
+
+    public function testEveryValueOfAMultiChoiceIsChecked(): void
+    {
+        try {
+            self::convert(['visibleOn' => ['desktop', 'tablet']]);
+            self::fail('A value outside the options was accepted in a list of values.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('"visibleOn" has no option "tablet"', $e->getMessage());
+        }
+
+        // The stored, serialised form is read the same way.
+        $stored = serialize(['mobile']);
+        self::assertSame($stored, self::convert(['visibleOn' => $stored])['visibleOn']);
+    }
+
+    /**
+     * Read → change → write back must survive an option the config dropped,
+     * as it survives a dropped key.
+     */
+    public function testAStoredValueThatLeftTheOptionsStillGoesBack(): void
+    {
+        self::assertSame('grid4Col', self::convert(['grid' => 'grid4Col'], ['grid' => 'grid4Col'])['grid']);
+        self::assertSame(
+            serialize(['desktop', 'watch']),
+            self::convert(['visibleOn' => ['desktop', 'watch']], ['visibleOn' => serialize(['watch'])])['visibleOn'],
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('has no option "grid5Col"');
+
+        self::convert(['grid' => 'grid5Col'], ['grid' => 'grid4Col']);
+    }
+
+    /**
+     * Contao's rules for which part of an option is its value: the key of an
+     * associative array, the item of a list unless isAssociative says
+     * otherwise, and inside a group the same once more. A callback or a
+     * foreign key replaces the fixed options, so nothing is checked then.
+     */
+    public function testOptionValuesFollowContaosRules(): void
+    {
+        $fields = [
+            'grouped' => ['inputType' => 'select', 'options' => ['Columns' => ['grid2Col' => 'Two', 'grid3Col' => 'Three'], 'Other' => ['full', 'narrow']]],
+            'keyed' => ['inputType' => 'radio', 'options' => ['mobile', 'desktop'], 'eval' => ['isAssociative' => true]],
+            'numbered' => ['inputType' => 'select', 'options' => [1 => 'One', 2 => 'Two']],
+            'computed' => ['inputType' => 'select', 'options' => ['a'], 'options_callback' => ['Some\\Theme', 'options']],
+            'related' => ['inputType' => 'select', 'foreignKey' => 'tl_page.title'],
+        ];
+        $convert = static fn (array $patch): array => RsceData::convert($patch, $fields, [], self::TYPE);
+
+        self::assertSame(['grouped' => 'grid3Col'], $convert(['grouped' => 'grid3Col']));
+        self::assertSame(['grouped' => 'narrow'], $convert(['grouped' => 'narrow']));
+        self::assertSame(['keyed' => '1'], $convert(['keyed' => 1]));
+        self::assertSame(['numbered' => '2'], $convert(['numbered' => 2]));
+        self::assertSame(['computed' => 'anything', 'related' => '42'], $convert(['computed' => 'anything', 'related' => '42']));
+
+        foreach ([['grouped' => 'Columns'], ['keyed' => 'mobile'], ['numbered' => 'Two']] as $patch) {
+            try {
+                $convert($patch);
+                self::fail('Accepted '.json_encode($patch));
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('has no option', $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Inside a list the check runs per item, and a value any stored item
+     * holds goes back unchanged — lists are rewritten as a whole.
+     */
+    public function testChoicesInsideListItemsAreCheckedToo(): void
+    {
+        $fields = ['buttons' => [
+            'inputType' => 'list',
+            'fields' => [
+                'text' => ['inputType' => 'text'],
+                'style' => ['inputType' => 'select', 'options' => ['primary', 'secondary']],
+            ],
+        ]];
+        $stored = ['buttons' => [['text' => 'Alt', 'style' => 'legacy']]];
+
+        self::assertSame(
+            ['buttons' => [['text' => 'Alt', 'style' => 'legacy'], ['text' => 'Neu', 'style' => 'primary']]],
+            RsceData::convert(['buttons' => [['text' => 'Alt', 'style' => 'legacy'], ['text' => 'Neu', 'style' => 'primary']]], $fields, $stored, self::TYPE),
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('"buttons[1].style" has no option "tertiary"');
+
+        RsceData::convert(['buttons' => [['style' => 'primary'], ['style' => 'tertiary']]], $fields, $stored, self::TYPE);
+    }
+
     public function testAnUnreadableColumnDecodesToNothing(): void
     {
         self::assertSame([], RsceData::decode(null));
@@ -295,6 +406,9 @@ final class RsceDataTest extends TestCase
         self::assertStringContainsString('file UUID', $byName['bgImage']['value']);
         self::assertStringContainsString('list of file UUIDs', $byName['gallery']['value']);
         self::assertSame(3, $byName['buttons']['max_items']);
+
+        $computed = RsceData::describe(['style' => ['inputType' => 'select', 'options' => ['a'], 'options_callback' => ['Some\\Theme', 'options']]]);
+        self::assertStringContainsString('computed at edit time', (string) $computed[0]['options']);
         self::assertSame(['text', 'url'], array_column($byName['buttons']['fields'], 'name'));
     }
 }
