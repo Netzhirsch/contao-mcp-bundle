@@ -37,6 +37,15 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   nur die Overrides, die etwas ändern. Den Typ und die übrigen Spalten der
   Quelle übernimmt auch der Kopieren-Knopf, ohne nach Feldrechten zu fragen.
 
+  Eine Ausnahme kommt ebenfalls aus dem Backend: `rsce_data` braucht kein
+  Feldrecht. RSCE schreibt die Spalte über die virtuellen Felder eines
+  Elements, und die setzt RSCE durchweg auf `exclude => false`. Ein
+  eingeschränkter Redakteur konfiguriert ein RSCE-Element im Backend also ohne
+  Feldrecht, und nach einem Recht auf `rsce_data` selbst fragt keine
+  Bearbeitungsmaske. Die regulären Spalten eines RSCE-Elements (`headline`,
+  `text`, …) brauchen ihr Recht wie sonst. Geprüft mit einem eingeschränkten
+  Redakteur gegen Contaos Voter im Kontext eines echten `/mcp`-Requests.
+
   Geprüft, ob die strengere Prüfung Tool-Parameter trifft, die gar kein Feld
   schreiben: Jeder Parameter der schreibenden Tools, der als
   ausgeschlossenes Feld gilt, schreibt auch genau dieses Feld.

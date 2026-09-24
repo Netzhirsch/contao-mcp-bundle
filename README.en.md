@@ -44,7 +44,8 @@ URL rewrites, form leads, maintenance and system settings.
   wherever Contao requires it — since Contao 5 that is every field with an input
   unless its DCA opts out with `exclude => false`. A value that changes nothing
   (a default on create, the stored value on update) needs no right, just as in
-  the backend.
+  the backend. Neither does `rsce_data`: RSCE writes the column through virtual
+  fields that never ask for a field right.
 - **Full-text site search**: `search_query` queries Contao's own search index
   (`tl_search`), so it also finds text produced by modules, includes or
   extensions that the CRUD tools cannot see. Protected pages are always excluded;

@@ -45,7 +45,8 @@ System-Einstellungen.
   Benutzergruppe), wo Contao es verlangt. Seit Contao 5 ist das jedes Feld mit
   Eingabe, sofern das DCA es nicht mit `exclude => false` freigibt. Ein Wert, der
   nichts ändert (beim Anlegen der Default, beim Ändern der gespeicherte Wert),
-  braucht kein Recht, wie im Backend.
+  braucht kein Recht, wie im Backend. Ebenso `rsce_data`: RSCE schreibt die
+  Spalte über virtuelle Felder, die nie ein Feldrecht verlangen.
 - **Volltextsuche über die Website**: `search_query` durchsucht Contaos
   Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
   oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.

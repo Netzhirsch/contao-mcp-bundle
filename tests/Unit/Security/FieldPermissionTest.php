@@ -65,6 +65,8 @@ final class FieldPermissionTest extends TestCase
                 'invisible' => ['inputType' => 'checkbox', 'sql' => ['type' => 'boolean', 'default' => false]],
                 'customTpl' => ['inputType' => 'select', 'sql' => "varchar(64) NOT NULL default ''"],
                 'cssID' => ['inputType' => 'text', 'exclude' => false, 'sql' => "varchar(255) NOT NULL default ''"],
+                // As RSCE 2.5 declares it.
+                'rsce_data' => ['exclude' => true, 'inputType' => 'rsce_data', 'sql' => 'mediumblob NULL'],
             ],
         ];
         $GLOBALS['TL_DCA']['tl_settings'] = [
@@ -206,6 +208,26 @@ final class FieldPermissionTest extends TestCase
         self::assertNull($guard->ensureCan('tl_content', 'create', null, $row, []));
 
         $denied = $guard->ensureCan('tl_content', 'create', null, $row, ['headline' => 'Kopie']);
+        self::assertStringContainsString('"headline"', $denied['message'] ?? '');
+    }
+
+    /**
+     * RSCE writes rsce_data through virtual fields it marks `exclude => false`,
+     * so the backend never asks for a right on the column. The regular columns
+     * of an RSCE element are still checked.
+     */
+    public function testRsceDataNeedsNoRightButTheRegularColumnsDo(): void
+    {
+        $guard = $this->guard();
+
+        self::assertNull($guard->ensureCan('tl_content', 'create', null, ['ptable' => 'tl_article', 'pid' => 3, 'rsce_data' => '{"grid":"grid3Col"}']));
+
+        $this->stored = ['id' => 5, 'pid' => 3, 'ptable' => 'tl_article', 'type' => 'rsce_grid', 'rsce_data' => '{}'];
+        $guard = $this->guard();
+        self::assertNull($guard->ensureCan('tl_content', 'update', 5, ['rsce_data' => '{"grid":"grid2Col"}']));
+
+        $denied = $guard->ensureCan('tl_content', 'update', 5, ['rsce_data' => '{"grid":"grid2Col"}', 'headline' => 'Raster']);
+        self::assertSame('permission_denied', $denied['error'] ?? null);
         self::assertStringContainsString('"headline"', $denied['message'] ?? '');
     }
 

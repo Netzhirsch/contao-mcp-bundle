@@ -67,6 +67,26 @@ final class McpPermissionGuard
     ];
 
     /**
+     * Columns the edit mask writes without asking for their field right,
+     * although their DCA marks them excluded.
+     *
+     * rsce_data is the storage behind the virtual fields of an RSCE element,
+     * and RSCE sets every one of those fields to `exclude => false`; its save
+     * callbacks then write the column. A restricted editor therefore configures
+     * an RSCE element without any field right, and no backend form ever asks
+     * for one on rsce_data itself. Asking for it here refused exactly the edit
+     * the backend allows. The regular columns an RSCE element shows (headline,
+     * text, …) are written as themselves and checked as usual.
+     *
+     * @var array<string, list<string>>
+     */
+    private const FIELDS_WITHOUT_FIELD_RIGHT = [
+        'tl_content' => ['rsce_data'],
+        'tl_module' => ['rsce_data'],
+        'tl_form_field' => ['rsce_data'],
+    ];
+
+    /**
      * Tables that have a Contao record-level READ voter which scopes list
      * access (archive/calendar/channel/parent membership). Only these are
      * filtered by {@see filterReadable()} — a table WITHOUT such a voter would
@@ -651,7 +671,10 @@ final class McpPermissionGuard
         foreach ($values as $field => $value) {
             $field = (string) $field;
 
-            if ($value === null || !$dataContainer->isFieldExcluded($table, $field)) {
+            if ($value === null
+                || \in_array($field, self::FIELDS_WITHOUT_FIELD_RIGHT[$table] ?? [], true)
+                || !$dataContainer->isFieldExcluded($table, $field)
+            ) {
                 continue;
             }
 
