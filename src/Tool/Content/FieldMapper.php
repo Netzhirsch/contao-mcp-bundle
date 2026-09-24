@@ -10,6 +10,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 use Netzhirsch\ContaoMcpBundle\Service\SerializedTuple;
 use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 
 /**
  * Field mapper for tl_content. Because tl_content's column set is extended by every
@@ -21,7 +22,8 @@ use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
  * Input shape: tools pass a flat array merging the four required Top-Level fields
  * (pid, ptable, type, sorting) and a `fields` dict containing every type-specific
  * value. The mapper validates each key against the live palette + a few
- * always-allowed core fields, then casts/serialises the value to the DCA expectation.
+ * always-allowed core fields + what the element's parent adds (an accordion's
+ * sectionHeadline), then casts/serialises the value to the DCA expectation.
  */
 final class FieldMapper
 {
@@ -75,11 +77,26 @@ final class FieldMapper
     private const STRING_LIST_FIELDS = ['mooHeaders', 'sliderTypes', 'cssClasses', 'galleryTplOptions'];
 
     /**
-     * Headline tuple field.
+     * Headline tuple fields — serialised {value, unit}. sectionHeadline is the
+     * same inputUnit widget with the same default.
      *
      * @var list<string>
      */
-    private const HEADLINE_TUPLE_FIELDS = ['headline'];
+    private const HEADLINE_TUPLE_FIELDS = ['headline', 'sectionHeadline'];
+
+    /**
+     * Fields an element gains from WHERE it sits, not from its type:
+     * field => the type of the parent element that adds it.
+     *
+     * Contao's AccordionListener (config.onpalette, unchanged from 5.3 to 6.0)
+     * puts sectionHeadline — the title of an accordion section — into the
+     * palette of every element whose parent is an accordion. A palette read per
+     * type never shows it, so the field was refused on exactly the elements that
+     * need it, and an accordion could not be built with titled sections.
+     *
+     * @var array<string, string>
+     */
+    private const CONTEXT_FIELDS = ['sectionHeadline' => 'accordion'];
 
     /**
      * Serialised positional string-pair fields → accept an object
@@ -116,6 +133,7 @@ final class FieldMapper
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly ProviderFields $providerFields,
+        private readonly RsceElements $rsce,
     ) {
     }
 
@@ -139,32 +157,57 @@ final class FieldMapper
             ));
         }
 
-        $allowed = $this->allowedFieldsFor($type);
+        // Where the element sits after this write: a move in the same call
+        // counts, because the palette it gets is the one of its NEW parent.
+        $parentType = $this->parentTypeOf(
+            (string) ($input['ptable'] ?? $content->ptable),
+            (int) ($input['pid'] ?? $content->pid),
+        );
 
+        return $this->write($content, $input, $detectChanges, $type, $parentType);
+    }
+
+    /**
+     * Everything apply() would check — field names, values, extension
+     * providers — run against a throwaway element that is never saved.
+     *
+     * For content_create_tree, which promises to find every checkable problem
+     * before its first write. A node's parent may not exist yet at that point
+     * (it is created by the same call), so the parent's type is passed in.
+     *
+     * @param array<string, mixed> $fields
+     *
+     * @return string|null the refusal content_create would answer, null when the element can be written
+     */
+    public function check(string $type, array $fields, ?string $parentType = null): ?string
+    {
+        $this->framework->initialize();
+
+        $probe = new ContentModel();
+        $probe->type = $type;
+
+        try {
+            $this->write($probe, $fields, false, $type, $parentType);
+        } catch (\InvalidArgumentException $e) {
+            return $e->getMessage();
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     *
+     * @return list<string>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function write(ContentModel $content, array $input, bool $detectChanges, string $type, ?string $parentType): array
+    {
         // ─── Validate ───
-        foreach (array_keys($input) as $field) {
-            if (!\in_array($field, $allowed, true)) {
-                // A type whose palette is built at edit time resolves to
-                // nothing here, and the base list is all that is left. Saying
-                // "see content_palette_get" would then send the caller to an
-                // answer that repeats this same list — the field is not missing
-                // from a palette, there IS no readable palette.
-                $dynamic = $this->resolvePalette($type)['fields'] === [];
-
-                throw new \InvalidArgumentException(sprintf(
-                    $dynamic
-                        ? 'Field "%1$s" cannot be written on content type "%2$s": that type has no static palette (it is assembled at edit time), so only the base fields and extension-declared fields are writable here — %5$s. '
-                            .'This is a validation limit, not a permission check — nothing here can tell what a valid value for that field would be, so it is refused rather than guessed at. '
-                            .'Two ways to make it writable, both on the extension that owns the type: it can ship its own tools (see installed_bundles, enable them under MCP-Server → Tools), '
-                            .'or it can declare the field by implementing Netzhirsch\ContaoMcpBundle\Tool\Contract\FieldProvider and tagging that service `netzhirsch.field_provider` — declared fields skip the palette check and are validated by the extension itself.'
-                        : 'Field "%1$s" is not valid for content type "%2$s". Use content_palette_get("%3$s") to see allowed fields. Currently allowed: %4$s.',
-                    $field,
-                    $type,
-                    $type,
-                    implode(', ', $allowed),
-                    implode(', ', $allowed),
-                ));
-            }
+        $rejected = $this->rejectedFields($type, array_map(strval(...), array_keys($input)), $parentType);
+        if ($rejected !== []) {
+            throw new \InvalidArgumentException((string) reset($rejected));
         }
 
         $changed = [];
@@ -174,8 +217,13 @@ final class FieldMapper
             }
         };
 
+        // Extension-owned columns are left to their provider. It may merge into
+        // what is stored (rsce_data does), and the generic cast below would
+        // have overwritten the stored value before the provider got to read it.
+        $providerOwned = $this->providerFields->declaredFor('tl_content');
+
         foreach ($input as $field => $value) {
-            if ($value === null) {
+            if ($value === null || \in_array($field, $providerOwned, true)) {
                 continue;
             }
             $newValue = $this->castValue($field, $value, $content->$field);
@@ -205,18 +253,174 @@ final class FieldMapper
      * from the live DCA. Sub-palette children (e.g. addImage → singleSRC, alt) are
      * always included, since we don't enforce the gate.
      *
+     * $parentType is the type of the tl_content element this one sits in (null
+     * for an element directly in an article, news entry, …) — see
+     * {@see CONTEXT_FIELDS} and {@see parentTypeOf()}.
+     *
      * @return list<string>
      */
-    public function allowedFieldsFor(string $type): array
+    public function allowedFieldsFor(string $type, ?string $parentType = null): array
     {
         return array_values(array_unique(array_merge(
             self::COMMON_FIELDS,
             $this->resolvePalette($type)['fields'],
+            $this->contextFieldsFor($parentType),
             // Extension-owned columns are not in the DCA palette, so without
             // this the validation above rejects them before their provider is
-            // ever asked.
-            $this->providerFields->declaredFor('tl_content'),
+            // ever asked. Only the ones their provider allows on this type:
+            // a palette answer offering rsce_data on a text element would be
+            // as wrong as refusing it on an RSCE element was.
+            $this->providerFields->allowedFor('tl_content', $type),
         )));
+    }
+
+    /**
+     * The fields among $fields that this element cannot be written with, each
+     * with the message the write tools report.
+     *
+     * One answer for content_create/_update (through apply()), for
+     * content_create_tree's check before its first write and for the overrides
+     * of entity_duplicate — so the same mistake reads the same whichever tool
+     * made it, and no route writes what another refuses. The v1.33.0 report
+     * found exactly that: the regular write refused rsce_data and
+     * sectionHeadline, a duplicate's overrides wrote both unchecked.
+     *
+     * Core fields come first, then provider refusals (extension missing, field
+     * not valid for this type) in the words ProviderFields::apply() uses.
+     *
+     * @param list<string> $fields
+     *
+     * @return array<string, string> field => message
+     */
+    public function rejectedFields(string $type, array $fields, ?string $parentType = null): array
+    {
+        $allowed = $this->allowedFieldsFor($type, $parentType);
+        $declared = $this->providerFields->declaredFor('tl_content');
+
+        $rejected = [];
+        $claimed = [];
+
+        foreach ($fields as $field) {
+            if (\in_array($field, $allowed, true)) {
+                continue;
+            }
+
+            if (\in_array($field, $declared, true)) {
+                $claimed[] = $field;
+                continue;
+            }
+
+            $rejected[$field] = $this->rejectionMessage($field, $type, $allowed, $parentType);
+        }
+
+        return $rejected + $this->providerFields->refusals('tl_content', $claimed, $type);
+    }
+
+    /**
+     * The type of the element a record sits in, when that is an element: the
+     * context {@see CONTEXT_FIELDS} depends on. Null for any other parent
+     * (article, news entry, event, …) and for a parent that does not exist.
+     */
+    public function parentTypeOf(string $ptable, int $pid): ?string
+    {
+        if ($ptable !== 'tl_content' || $pid <= 0) {
+            return null;
+        }
+
+        $this->framework->initialize();
+
+        $parent = $this->framework->getAdapter(ContentModel::class)->findByPk($pid);
+
+        return $parent instanceof ContentModel ? (string) $parent->type : null;
+    }
+
+    /**
+     * Every context-dependent field this installation has, with the parent
+     * type that adds it — for content_palette_get, which answers per type and
+     * would otherwise never mention them.
+     *
+     * @return array<string, string> field => parent type
+     */
+    public function contextFields(): array
+    {
+        return array_filter(
+            self::CONTEXT_FIELDS,
+            fn (string $parent, string $field): bool => $this->hasField($field),
+            \ARRAY_FILTER_USE_BOTH,
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function contextFieldsFor(?string $parentType): array
+    {
+        if ($parentType === null) {
+            return [];
+        }
+
+        return array_keys(array_filter(
+            $this->contextFields(),
+            static fn (string $parent): bool => $parent === $parentType,
+        ));
+    }
+
+    /**
+     * Whether the type has a palette this mapper can read. A type whose palette
+     * is only assembled in the edit mask has none, and then the base fields
+     * are all that is left.
+     */
+    public function hasPalette(string $type): bool
+    {
+        return $this->resolvePalette($type)['fields'] !== [];
+    }
+
+    /**
+     * @param list<string> $allowed
+     */
+    private function rejectionMessage(string $field, string $type, array $allowed, ?string $parentType): string
+    {
+        $contextParent = $this->contextFields()[$field] ?? null;
+        if ($contextParent !== null && $contextParent !== $parentType) {
+            return sprintf(
+                'Field "%1$s" only exists on an element inside an element of type "%2$s" — Contao adds it from the parent, not from the type. '
+                .'Put this element into the %2$s: ptable "tl_content" and pid = the %2$s element (in content_create_tree: as a child of the %2$s node).',
+                $field,
+                $contextParent,
+            );
+        }
+
+        // A type whose palette is built at edit time resolves to nothing here,
+        // and the base list is all that is left. Saying "see
+        // content_palette_get" would then send the caller to an answer that
+        // repeats this same list — the field is not missing from a palette,
+        // there IS no readable palette.
+        if (!$this->hasPalette($type)) {
+            return sprintf(
+                'Field "%1$s" cannot be written on content type "%2$s": that type has no static palette (it is assembled at edit time), so only the base fields and extension-declared fields are writable here — %3$s. '
+                .'This is a validation limit, not a permission check — nothing here can tell what a valid value for that field would be, so it is refused rather than guessed at. '
+                .'Two ways to make it writable, both on the extension that owns the type: it can ship its own tools (see installed_bundles, enable them under MCP-Server → Tools), '
+                .'or it can declare the field by implementing Netzhirsch\ContaoMcpBundle\Tool\Contract\FieldProvider and tagging that service `netzhirsch.field_provider` — declared fields skip the palette check and are validated by the extension itself.',
+                $field,
+                $type,
+                implode(', ', $allowed),
+            );
+        }
+
+        return sprintf(
+            'Field "%1$s" is not valid for content type "%2$s". Use content_palette_get("%2$s") to see allowed fields. Currently allowed: %3$s.',
+            $field,
+            $type,
+            implode(', ', $allowed),
+        );
+    }
+
+    private function hasField(string $field): bool
+    {
+        $this->framework->initialize();
+        $this->framework->getAdapter(Controller::class)->loadDataContainer('tl_content');
+
+        return isset($GLOBALS['TL_DCA']['tl_content']['fields'][$field]);
     }
 
     /**
@@ -243,7 +447,20 @@ final class FieldMapper
         $adapter = $this->framework->getAdapter(Controller::class);
         $adapter->loadDataContainer('tl_content');
 
-        return DcaPalette::resolve($GLOBALS['TL_DCA']['tl_content'] ?? [], $type);
+        $dca = $GLOBALS['TL_DCA']['tl_content'] ?? [];
+
+        // RSCE builds an rsce_* palette in the edit mask's onload callback,
+        // which a DCA loaded here never runs. Rebuilt from the type's config
+        // the same way (RscePalette), on a copy — the global DCA stays as
+        // Contao loaded it.
+        if (trim((string) ($dca['palettes'][$type] ?? '')) === '') {
+            $palette = $this->rsce->paletteFor($type, $dca);
+            if ($palette !== null) {
+                $dca['palettes'][$type] = $palette;
+            }
+        }
+
+        return DcaPalette::resolve($dca, $type);
     }
 
     /**
@@ -374,7 +591,11 @@ final class FieldMapper
             // only {unit: "h1"} used to blank the headline text and report
             // success; sending only {value: "…"} reset the level to h2. See
             // Service\SerializedTuple.
-            return serialize(SerializedTuple::headline($value, $current));
+            try {
+                return serialize(SerializedTuple::headline($value, $current));
+            } catch (\InvalidArgumentException) {
+                throw new \InvalidArgumentException(sprintf('"%s" must be a string or an object {value, unit}.', $field));
+            }
         }
 
         if (isset(self::STRING_PAIR_FIELDS[$field])) {

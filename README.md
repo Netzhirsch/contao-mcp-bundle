@@ -67,6 +67,10 @@ System-Einstellungen.
   Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
   `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`)
   und **Übersetzen mit DeepL** (`numero2/contao-deepl`, siehe unten).
+- **RockSolid Custom Elements**: RSCE-Elemente (`rsce_*`) lassen sich über die
+  Content-Tools anlegen **und** konfigurieren. `rsce_data` wird gegen die
+  `rsce_*_config.php` geprüft, in das Gespeicherte gemergt und so abgelegt, wie
+  es das Backend ablegt (siehe unten).
 - **Author-Pass-Through**: Writes laufen unter dem echten OAuth-User in
   `tl_log` + `tl_version`.
 - **Löschungen sind rückholbar**: Was die KI löscht, landet inklusive
@@ -503,6 +507,14 @@ erzeugt (`headline` bei News, `question` bei FAQs) und folgt einem `overrides`,
 das die Kopie umbenennt. Name und Titel macht das Werkzeug **nicht** eindeutig —
 dafür ist `overrides` da.
 
+`overrides` ist kein Rohzugang: `id`, `pid` und `ptable` sind gesperrt (der
+Elternteil ist `into_pid`/`into_ptable`, dort wird er auch geprüft), und die
+Feldrechte des Kontos gelten wie auf den `*_update`-Tools. Auf `tl_content`
+nehmen Overrides genau die Felder, die `content_update` für den Typ der Kopie und
+ihren **neuen** Elternteil nimmt. `rsce_data` wird dabei in die Einstellungen der
+Quelle gemergt. So entsteht aus einem vorbereiteten RSCE-Element eine Kopie mit
+anderer Button-URL.
+
 `tl_user` und `tl_member` sind bewusst nicht dabei: Contaos Kopieren-Knopf
 landet dort in der Bearbeitungsmaske, damit ein Mensch Benutzername und E-Mail
 eindeutig macht, bevor gespeichert wird.
@@ -545,17 +557,56 @@ abgelehnt; dafür ist `page_update` zuständig.
 übersetzen und danach einen **leeren** Alias an `page_update` schicken — Contao
 erzeugt ihn dann über den Slug-Service aus dem neuen Titel neu.
 
+## RockSolid Custom Elements (RSCE)
+
+Ein RSCE-Element speichert seine ganze Einstellung (Raster, Button-URL,
+Hintergrund) in **einer** JSON-Spalte, `tl_content.rsce_data`. RSCE baut Palette
+und Felder erst in der Bearbeitungsmaske auf. Mit installiertem
+`madeyourday/contao-rocksolid-custom-elements` schreiben `content_create`,
+`content_update`, `content_create_tree` und die Overrides von `entity_duplicate`
+diese Spalte trotzdem auf allen `rsce_*`-Typen:
+
+```
+content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", "bgColor": null}})
+```
+
+- **Gemergt, nicht ersetzt.** Ein gesendeter Schlüssel wird ersetzt, `null`
+  entfernt einen, alles Nicht-Genannte bleibt. Eine Liste (`inputType: list`) wird
+  als Ganzes ersetzt.
+- **Geprüft.** Einen Schlüssel, den der Typ laut `rsce_*_config.php` nicht hat,
+  lehnt das Tool ab und nennt dabei die vorhandenen. Was schon gespeichert ist,
+  geht auch dann durch, wenn die Config es nicht mehr kennt.
+- **Gespeichert wie vom Backend.** Werte-Listen werden serialisiert, Dateien als
+  UUID abgelegt (die Hex-Form aus `content_get` wird umgerechnet),
+  `true`/`false` wird zu `"1"`/`""`, Datumsfelder werden zum Timestamp (ISO 8601
+  wird umgerechnet).
+
+`content_palette_get("rsce_…")` listet unter `rsce_data` jeden Schlüssel des Typs
+mit Eingabetyp, Optionen und erwartetem Wertformat. In `fields` stehen die
+regulären Spalten, die die Bearbeitungsmaske des Typs zeigt (`headline`, Bild,
+`customTpl`, …). Die Config liest RSCE selbst, Theme-Ordner und Twig-Templates
+werden also aufgelöst wie im Backend.
+
 ## Wie Tools Fehler melden
 
 Ein Tool, das nicht tun kann, was es soll, gibt ein strukturiertes Ergebnis
 zurück statt einer Ausnahme — mit `error`, einer `message` im Klartext und,
-wo es hilft, der Liste des Erlaubten. Zwei Fälle, die man kennen sollte:
+wo es hilft, der Liste des Erlaubten. Drei Fälle, die man kennen sollte:
 
 **Ein Feld, das der Datensatztyp nicht hat**, wird abgelehnt und nennt den Typ:
 
 ```
 Field "gibtsNicht" is not valid for content type "text".
 Use content_palette_get("text") to see allowed fields. Currently allowed: pid, ptable, …
+```
+
+**Ein Feld, das vom Elternelement kommt**, gilt nur dort. Contao legt
+`sectionHeadline` (den Titel eines Akkordeon-Abschnitts) nur Elementen **in**
+einem Akkordeon in die Palette. `content_palette_get` nennt solche Felder unter
+`context_fields`, und außerhalb sagt die Ablehnung, wo das Feld gilt:
+
+```
+Field "sectionHeadline" only exists on an element inside an element of type "accordion" — …
 ```
 
 **Ein Parameter, den das Tool nicht hat**, ebenso — mit Vorschlag bei einem

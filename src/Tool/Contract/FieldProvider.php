@@ -27,9 +27,12 @@ use Contao\Model;
  *   1. FIELD NAMES MUST BE UNIQUE TO YOUR BUNDLE. Skipping the palette check also
  *      means skipping the "is this a column of that table?" question. A declared
  *      field named like an existing column — `headline`, `text`, `url`, `cssID` on
- *      tl_content — is not rejected as a duplicate: the core mapper writes the
- *      column, then your provider runs last and writes it again. The core value is
- *      quietly replaced. Prefix your fields (`mybundle_headline`), and prefix them
+ *      tl_content — is not rejected as a duplicate. On tl_content the core mapper
+ *      leaves every declared field to its provider (so a provider can read the
+ *      stored value before anything overwrites it — rsce_data merges into it); on
+ *      the other tables it writes the column, then your provider runs last and
+ *      writes it again. Either way the core handling of that column is quietly
+ *      gone. Prefix your fields (`mybundle_headline`), and prefix them
  *      especially when the names come from editor input rather than from your code.
  *
  *   2. getAllowedFields() IS the type gate, and it is honoured — the mapper calls

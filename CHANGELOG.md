@@ -6,12 +6,76 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-### Fixed
-- Ein implizit nullbarer Parameter in `ProviderFieldsTest` ist jetzt explizit
-  `?bool` — unter PHP 8.4 eine Deprecation in jedem Testlauf, unter PHP 9 ein
-  Fehler.
+> Aus [#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2):
+> RSCE-Elemente und Akkordeons lassen sich jetzt über die Content-Tools bauen,
+> und alle Schreibwege prüfen nach denselben Regeln. Das heißt auch: Der
+> bisherige Umweg über `entity_duplicate` mit rohen Overrides nimmt nur noch,
+> was `content_update` nimmt.
+
+### Security
+- **Overrides von `entity_duplicate` umgehen die Rechteprüfung nicht mehr.**
+  Geprüft wurde „darf unter `into_pid` anlegen". Danach setzte ein Override
+  `pid` oder `ptable` die Kopie unter einen anderen Elternteil, und dort fragte
+  niemand mehr. `id`, `pid` und `ptable` werden jetzt abgelehnt; der Elternteil
+  ist `into_pid`/`into_ptable`. Außerdem gehen die Override-Schlüssel und der
+  Typ der Kopie in die Prüfung ein: Ein ausgeschlossenes Feld braucht wie auf
+  `*_update` das Feldrecht, und ein Typ, den das Konto nicht anlegen darf, wird
+  abgelehnt. So fragt auch Contaos Kopieren-Knopf, nämlich mit der ganzen neuen
+  Zeile. Das betrifft eingeschränkte OAuth-Benutzer; Administratoren und der
+  Trusted-Modus merken keinen Unterschied.
+- **`content_create_tree` prüft die Rechte pro Knoten.** Der Enforcer sieht den
+  Baum-Aufruf einmal, gegen dessen Elternteil. Elementtyp und Felder der Knoten
+  sieht er nie. Ein Elementtyp, den das Konto nicht verwenden darf, oder ein
+  ausgeschlossenes Feld kam also hier durch und nirgends sonst. Jetzt wird jeder
+  Knoten so gefragt, wie `content_create` fragen würde, und zwar vor dem ersten
+  Schreibvorgang. Eine Ablehnung kommt als `permission_denied` mit `problems`
+  pro Pfad.
 
 ### Added
+- **RockSolid Custom Elements lassen sich über die Content-Tools
+  konfigurieren** ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)).
+  Die ganze Einstellung eines RSCE-Elements (Raster, Button-URL,
+  Hintergrund) steckt in der JSON-Spalte `tl_content.rsce_data`. `content_get`
+  konnte sie lesen, jeder Schreibweg lehnte sie ab. RSCE baut Palette und
+  virtuelle Felder erst im `onload_callback` der Bearbeitungsmaske auf, und
+  genau dieser Schritt fehlte hier. Themes wie themore ließen sich so nur über
+  Kopien bestehender Elemente aufbauen, mit festen Einstellungen.
+
+  `rsce_data` ist jetzt auf `rsce_*`-Typen schreibbar (mit installiertem RSCE,
+  sonst benennt die Ablehnung die Erweiterung), als JSON-Objekt oder JSON-String:
+  - **Wird gemergt, nicht ersetzt.** Ein gesendeter Schlüssel ersetzt diesen
+    Schlüssel, `null` entfernt ihn, alles Nicht-Genannte bleibt. Die Lehre aus dem
+    Headline-Tupel gilt hier doppelt: Wer die Button-URL ändert, darf die
+    Hintergrundfarbe nicht zurücksetzen. Listen werden als Ganzes ersetzt.
+  - **Wird gegen die `rsce_*_config.php` geprüft.** Ein Schlüssel, den der Typ
+    nicht hat, wird abgelehnt, und die Meldung nennt die echten. Sonst landet ein
+    Tippfehler in der Datenbank, wird als angewendet gemeldet und nie gerendert.
+    Schlüssel, die schon gespeichert sind, gehen auch durch, wenn die Config sie
+    nicht mehr kennt, damit Lesen und Zurückschreiben nach einer Umbenennung
+    weiter funktioniert.
+  - **Wird gespeichert wie vom Backend.** Werte-Listen werden serialisiert,
+    Dateien als Text-UUID abgelegt (die Hex-Form aus `content_get` wird
+    umgerechnet), `true`/`false` wird zu `"1"`/`""`, ein Datumsfeld nimmt ISO 8601.
+    Die Kodierung entspricht der von RSCE selbst, deshalb zeigt ein
+    Versions-Diff nur echte Änderungen.
+
+  Dazu gilt für RSCE-Typen jetzt die Palette, die ihre Bearbeitungsmaske zeigt,
+  also die regulären Spalten, die die Config über `standardFields` und
+  `standardField`-Einträge anfordert (`headline`, `text`, Bild, Spalten,
+  Slider), plus `customTpl`, Titel und Veröffentlichung. Diese Spalten wurden
+  bisher ebenfalls abgelehnt. `content_palette_get` listet unter `rsce_data`
+  jeden Schlüssel des Typs mit Eingabetyp, Optionen, Pflichtangabe und dem
+  erwarteten Wertformat.
+
+  Die Config liest RSCE selbst (`CustomElements::getConfigByType`), so dass
+  Theme-Ordner, Twig-Templates und Fallbacks genau wie im Backend aufgelöst
+  werden. Lokal geprüft gegen Contao 5.7.13 mit RSCE 2.5.1, einschließlich
+  Frontend-Ausgabe der geschriebenen Daten.
+- **`content_palette_get` nennt Felder, die vom Elternelement kommen** —
+  `context_fields`, derzeit `sectionHeadline`. Eine Antwort pro Typ zeigt solche
+  Felder nie. Ohne den Hinweis erfährt man von ihnen erst durch die erste
+  Ablehnung.
+
 - **`ReactHttpReplaceTest` bewacht den `replace`-Eintrag für `react/http`.**
   Der Eintrag sieht in der `composer.json` wie ein Versehen aus und ist genau
   deshalb gefährdet: Er behauptet gegenüber Composer, das Bundle liefere
@@ -42,6 +106,60 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   dieser Test und der README-Abschnitt zu `psr/http-message` alle verschwinden.
   Bis dahin hält der Test die Entscheidung fest, samt Begründung im
   Klassenkommentar.
+
+### Changed
+- **`content_get` liefert `sectionHeadline` wie `headline` als `{value, unit}`**
+  statt der serialisierten Zeichenkette, also in der Form, in der es jetzt
+  geschrieben wird.
+- **`content_palette_get` listet Erweiterungsfelder nur noch auf Typen, die sie
+  haben.** Bisher standen alle von Providern deklarierten Felder bei jedem Typ.
+  Mit dem RSCE-Provider wäre das `rsce_data` auf einem Textelement gewesen.
+  Maßgeblich ist jetzt die Antwort des Providers pro Typ (`getAllowedFields`),
+  also dieselbe, nach der schon geschrieben wurde. Ein nicht registrierter Typ
+  heißt jetzt immer `known: false`, auch wenn ein Provider Felder für ihn meldet.
+- **Auf `tl_content` schreibt ein deklariertes Feld nur noch sein Provider.**
+  Der generische Mapper hat es bisher vorher selbst in die Spalte geschrieben.
+  Das war harmlos, solange Provider nur überschrieben, aber ein Provider, der in
+  den gespeicherten Wert mergt, las dann bereits den überschriebenen. Der Hinweis
+  im `FieldProvider`-Vertrag ist angepasst.
+
+### Fixed
+- **`sectionHeadline` auf den Kindern eines Akkordeons**
+  ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)). Contao legt
+  das Feld (den Titel eines Akkordeon-Abschnitts) über den `AccordionListener`
+  (`config.onpalette`, unverändert von 5.3 bis 6.0) in die Palette jedes
+  Elements, dessen Elternteil ein `accordion` ist. Die Prüfung las die Palette
+  nur pro Typ, deshalb wurde das Feld auf genau den Elementen abgelehnt, die es
+  brauchen: `Field "sectionHeadline" is not valid for content type "text"`.
+  Titelte Akkordeons ließen sich so nicht anlegen. Jetzt zählt der Elternteil
+  nach dem Schreiben, auch bei einer Verschiebung im selben Aufruf, und in
+  `content_create_tree` der Container-Knoten, der zu dem Zeitpunkt noch gar nicht
+  existiert. Gespeichert wird wie `headline`: `{value, unit}`, ein String als
+  Kurzform, und eine Teiländerung behält die Überschriftenebene. Außerhalb eines
+  Akkordeons sagt die Ablehnung, wo das Feld gilt.
+- **`content_create_tree` prüft nach denselben Regeln wie `content_create`.**
+  Der Baum hatte eine eigene Kopie der Feldprüfung. Die kannte weder den
+  Elternteil noch die Provider-Regeln pro Typ und sagte bei Typen mit
+  dynamischer Palette „siehe `content_palette_get`", was sich im Kreis drehte.
+  Sie ist ersetzt: Namen werden über denselben Mapper geprüft (alle falschen
+  auf einmal), danach die Werte an einem Wegwerf-Element. Ein Tippfehler in
+  `rsce_data` oder eine ungültige UUID in einem verschachtelten Knoten stoppt den
+  Baum damit vor dem ersten Schreibvorgang statt nach der Hälfte der Seite. Ein
+  leeres `fields: {}` gilt jetzt als Objekt.
+- **Overrides von `entity_duplicate` nehmen auf `tl_content` genau, was
+  `content_update` nimmt**
+  ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)). Bisher
+  lautete die einzige Frage, ob die Tabelle die Spalte hat. Der reguläre Weg
+  lehnte ab, was der Kopierweg roh durchließ, und genau das wurde als Umweg
+  benutzt. Jetzt gelten für die Kopie der Typ und der NEUE Elternteil
+  (`sectionHeadline` beim Kopieren in ein Akkordeon), und `rsce_data` geht durch
+  seinen Provider: geprüft, in die Einstellungen der Quelle gemergt. Werte bleiben
+  sonst in gespeicherter Form, wie dokumentiert. Andere Tabellen prüfen wie
+  bisher gegen die Spalten; `tl_module` und `tl_form_field` bleiben bewusst dabei,
+  weil deren reguläre Schreib-Tools RSCE-Daten noch nicht schreiben können.
+- Ein implizit nullbarer Parameter in `ProviderFieldsTest` ist jetzt explizit
+  `?bool` — unter PHP 8.4 eine Deprecation in jedem Testlauf, unter PHP 9 ein
+  Fehler.
 
 ## [1.33.0] – 2026-09-21
 

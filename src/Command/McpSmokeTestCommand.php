@@ -3463,6 +3463,106 @@ final class McpSmokeTestCommand extends Command
                 $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$dupId]);
             }
 
+            // ── fields from the parent, one rule for every write route ─────
+            //
+            // Reported against v1.33.0: sectionHeadline — the title of an
+            // accordion section — was refused on the children of an accordion,
+            // because Contao adds it to their palette from the PARENT
+            // (AccordionListener, config.onpalette). The only way around was
+            // entity_duplicate, whose overrides wrote any column unchecked.
+            $output->writeln("\n<comment>Felder vom Elternelement (Akkordeon) + einheitliche Regeln</comment>");
+
+            $accordionTree = $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                ['type' => 'accordion', 'sorting' => 1024, 'children' => [
+                    ['type' => 'text', 'fields' => ['text' => '<p>Antwort eins</p>', 'sectionHeadline' => ['value' => 'Frage eins', 'unit' => 'h3']]],
+                    ['type' => 'text', 'fields' => ['text' => '<p>Antwort zwei</p>', 'sectionHeadline' => 'Frage zwei']],
+                ]],
+            ]);
+            $expect('an accordion is built with titled sections in one call', $accordionTree,
+                static fn ($r) => ($r['created'] ?? 0) === 3 && ($r['failed'] ?? 1) === 0);
+
+            $accordionId = 0;
+            $sectionIds = [];
+            foreach ($accordionTree['elements'] ?? [] as $element) {
+                if (($element['type'] ?? '') === 'accordion') {
+                    $accordionId = (int) $element['id'];
+                } elseif (isset($element['id'])) {
+                    $sectionIds[] = (int) $element['id'];
+                }
+            }
+
+            $expect('the section title reads back as {value, unit}',
+                $sectionIds !== [] ? $this->contentTool->get($sectionIds[0], ['sectionHeadline']) : [],
+                static fn ($r) => ($r['sectionHeadline'] ?? null) === ['value' => 'Frage eins', 'unit' => 'h3']);
+
+            $expect('changing only the title keeps its heading level',
+                $sectionIds !== [] ? $this->contentTool->update($sectionIds[0], ['sectionHeadline' => ['value' => 'Frage eins, neu']]) : [],
+                static fn ($r) => ($r['sectionHeadline'] ?? null) === ['value' => 'Frage eins, neu', 'unit' => 'h3']);
+
+            $expect('outside an accordion the refusal names the accordion',
+                $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                    ['type' => 'element_group', 'children' => [
+                        ['type' => 'text', 'fields' => ['text' => '<p>x</p>', 'sectionHeadline' => 'Titel']],
+                    ]],
+                ]),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && ($r['problems'][0]['path'] ?? '') === '1.1'
+                    && str_contains((string) ($r['problems'][0]['error'] ?? ''), '"accordion"'));
+
+            // Values are checked before the first write too, not only names.
+            $expect('a bad value in a nested node stops the tree before anything exists',
+                $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                    ['type' => 'text', 'fields' => ['text' => '<p>ok</p>']],
+                    ['type' => 'element_group', 'children' => [
+                        ['type' => 'image', 'fields' => ['singleSRC' => 'not-a-uuid']],
+                    ]],
+                ]),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && ($r['problems'][0]['path'] ?? '') === '2.1'
+                    && str_contains((string) ($r['problems'][0]['error'] ?? ''), 'singleSRC'));
+            $expect('and nothing was created by the refused trees',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]),
+                static fn (int $n) => $n === 4);
+
+            $expect('content_palette_get says which fields come from the parent',
+                $this->contentTool->paletteGet('text'),
+                static fn ($r) => str_contains((string) ($r['context_fields']['sectionHeadline'] ?? ''), 'accordion')
+                    && !\in_array('sectionHeadline', $r['fields'] ?? [], true)
+                    && !\in_array('rsce_data', $r['fields'] ?? [], true));
+
+            // RSCE is not installed here, which is what proves the provider
+            // is wired: the column is claimed, and the refusal names the
+            // extension instead of calling rsce_data unknown.
+            $expect('rsce_data without RSCE names the extension',
+                $sectionIds !== [] ? $this->contentTool->update($sectionIds[0], ['rsce_data' => '{"grid":"grid3Col"}']) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
+
+            // entity_duplicate: the same fields as content_update, no raw path.
+            $expect('an override cannot move the copy past the permission check',
+                $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0], overrides: (object) ['pid' => $ctreeArticleId]) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), 'into_pid'));
+            $expect('an override the type does not have is refused like on content_update',
+                $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0], overrides: (object) ['linkTitle' => 'x']) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), 'linkTitle'));
+            $expect('copied out of the accordion, the section title is refused',
+                $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0], into_pid: $ctreeArticleId,
+                    into_ptable: 'tl_article', overrides: (object) ['sectionHeadline' => 'x']) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), '"accordion"'));
+
+            $sectionCopy = $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0],
+                overrides: (object) ['sectionHeadline' => serialize(['value' => 'Frage drei', 'unit' => 'h3'])]) : [];
+            $expect('copied within the accordion, it is accepted', $sectionCopy,
+                static fn ($r) => ($r['duplicated'] ?? false) === true);
+            $expect('and lands in the copy',
+                isset($sectionCopy['new_id']) ? $this->contentTool->get((int) $sectionCopy['new_id'], ['sectionHeadline']) : [],
+                static fn ($r) => ($r['sectionHeadline']['value'] ?? '') === 'Frage drei');
+
+            if ($accordionId > 0) {
+                $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $accordionId]);
+            }
+
             $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $groupId]);
             $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]);
             $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$ctreeArticleId]);
