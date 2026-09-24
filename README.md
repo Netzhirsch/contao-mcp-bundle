@@ -276,11 +276,18 @@ ab. Auf Contao 5 ist das Flag überflüssig.
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
 
-Geht ~200 Asserts gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
-Newsletter/Comments/Theme/Layout/Templates/Maintenance + External-ID +
-Audit-Regressions + Key-Rotation + Rate-Limit + MCP-Activity-Log),
-erstellt eigene Testdaten, räumt am Ende wieder auf. Soll grün
-durchlaufen.
+Geht rund 500 Asserts gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
+Newsletter/Comments/Theme/Layout/Templates/Maintenance + Content-Baum +
+Rechte-Parität + External-ID + Audit-Regressions + Key-Rotation + Rate-Limit +
+MCP-Activity-Log), erstellt eigene Testdaten, räumt am Ende wieder auf. Soll
+grün durchlaufen.
+
+Auf einer **frischen Installation** (keine Root-Seite, kein Administrator oder
+keine Datei) legt der Test die fehlenden Fixtures für die Dauer des Laufs an:
+einen Seitenbaum mit Artikel, einen Administrator mit zufälligem, nie
+angezeigtem Passwort und eine Datei. Danach entfernt er sie wieder, auch wenn
+ein Abschnitt abbricht. So laufen in CI dieselben Abschnitte wie auf einer
+gepflegten Installation. `--keep` lässt auch die Fixtures stehen.
 
 Zusätzlich gibt es eine isolierte PHPUnit-Suite (`vendor/bin/phpunit`)
 für OAuth-Crypto-Edge-Cases (dual-key Rotation, IAT single-use,

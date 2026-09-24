@@ -811,6 +811,13 @@ part of it. It belongs before every release tag:
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
 
+On a **fresh installation** (no root page, no administrator or no file) it
+seeds the missing fixtures for the duration of the run: a page tree with an
+article, an administrator with a random password that is never shown, and a
+file. It removes them again afterwards, also when a section aborts, so CI runs
+the same sections as a maintained installation. `--keep` leaves the fixtures in
+place as well.
+
 Release order: `composer verify` → smoke test → commit → push → **wait for CI to
 go green** → only then tag.
 

@@ -145,6 +145,186 @@ final class McpSmokeTestCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $keep = (bool) $input->getOption('keep');
+        $fixtures = $this->seedFreshInstall($output);
+
+        try {
+            return $this->runChecks($input, $output);
+        } finally {
+            // Also when a section throws: a fixture page left behind on a real
+            // install would be a page nobody created.
+            $this->removeFixtures($fixtures, $output, $keep);
+        }
+    }
+
+    /**
+     * What a fresh installation lacks for the smoke test to reach all of its
+     * sections: a page tree, an administrator, an article with two elements
+     * (sorting), a news archive whose jumpTo points at the page (the delete
+     * guard) and one file in the upload folder (the fileTree fields).
+     *
+     * CI starts every run on an empty database. Without these, the content
+     * tree, the permission parity checks, sorting and the fileTree fields
+     * skipped themselves and still counted as a pass — among them the checks
+     * that would have shown the field rights doing nothing. Created only where
+     * there is none and removed afterwards; an installation with pages, an
+     * admin and files is not touched.
+     *
+     * @return array{pages: list<int>, users: list<int>, news_archives: list<int>, files: list<string>}
+     */
+    private function seedFreshInstall(OutputInterface $output): array
+    {
+        $seeded = ['pages' => [], 'users' => [], 'news_archives' => [], 'files' => []];
+        $suffix = dechex(random_int(0, 0xFFFFFF));
+
+        if ((int) $this->connection->fetchOne("SELECT COUNT(*) FROM tl_page WHERE type = 'root'") === 0) {
+            $this->connection->insert('tl_page', [
+                'pid' => 0, 'sorting' => 128, 'tstamp' => time(), 'title' => 'MCP smoke root',
+                'alias' => 'mcp-smoke-root-'.$suffix, 'type' => 'root', 'published' => 1,
+                'fallback' => 1, 'language' => 'en',
+            ]);
+            $rootId = (int) $this->connection->lastInsertId();
+            $seeded['pages'][] = $rootId;
+
+            $this->connection->insert('tl_page', [
+                'pid' => $rootId, 'sorting' => 128, 'tstamp' => time(), 'title' => 'MCP smoke page',
+                'alias' => 'mcp-smoke-page-'.$suffix, 'type' => 'regular', 'published' => 1,
+            ]);
+            $pageId = (int) $this->connection->lastInsertId();
+
+            $this->connection->insert('tl_article', [
+                'pid' => $pageId, 'sorting' => 128, 'tstamp' => time(), 'title' => 'MCP smoke article',
+                'alias' => 'mcp-smoke-article-'.$suffix, 'inColumn' => 'main', 'published' => 1,
+            ]);
+            $articleId = (int) $this->connection->lastInsertId();
+
+            foreach ([128, 256] as $sorting) {
+                $this->connection->insert('tl_content', [
+                    'pid' => $articleId, 'ptable' => 'tl_article', 'sorting' => $sorting, 'tstamp' => time(),
+                    'type' => 'text', 'text' => '<p>MCP smoke</p>',
+                ]);
+            }
+
+            if ($this->connection->createSchemaManager()->tablesExist(['tl_news_archive'])) {
+                $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => 'MCP smoke archive', 'jumpTo' => $pageId]);
+                $seeded['news_archives'][] = (int) $this->connection->lastInsertId();
+            }
+        }
+
+        if ((int) $this->connection->fetchOne("SELECT COUNT(*) FROM tl_files WHERE type = 'file'") === 0) {
+            // A 1×1 PNG, registered in the DBAFS the way a sync would.
+            $path = 'files/mcp-smoke-'.$suffix.'.png';
+            $absolute = $this->projectDir.'/'.$path;
+            $png = (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', true);
+
+            // Shaped like the version-1 UUIDs the DBAFS creates — Contao's
+            // Validator accepts nothing else, and the file tools ask it.
+            $uuid = random_bytes(16);
+            $uuid[6] = \chr((\ord($uuid[6]) & 0x0F) | 0x10);
+            $uuid[8] = \chr((\ord($uuid[8]) & 0x3F) | 0x80);
+
+            if (is_dir(\dirname($absolute)) && file_put_contents($absolute, $png) !== false) {
+                $this->connection->insert('tl_files', [
+                    'tstamp' => time(), 'uuid' => $uuid, 'type' => 'file', 'path' => $path,
+                    'extension' => 'png', 'hash' => md5($png), 'found' => 1, 'name' => basename($path),
+                ]);
+                $seeded['files'][] = $path;
+            }
+        }
+
+        if ((int) $this->connection->fetchOne('SELECT COUNT(*) FROM tl_user WHERE admin = 1') === 0) {
+            // Nobody logs in with it: the password is random and never shown.
+            $this->connection->insert('tl_user', [
+                'tstamp' => time(), 'username' => 'mcp-smoke-admin-'.$suffix, 'name' => 'MCP smoke admin',
+                'email' => 'mcp-smoke-admin-'.$suffix.'@example.invalid', 'language' => 'en',
+                'password' => password_hash(bin2hex(random_bytes(32)), \PASSWORD_DEFAULT),
+                'admin' => 1, 'disable' => 0, 'dateAdded' => time(),
+            ]);
+            $seeded['users'][] = (int) $this->connection->lastInsertId();
+        }
+
+        $what = array_filter([
+            $seeded['pages'] !== [] ? 'a page tree with an article' : null,
+            $seeded['news_archives'] !== [] ? 'a news archive' : null,
+            $seeded['users'] !== [] ? 'an administrator' : null,
+            $seeded['files'] !== [] ? 'a file' : null,
+        ]);
+        if ($what !== []) {
+            $output->writeln(sprintf(
+                "<comment>Fresh installation:</comment> seeded %s for this run — removed again at the end.\n",
+                implode(', ', $what),
+            ));
+        }
+
+        return $seeded;
+    }
+
+    /**
+     * @param array{pages: list<int>, users: list<int>, news_archives: list<int>, files: list<string>} $fixtures
+     */
+    private function removeFixtures(array $fixtures, OutputInterface $output, bool $keep): void
+    {
+        if ($fixtures === ['pages' => [], 'users' => [], 'news_archives' => [], 'files' => []]) {
+            return;
+        }
+
+        if ($keep) {
+            $output->writeln('<info>--keep was passed — the seeded fixtures stay as well.</info>');
+
+            return;
+        }
+
+        foreach ($fixtures['news_archives'] as $archiveId) {
+            $this->connection->executeStatement('DELETE FROM tl_news WHERE pid = ?', [$archiveId]);
+            $this->connection->delete('tl_news_archive', ['id' => $archiveId]);
+        }
+
+        foreach ($fixtures['files'] as $path) {
+            $this->connection->delete('tl_files', ['path' => $path]);
+            if (is_file($this->projectDir.'/'.$path)) {
+                unlink($this->projectDir.'/'.$path);
+            }
+        }
+
+        // The whole tree below the seeded root, with whatever a section left
+        // on it: a forgotten article must not keep the fixture alive.
+        $pages = $fixtures['pages'];
+        for ($level = $pages; $level !== [];) {
+            $level = array_map('intval', $this->connection->fetchFirstColumn(
+                'SELECT id FROM tl_page WHERE pid IN ('.implode(',', $level).')',
+            ));
+            $pages = [...$pages, ...$level];
+        }
+
+        if ($pages !== []) {
+            $in = implode(',', $pages);
+            $articles = array_map('intval', $this->connection->fetchFirstColumn("SELECT id FROM tl_article WHERE pid IN ({$in})"));
+
+            for ($parents = $articles, $ptable = 'tl_article'; $parents !== []; $ptable = 'tl_content') {
+                $children = array_map('intval', $this->connection->fetchFirstColumn(
+                    'SELECT id FROM tl_content WHERE ptable = ? AND pid IN ('.implode(',', $parents).')',
+                    [$ptable],
+                ));
+                $this->connection->executeStatement(
+                    'DELETE FROM tl_content WHERE ptable = ? AND pid IN ('.implode(',', $parents).')',
+                    [$ptable],
+                );
+                $parents = $children;
+            }
+
+            $this->connection->executeStatement("DELETE FROM tl_article WHERE pid IN ({$in})");
+            $this->connection->executeStatement("DELETE FROM tl_page WHERE id IN ({$in})");
+        }
+
+        foreach ($fixtures['users'] as $userId) {
+            $this->connection->delete('tl_user', ['id' => $userId]);
+        }
+
+        $output->writeln('  removed the seeded fixtures');
+    }
+
+    private function runChecks(InputInterface $input, OutputInterface $output): int
+    {
+        $keep = (bool) $input->getOption('keep');
         $stamp = 'mcp_smoke_'.dechex(random_int(0, 0xFFFFFF));
 
         // Contao\Versions reads from request_stack->getCurrentRequest()->server

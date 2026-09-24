@@ -156,6 +156,18 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   im `FieldProvider`-Vertrag ist angepasst.
 
 ### Fixed
+- **Der Smoke-Test läuft auf einer frischen Installation vollständig, also auch
+  in CI.** Beide CI-Jobs, die ihn ausführen, starten auf einer leeren Datenbank.
+  Ohne Seite, Administrator und Datei übersprangen sich der Content-Baum,
+  die Rechte-Parität, die Sortierung, der Lösch-Schutz und die fileTree-Felder,
+  und der Lauf meldete trotzdem Grün. Darunter waren genau die Prüfungen, die
+  gezeigt hätten, dass die Feldrechte nichts prüften. Fehlen solche Daten,
+  legt der Test jetzt für die Dauer des Laufs Fixtures an: einen Seitenbaum mit
+  Artikel und Nachrichtenarchiv, einen Administrator mit zufälligem, nie
+  angezeigtem Passwort und eine Datei. Danach entfernt er sie wieder, auch wenn
+  ein Abschnitt abbricht. Lokal gemessen auf einer frischen Datenbank: vorher
+  412 bestandene Prüfungen, jetzt 505. Übersprungen wird nur noch, was eine
+  nicht installierte Erweiterung braucht (changelanguage, url-rewrite, DeepL).
 - **`sectionHeadline` auf den Kindern eines Akkordeons**
   ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)). Contao legt
   das Feld (den Titel eines Akkordeon-Abschnitts) über den `AccordionListener`
