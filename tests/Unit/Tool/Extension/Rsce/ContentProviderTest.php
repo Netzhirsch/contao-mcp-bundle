@@ -7,7 +7,10 @@ namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Tool\Extension\Rsce;
 use Contao\ContentModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use MadeYourDay\RockSolidCustomElements\CustomElements;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\AbstractDataProvider;
 use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\ContentProvider;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\FormFieldProvider;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\ModuleProvider;
 use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -18,7 +21,10 @@ use PHPUnit\Framework\TestCase;
  * Runs against a stand-in for RSCE's CustomElements, so "installed" and the
  * type's config are under the test's control.
  */
+#[CoversClass(AbstractDataProvider::class)]
 #[CoversClass(ContentProvider::class)]
+#[CoversClass(ModuleProvider::class)]
+#[CoversClass(FormFieldProvider::class)]
 #[CoversClass(RsceElements::class)]
 final class ContentProviderTest extends TestCase
 {
@@ -153,6 +159,22 @@ final class ContentProviderTest extends TestCase
         $this->provider()->apply(self::element(['type' => 'text']), ['rsce_data' => '{}'], false);
     }
 
+    /**
+     * One provider per table: a module's provider leaves a content element
+     * alone even when the input names rsce_data.
+     */
+    public function testEachProviderWritesOnlyItsOwnTable(): void
+    {
+        $element = self::element(['type' => self::TYPE, 'rsce_data' => '{"grid":"grid2Col"}']);
+
+        self::assertSame([], (new ModuleProvider($this->rsce()))->apply($element, ['rsce_data' => '{"grid":"grid3Col"}'], false));
+        self::assertSame([], (new FormFieldProvider($this->rsce()))->apply($element, ['rsce_data' => '{"grid":"grid3Col"}'], false));
+        self::assertSame('{"grid":"grid2Col"}', $element->rsce_data);
+
+        self::assertSame('tl_module', (new ModuleProvider($this->rsce()))->getTable());
+        self::assertSame('tl_form_field', (new FormFieldProvider($this->rsce()))->getTable());
+    }
+
     public function testTheConfigIsLookedUpOncePerType(): void
     {
         $rsce = $this->rsce();
@@ -187,5 +209,11 @@ final class ContentProviderTest extends TestCase
         $unreadable = $this->rsce()->describe('rsce_unknown');
         self::assertNull($unreadable['fields']);
         self::assertStringContainsString('could not be read', $unreadable['message']);
+        self::assertStringContainsString('content_get', $unreadable['message']);
+
+        // A module's keys are read back through module_get, not content_get.
+        $module = $this->rsce()->describe('rsce_unknown', 'tl_module');
+        self::assertStringContainsString('module_get', $module['message']);
+        self::assertStringNotContainsString('content_get', $module['message']);
     }
 }

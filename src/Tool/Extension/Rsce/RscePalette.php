@@ -7,7 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 
 /**
- * The regular tl_content columns an RSCE type shows next to its own fields.
+ * The regular columns an RSCE type shows next to its own fields.
  *
  * RSCE assembles the palette in the same onload callback that creates its
  * virtual fields (CustomElements::createDca → generatePalette). A DCA loaded
@@ -15,55 +15,66 @@ use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
  * column looked foreign to the write tools: headline, customTpl, the image
  * toggle — refused on an element whose backend form shows them.
  *
- * This rebuilds that palette from the type's config the way RSCE 2.5 does for
- * tl_content, minus the virtual `rsce_field_*` entries. Those are not columns;
- * their values live in rsce_data, which ContentProvider writes.
+ * This rebuilds that palette from the type's config the way RSCE 2.5 does, minus
+ * the virtual `rsce_field_*` entries. Those are not columns; their values live in
+ * rsce_data, which the table's provider writes. RSCE builds a different palette
+ * per table, and so does this:
  *
- *   config `standardFields`   headline, columns (rocksolid-columns), text,
- *                             slider (rocksolid-slider), image, cssID
- *   `standardField` entries   the column of that name
- *   always                    type (+ title where Contao has it), customTpl,
- *                             protected, guests, invisible, start, stop
+ *   tl_content      type (+ title where Contao has it); from `standardFields`
+ *                   headline, columns (rocksolid-columns), text, slider
+ *                   (rocksolid-slider), image, cssID; customTpl, protected,
+ *                   guests, invisible, start, stop
+ *   tl_module       name, type; headline and cssID from `standardFields`;
+ *                   customTpl, protected, guests
+ *   tl_form_field   type; columns and text from `standardFields`; class,
+ *                   customTpl
  *
- * Sub-palettes (addImage → singleSRC, …) are not listed here; DcaPalette
- * expands them from the live DCA like for any other type.
+ * plus, everywhere, the column of every `standardField` entry in `fields`.
+ * Sub-palettes (addImage → singleSRC, …) are not listed here; DcaPalette expands
+ * them from the live DCA like for any other type.
  */
 final class RscePalette
 {
     /**
      * @param array<string, mixed> $config the type's rsce_*_config.php
-     * @param array<string, mixed> $dca    the loaded tl_content DCA
+     * @param array<string, mixed> $dca    the loaded DCA of $table
      */
-    public static function build(array $config, array $dca, bool $sliderInstalled): string
+    public static function build(array $config, array $dca, bool $sliderInstalled, string $table = 'tl_content'): string
     {
         $standard = \is_array($config['standardFields'] ?? null)
             ? array_map(static fn (mixed $f): string => \is_scalar($f) ? (string) $f : '', $config['standardFields'])
             : [];
         $columns = \is_array($dca['fields'] ?? null) ? $dca['fields'] : [];
         $palettes = \is_array($dca['palettes'] ?? null) ? $dca['palettes'] : [];
+        $has = static fn (string $field): bool => \in_array($field, $standard, true);
 
-        $fields = ['type'];
+        $fields = match ($table) {
+            'tl_module' => $has('headline') ? ['name', 'headline', 'type'] : ['name', 'type'],
+            default => ['type'],
+        };
 
-        // Contao 5.6 added the element title; RSCE puts it into the palette
-        // from that version on. Asking the DCA answers the same question
-        // without a version check.
-        if (isset($columns['title'])) {
-            $fields[] = 'title';
+        if ($table === 'tl_content') {
+            // Contao 5.6 added the element title; RSCE puts it into the palette
+            // from that version on. Asking the DCA answers the same question
+            // without a version check.
+            if (isset($columns['title'])) {
+                $fields[] = 'title';
+            }
+            if ($has('headline')) {
+                $fields[] = 'headline';
+            }
         }
 
-        if (\in_array('headline', $standard, true)) {
-            $fields[] = 'headline';
+        if ($table !== 'tl_module') {
+            if ($has('columns')) {
+                $fields = [...$fields, ...self::after((string) ($palettes['rs_columns_start'] ?? ''), '{rs_columns_legend},', ';')];
+            }
+            if ($has('text')) {
+                $fields[] = 'text';
+            }
         }
 
-        if (\in_array('columns', $standard, true)) {
-            $fields = [...$fields, ...self::after((string) ($palettes['rs_columns_start'] ?? ''), '{rs_columns_legend},', ';')];
-        }
-
-        if (\in_array('text', $standard, true)) {
-            $fields[] = 'text';
-        }
-
-        if ($sliderInstalled && \in_array('slider', $standard, true)) {
+        if ($table === 'tl_content' && $sliderInstalled && $has('slider')) {
             // RSCE picks one of two slider palettes from the record's current
             // settings. Which one is open is edit-mask state; the write path
             // takes both, as DcaPalette does for every select-style toggle.
@@ -81,17 +92,26 @@ final class RscePalette
             }
         }
 
-        if (\in_array('image', $standard, true)) {
+        if ($table === 'tl_content' && $has('image')) {
             $fields[] = 'addImage';
         }
 
-        $fields = [...$fields, 'customTpl', 'protected', 'guests'];
-
-        if (\in_array('cssID', $standard, true)) {
-            $fields[] = 'cssID';
+        if ($table === 'tl_form_field') {
+            $fields[] = 'class';
         }
 
-        $fields = [...$fields, 'invisible', 'start', 'stop'];
+        $fields[] = 'customTpl';
+
+        if ($table !== 'tl_form_field') {
+            $fields = [...$fields, 'protected', 'guests'];
+            if ($has('cssID')) {
+                $fields[] = 'cssID';
+            }
+        }
+
+        if ($table === 'tl_content') {
+            $fields = [...$fields, 'invisible', 'start', 'stop'];
+        }
 
         return implode(',', array_values(array_unique($fields)));
     }

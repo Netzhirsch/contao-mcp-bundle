@@ -13,13 +13,15 @@ use Contao\CoreBundle\Framework\ContaoFramework;
  * RSCE is common under Contao themes (themore and many agency themes), and it
  * keeps everything that makes an element configurable out of the DCA until the
  * edit mask opens: the palette, the virtual fields, and the one JSON column
- * their values are stored in. The content tools read the DCA, so an RSCE
- * element could be created but not configured. Three places need the missing
- * half, and all three get it from here:
+ * their values are stored in. The write tools read the DCA, so an RSCE element
+ * could be created but not configured. RSCE does this for content elements,
+ * frontend modules and form fields alike — an element's config registers it as
+ * all three unless it says otherwise — and three places per table need the
+ * missing half, all of them from here:
  *
- *   - the content FieldMapper, for the palette of an RSCE type (RscePalette);
- *   - ContentProvider, which writes rsce_data (RsceData);
- *   - content_palette_get, which lists the type's fields ({@see describe()}).
+ *   - the table's FieldMapper, for the palette of an RSCE type (RscePalette);
+ *   - the table's DataProvider, which writes rsce_data (RsceData);
+ *   - the table's *_palette_get, which lists the type's fields ({@see describe()}).
  *
  * The type's config comes from RSCE itself (CustomElements::getConfigByType),
  * so theme template folders, Twig templates and the fallback lookup resolve
@@ -33,6 +35,16 @@ final class RsceElements
     private const CUSTOM_ELEMENTS = 'MadeYourDay\\RockSolidCustomElements\\CustomElements';
 
     private const SLIDER = 'MadeYourDay\\RockSolidSlider\\Module\\Slider';
+
+    /**
+     * Per table, the tool that lists a type's keys (named in refusals) and the
+     * tool that reads a record (named when the keys cannot be listed).
+     */
+    private const TOOLS = [
+        'tl_content' => ['content_palette_get', 'content_get'],
+        'tl_module' => ['module_palette_get', 'module_get'],
+        'tl_form_field' => ['form_field_palette_get', 'form_field_get'],
+    ];
 
     /** @var array<string, array<string, mixed>|null> */
     private array $configs = [];
@@ -94,13 +106,14 @@ final class RsceElements
      * The palette the edit mask would build for this type, or null when there
      * is no config to build it from.
      *
-     * @param array<string, mixed> $dca the loaded tl_content DCA
+     * @param array<string, mixed> $dca   the loaded DCA of $table
+     * @param string               $table tl_content, tl_module or tl_form_field
      */
-    public function paletteFor(string $type, array $dca): ?string
+    public function paletteFor(string $type, array $dca, string $table = 'tl_content'): ?string
     {
         $config = $this->config($type);
 
-        return $config === null ? null : RscePalette::build($config, $dca, class_exists(self::SLIDER));
+        return $config === null ? null : RscePalette::build($config, $dca, class_exists(self::SLIDER), $table);
     }
 
     /**
@@ -110,10 +123,10 @@ final class RsceElements
      * @throws \InvalidArgumentException when the input is not a JSON object, or
      *                                   names a key the type does not have
      */
-    public function write(string $type, mixed $input, mixed $stored): string
+    public function write(string $type, mixed $input, mixed $stored, string $table = 'tl_content'): string
     {
         $current = RsceData::decode($stored);
-        $patch = RsceData::convert(RsceData::parse($input), $this->fieldsOf($type), $current, $type);
+        $patch = RsceData::convert(RsceData::parse($input), $this->fieldsOf($type), $current, $type, '', self::tools($table)[0]);
 
         return RsceData::encode(RsceData::merge($current, $patch));
     }
@@ -128,12 +141,14 @@ final class RsceElements
     }
 
     /**
-     * The rsce_data part of content_palette_get: how the column is written and
-     * which keys this type has.
+     * The rsce_data part of the table's *_palette_get: how the column is
+     * written and which keys this type has.
+     *
+     * @param string $table tl_content, tl_module or tl_form_field
      *
      * @return array<string, mixed>
      */
-    public function describe(string $type): array
+    public function describe(string $type, string $table = 'tl_content'): array
     {
         $out = [
             'column' => 'rsce_data',
@@ -148,9 +163,10 @@ final class RsceElements
             $out['fields'] = null;
             $out['message'] = sprintf(
                 'The config file of "%s" (%s_config.php) could not be read here, so its keys cannot be listed or checked. '
-                .'rsce_data is still writable as a JSON object; content_get of an existing element shows the keys it stores.',
+                .'rsce_data is still writable as a JSON object; %s of an existing record shows the keys it stores.',
                 $type,
                 $type,
+                self::tools($table)[1],
             );
 
             return $out;
@@ -159,6 +175,14 @@ final class RsceElements
         $out['fields'] = RsceData::describe($fields);
 
         return $out;
+    }
+
+    /**
+     * @return array{0: string, 1: string} the palette tool and the read tool
+     */
+    private static function tools(string $table): array
+    {
+        return self::TOOLS[$table] ?? self::TOOLS['tl_content'];
     }
 
     /**

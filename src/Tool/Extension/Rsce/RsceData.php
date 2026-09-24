@@ -100,12 +100,13 @@ final class RsceData
      * @param array<string, mixed>      $patch  parsed input
      * @param array<array-key, mixed>|null $fields the type's `fields` config; null when it could not be read
      * @param array<string, mixed>      $stored the decoded column as it is now
+     * @param string                    $paletteTool the tool that lists the type's keys, named in refusals
      *
      * @return array<string, mixed>
      *
      * @throws \InvalidArgumentException
      */
-    public static function convert(array $patch, ?array $fields, array $stored, string $type, string $path = ''): array
+    public static function convert(array $patch, ?array $fields, array $stored, string $type, string $path = '', string $paletteTool = 'content_palette_get'): array
     {
         $out = [];
 
@@ -126,11 +127,11 @@ final class RsceData
                     continue;
                 }
 
-                throw new \InvalidArgumentException(self::unknownKey($key, $config, $fields, $type, $path));
+                throw new \InvalidArgumentException(self::unknownKey($key, $config, $fields, $type, $path, $paletteTool));
             }
 
             /** @var array<string, mixed> $config */
-            $out[$key] = self::convertValue($key, $value, $config, $stored[$key] ?? null, $type, $path);
+            $out[$key] = self::convertValue($key, $value, $config, $stored[$key] ?? null, $type, $path, $paletteTool);
         }
 
         return $out;
@@ -179,7 +180,7 @@ final class RsceData
     }
 
     /**
-     * The type's fields as content_palette_get lists them: what each key is
+     * The type's fields as the *_palette_get tools list them: what each key is
      * called, what it takes, and what it is stored as.
      *
      * @param array<array-key, mixed> $fields the type's `fields` config
@@ -263,7 +264,7 @@ final class RsceData
     /**
      * @param array<array-key, mixed> $fields
      */
-    private static function unknownKey(string $key, mixed $config, array $fields, string $type, string $path): string
+    private static function unknownKey(string $key, mixed $config, array $fields, string $type, string $path, string $paletteTool): string
     {
         if (\is_array($config) && ($config['inputType'] ?? '') === 'standardField') {
             return sprintf(
@@ -286,11 +287,12 @@ final class RsceData
         }
 
         return sprintf(
-            'rsce_data: "%s%s" is not a field of %s. %s content_palette_get("%s") lists them with their input types.',
+            'rsce_data: "%s%s" is not a field of %s. %s %s("%s") lists them with their input types.',
             $path,
             $key,
             $type,
             $names === [] ? 'It has no fields at this level.' : 'Its fields here are: '.implode(', ', $names).'.',
+            $paletteTool,
             $type,
         );
     }
@@ -300,7 +302,7 @@ final class RsceData
      *
      * @throws \InvalidArgumentException
      */
-    private static function convertValue(string $key, mixed $value, array $config, mixed $stored, string $type, string $path): mixed
+    private static function convertValue(string $key, mixed $value, array $config, mixed $stored, string $type, string $path, string $paletteTool): mixed
     {
         $inputType = (string) ($config['inputType'] ?? '');
         $eval = \is_array($config['eval'] ?? null) ? $config['eval'] : [];
@@ -308,7 +310,7 @@ final class RsceData
         $where = $path.$key;
 
         if ($inputType === 'list') {
-            return self::convertList($where, $value, $config, $stored, $type);
+            return self::convertList($where, $value, $config, $stored, $type, $paletteTool);
         }
 
         if (\in_array($inputType, self::FILE_TYPES, true)) {
@@ -358,7 +360,7 @@ final class RsceData
      *
      * @throws \InvalidArgumentException
      */
-    private static function convertList(string $where, mixed $value, array $config, mixed $stored, string $type): array
+    private static function convertList(string $where, mixed $value, array $config, mixed $stored, string $type, string $paletteTool): array
     {
         if (!\is_array($value) || !array_is_list($value)) {
             throw new \InvalidArgumentException(sprintf('rsce_data: "%s" is a list — pass an array with one object per item.', $where));
@@ -389,7 +391,7 @@ final class RsceData
                 throw new \InvalidArgumentException(sprintf('rsce_data: "%s[%d]" must be an object with the item\'s fields.', $where, $i));
             }
 
-            $converted = self::convert($item, $itemFields, $storedKeys, $type, sprintf('%s[%d].', $where, $i));
+            $converted = self::convert($item, $itemFields, $storedKeys, $type, sprintf('%s[%d].', $where, $i), $paletteTool);
 
             // An item is written whole; a null inside it just leaves the key out.
             $items[] = array_filter($converted, static fn (mixed $v): bool => $v !== null);

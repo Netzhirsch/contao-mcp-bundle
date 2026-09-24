@@ -96,4 +96,45 @@ final class RscePaletteTest extends TestCase
         self::assertNotContains('rsce_slider', self::fields($config));
         self::assertContains('rsce_slider', self::fields($config, slider: true));
     }
+
+    /**
+     * RSCE builds a module palette of its own: title legend with name, no
+     * publishing or element title, no image toggle.
+     */
+    public function testAModuleGetsTheModulePalette(): void
+    {
+        $dca = ['fields' => array_fill_keys(['name', 'type', 'headline', 'rootPage', 'customTpl', 'protected', 'guests', 'cssID'], [])];
+        $config = [
+            'standardFields' => ['headline', 'cssID', 'image', 'text'],
+            'fields' => ['rootPage' => ['inputType' => 'standardField'], 'grid' => ['inputType' => 'select']],
+        ];
+
+        self::assertSame(
+            ['name', 'headline', 'type', 'rootPage', 'customTpl', 'protected', 'guests', 'cssID'],
+            DcaPalette::extractFields(RscePalette::build($config, $dca, true, 'tl_module')),
+        );
+    }
+
+    /**
+     * A form field has the expert class instead of the protection fields —
+     * and its standardField entries are where name, label and mandatory come
+     * from.
+     */
+    public function testAFormFieldGetsTheFormFieldPalette(): void
+    {
+        $dca = ['fields' => array_fill_keys(['type', 'text', 'name', 'label', 'mandatory', 'class', 'customTpl'], [])];
+        $config = [
+            'standardFields' => ['text', 'cssID'],
+            'fields' => [
+                'name' => ['inputType' => 'standardField'],
+                'label' => ['inputType' => 'standardField'],
+                'mandatory' => ['inputType' => 'standardField'],
+            ],
+        ];
+
+        self::assertSame(
+            ['type', 'text', 'name', 'label', 'mandatory', 'class', 'customTpl'],
+            DcaPalette::extractFields(RscePalette::build($config, $dca, false, 'tl_form_field')),
+        );
+    }
 }

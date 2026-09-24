@@ -514,6 +514,14 @@ final class McpSmokeTestCommand extends Command
         $textFieldId = (int) ($textFieldResult['id'] ?? 0);
         if ($textFieldId > 0) {
             $created['form_field'][] = $textFieldId;
+
+            // RSCE keeps rsce_data on tl_form_field too. With or without RSCE,
+            // a text field refuses it by naming the extension, which shows the
+            // form-field provider is wired.
+            $expect('rsce_data on a text form field names the extension',
+                $this->formFieldTool->update($textFieldId, ['rsce_data' => '{}']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
         }
 
         // Create a select field with options
@@ -3791,10 +3799,11 @@ final class McpSmokeTestCommand extends Command
                     && !\in_array('sectionHeadline', $r['fields'] ?? [], true)
                     && !\in_array('rsce_data', $r['fields'] ?? [], true));
 
-            // RSCE is not installed here, which is what proves the provider
-            // is wired: the column is claimed, and the refusal names the
-            // extension instead of calling rsce_data unknown.
-            $expect('rsce_data without RSCE names the extension',
+            // With or without RSCE installed, a text element refuses rsce_data
+            // by naming the extension ("not installed" or "not valid for type
+            // text") — which shows the provider is wired: an unclaimed column
+            // would be refused as unknown.
+            $expect('rsce_data on a text element names the extension',
                 $sectionIds !== [] ? $this->contentTool->update($sectionIds[0], ['rsce_data' => '{"grid":"grid3Col"}']) : [],
                 static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
                     && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
@@ -3860,6 +3869,23 @@ final class McpSmokeTestCommand extends Command
                 static fn (array $r) => $r[0] !== [] && $r[0] === $r[1]);
             $expect('and the override named the copy', $copyRow['name'] ?? null,
                 static fn ($v) => $v === $stamp.'_mod_kopie');
+
+            // Module overrides follow module_update's rules now: a column of
+            // another module type is refused before anything is copied.
+            $expect('a module override the type does not have is refused like on module_update',
+                $this->duplicateTool->duplicate('tl_module', $srcModuleId, overrides: (object) ['html' => '<b>x</b>']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), '"html"'));
+
+            // RSCE keeps rsce_data on tl_module as well. With or without RSCE,
+            // a navigation module refuses it by naming the extension, which
+            // shows the module provider is wired.
+            $expect('rsce_data on a navigation module names the extension',
+                $this->moduleTool->update($srcModuleId, ['rsce_data' => '{"grid":"grid3Col"}']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
+            $expect('and module_palette_get does not offer it on a navigation module',
+                $this->moduleTool->paletteGet('navigation'),
+                static fn ($r) => ($r['known'] ?? false) === true && !\in_array('rsce_data', $r['fields'] ?? [], true));
 
             $this->connection->executeStatement(
                 'DELETE FROM tl_module WHERE id IN ('.implode(',', array_filter([$srcModuleId, $modCopyId])).')');

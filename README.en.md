@@ -74,7 +74,8 @@ URL rewrites, form leads, maintenance and system settings.
   `leads_list` + `lead_get` for form submissions (`terminal42/contao-leads`),
   and **DeepL translation** (`numero2/contao-deepl`, see below).
 - **RockSolid Custom Elements**: RSCE elements (`rsce_*`) can be created **and**
-  configured through the content tools. `rsce_data` is checked against the
+  configured as content elements, frontend modules and form fields. `rsce_data`
+  is checked against the
   `rsce_*_config.php`, merged into what is stored and saved the way the backend
   saves it (see below).
 - **Author pass-through**: writes are recorded under the real OAuth user in
@@ -645,9 +646,10 @@ titles are **not** made unique — that is what `overrides` is for.
 `overrides` is not a raw path around the checks. `id`, `pid` and `ptable` are
 refused, because the parent is `into_pid`/`into_ptable` and that is where it is
 checked. The account's field permissions apply as they do on the `*_update`
-tools. On `tl_content`, overrides take exactly the fields `content_update` takes
-for the copy's type and its **new** parent, and `rsce_data` is merged into the
-source's settings. That is how a prepared RSCE element becomes a copy with a
+tools. On `tl_content`, `tl_module` and `tl_form_field`, overrides take exactly
+the fields the table's `*_update` tool takes for the copy's type, on `tl_content`
+also for its **new** parent, and `rsce_data` is merged into the source's
+settings. That is how a prepared RSCE element becomes a copy with a
 different button URL.
 
 `tl_user` and `tl_member` are deliberately absent: Contao's copy button lands
@@ -694,13 +696,18 @@ from the new title through the Slug service.
 ## RockSolid Custom Elements (RSCE)
 
 An RSCE element keeps its whole configuration (grid, button URL, background) in
-**one** JSON column, `tl_content.rsce_data`. RSCE only builds the palette and the
-fields in the edit mask. With `madeyourday/contao-rocksolid-custom-elements`
-installed, `content_create`, `content_update`, `content_create_tree` and the
-overrides of `entity_duplicate` still write that column on every `rsce_*` type:
+**one** JSON column, `rsce_data`. RSCE registers every element as a content
+element, a frontend module and a form field unless its config restricts `types`,
+and keeps the column in `tl_content`, `tl_module` and `tl_form_field`. It only
+builds the palette and the fields in the edit mask. With
+`madeyourday/contao-rocksolid-custom-elements` installed, `content_create`,
+`content_update`, `content_create_tree`, `module_create`, `module_update`,
+`form_field_create`, `form_field_update` and the overrides of `entity_duplicate`
+still write that column on every `rsce_*` type:
 
 ```
 content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", "bgColor": null}})
+module_create(theme_id: 1, type: "rsce_teaser", name: "Home teaser", fields: {"rsce_data": {"grid": "grid3Col"}})
 ```
 
 - **Merged, not replaced.** A key you send replaces that key, `null` removes
@@ -714,11 +721,13 @@ content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", 
   `true`/`false` becomes `"1"`/`""`, and date fields become timestamps (ISO 8601
   is converted).
 
-`content_palette_get("rsce_…")` lists every key of the type under `rsce_data`,
-with input type, options and the expected value format. `fields` holds the
-regular columns the type's edit mask shows (`headline`, image, `customTpl`, …).
-RSCE reads the config itself, so theme folders and Twig templates resolve as they
-do in the backend.
+For an `rsce_*` type, `content_palette_get`, `module_palette_get` and
+`form_field_palette_get` list every key under `rsce_data`, with input type,
+options and the expected value format. `fields` holds the regular columns the
+type's edit mask shows in that table: `headline`, image and `customTpl` on a
+content element, name, `headline` and `customTpl` on a module, `text`, CSS class
+and `customTpl` on a form field. RSCE reads the config itself, so theme folders
+and Twig templates resolve as they do in the backend.
 
 ## How tools report errors
 

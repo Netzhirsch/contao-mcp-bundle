@@ -74,8 +74,9 @@ System-Einstellungen.
   Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
   `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`)
   und **Übersetzen mit DeepL** (`numero2/contao-deepl`, siehe unten).
-- **RockSolid Custom Elements**: RSCE-Elemente (`rsce_*`) lassen sich über die
-  Content-Tools anlegen **und** konfigurieren. `rsce_data` wird gegen die
+- **RockSolid Custom Elements**: RSCE-Elemente (`rsce_*`) lassen sich als
+  Inhaltselement, Frontend-Modul und Formularfeld anlegen **und** konfigurieren.
+  `rsce_data` wird gegen die
   `rsce_*_config.php` geprüft, in das Gespeicherte gemergt und so abgelegt, wie
   es das Backend ablegt (siehe unten).
 - **Author-Pass-Through**: Writes laufen unter dem echten OAuth-User in
@@ -523,9 +524,10 @@ dafür ist `overrides` da.
 
 `overrides` ist kein Rohzugang: `id`, `pid` und `ptable` sind gesperrt (der
 Elternteil ist `into_pid`/`into_ptable`, dort wird er auch geprüft), und die
-Feldrechte des Kontos gelten wie auf den `*_update`-Tools. Auf `tl_content`
-nehmen Overrides genau die Felder, die `content_update` für den Typ der Kopie und
-ihren **neuen** Elternteil nimmt. `rsce_data` wird dabei in die Einstellungen der
+Feldrechte des Kontos gelten wie auf den `*_update`-Tools. Auf `tl_content`,
+`tl_module` und `tl_form_field` nehmen Overrides genau die Felder, die das
+`*_update`-Tool der Tabelle für den Typ der Kopie nimmt, auf `tl_content` auch
+für ihren **neuen** Elternteil. `rsce_data` wird dabei in die Einstellungen der
 Quelle gemergt. So entsteht aus einem vorbereiteten RSCE-Element eine Kopie mit
 anderer Button-URL.
 
@@ -574,14 +576,18 @@ erzeugt ihn dann über den Slug-Service aus dem neuen Titel neu.
 ## RockSolid Custom Elements (RSCE)
 
 Ein RSCE-Element speichert seine ganze Einstellung (Raster, Button-URL,
-Hintergrund) in **einer** JSON-Spalte, `tl_content.rsce_data`. RSCE baut Palette
-und Felder erst in der Bearbeitungsmaske auf. Mit installiertem
-`madeyourday/contao-rocksolid-custom-elements` schreiben `content_create`,
-`content_update`, `content_create_tree` und die Overrides von `entity_duplicate`
-diese Spalte trotzdem auf allen `rsce_*`-Typen:
+Hintergrund) in **einer** JSON-Spalte, `rsce_data`. RSCE meldet jedes Element als
+Inhaltselement, Frontend-Modul und Formularfeld an, sofern die Config `types`
+nicht einschränkt, und führt die Spalte in `tl_content`, `tl_module` und
+`tl_form_field`. Palette und Felder baut RSCE erst in der Bearbeitungsmaske auf.
+Mit installiertem `madeyourday/contao-rocksolid-custom-elements` schreiben
+`content_create`, `content_update`, `content_create_tree`, `module_create`,
+`module_update`, `form_field_create`, `form_field_update` und die Overrides von
+`entity_duplicate` diese Spalte trotzdem auf allen `rsce_*`-Typen:
 
 ```
 content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", "bgColor": null}})
+module_create(theme_id: 1, type: "rsce_teaser", name: "Teaser Startseite", fields: {"rsce_data": {"grid": "grid3Col"}})
 ```
 
 - **Gemergt, nicht ersetzt.** Ein gesendeter Schlüssel wird ersetzt, `null`
@@ -595,11 +601,13 @@ content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", 
   `true`/`false` wird zu `"1"`/`""`, Datumsfelder werden zum Timestamp (ISO 8601
   wird umgerechnet).
 
-`content_palette_get("rsce_…")` listet unter `rsce_data` jeden Schlüssel des Typs
-mit Eingabetyp, Optionen und erwartetem Wertformat. In `fields` stehen die
-regulären Spalten, die die Bearbeitungsmaske des Typs zeigt (`headline`, Bild,
-`customTpl`, …). Die Config liest RSCE selbst, Theme-Ordner und Twig-Templates
-werden also aufgelöst wie im Backend.
+`content_palette_get`, `module_palette_get` und `form_field_palette_get` listen
+für einen `rsce_*`-Typ unter `rsce_data` jeden Schlüssel mit Eingabetyp, Optionen
+und erwartetem Wertformat. In `fields` stehen die regulären Spalten, die die
+Bearbeitungsmaske des Typs in dieser Tabelle zeigt: beim Inhaltselement etwa
+`headline`, Bild und `customTpl`, beim Modul Name, `headline` und `customTpl`,
+beim Formularfeld `text`, CSS-Klasse und `customTpl`. Die Config liest RSCE
+selbst, Theme-Ordner und Twig-Templates werden also aufgelöst wie im Backend.
 
 ## Wie Tools Fehler melden
 
