@@ -13,6 +13,7 @@ use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -37,6 +38,7 @@ final class Tool
         private readonly FieldMapper $mapper,
         private readonly QueryFilterResolver $filterResolver,
         private readonly McpPermissionGuard $guard,
+        private readonly RsceElements $rsce,
     ) {
     }
 
@@ -147,6 +149,8 @@ final class Tool
               - select / radio / checkbox: name, label, mandatory, options (list of {value, label, default?, group?})
               - submit: slabel (button label), imageSubmit (bool), class, accesskey
               - captcha: label, placeholder
+              - RockSolid Custom Elements (rsce_* types): rsce_data, a JSON object with the
+                field's settings — form_field_palette_get(type) lists its keys
 
             Default sorting = max(sorting) + 128 in the same form.
         DESC,
@@ -199,7 +203,7 @@ final class Tool
      */
     #[McpTool(
         name: 'form_field_update',
-        description: 'Updates a tl_form_field row. Pass id, then `fields` as a JSON OBJECT. Pass `type` inside fields to switch widget type (palette of the new type is used for validation).',
+        description: 'Updates a tl_form_field row. Pass id, then `fields` as a JSON OBJECT. Pass `type` inside fields to switch widget type (palette of the new type is used for validation). On RSCE form fields rsce_data is merged into what is stored: send only the keys to change, null removes one.',
     )]
     /**
      * @param object|null $fields form_field columns to change as a JSON object.
@@ -302,7 +306,8 @@ final class Tool
         name: 'form_field_palette_get',
         description: 'Returns the field set valid for a given form-field type (live tl_form_field DCA palette + common columns).'
             .' Sub-palette children are listed only when their toggle is part of the palette of THIS type — Contao keeps one wide table per DCA, so a column existing on the row does not mean the type has it.'
-            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.',
+            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.'
+            .' For RockSolid Custom Elements (rsce_* types) `rsce_data` describes the JSON column that holds the form field\'s settings, with every key the type defines.',
     )]
     public function paletteGet(string $type): array
     {
@@ -314,13 +319,19 @@ final class Tool
 
         $known = \in_array($type, $this->mapper->listTypes(), true);
 
-        return [
+        $result = [
             'type' => $type,
             'known' => $known,
             'fields' => $fields,
             'count' => \count($fields),
             'subpalettes' => $this->mapper->subpalettesFor($type),
         ];
+
+        if ($this->rsce->handles($type)) {
+            $result['rsce_data'] = $this->rsce->describe($type, 'tl_form_field');
+        }
+
+        return $result;
     }
 
     // ─────────────────────────── helpers ────────────────────────────

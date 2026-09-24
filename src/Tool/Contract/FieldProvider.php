@@ -27,15 +27,20 @@ use Contao\Model;
  *   1. FIELD NAMES MUST BE UNIQUE TO YOUR BUNDLE. Skipping the palette check also
  *      means skipping the "is this a column of that table?" question. A declared
  *      field named like an existing column — `headline`, `text`, `url`, `cssID` on
- *      tl_content — is not rejected as a duplicate: the core mapper writes the
- *      column, then your provider runs last and writes it again. The core value is
- *      quietly replaced. Prefix your fields (`mybundle_headline`), and prefix them
- *      especially when the names come from editor input rather than from your code.
+ *      tl_content — is not rejected as a duplicate. On tl_content, tl_module and
+ *      tl_form_field the core mapper leaves every declared field to its provider
+ *      (so a provider can read the stored value before anything overwrites it —
+ *      rsce_data merges into it); on the other tables it writes the column, then
+ *      your provider runs last and writes it again. Either way the core handling
+ *      of that column is quietly gone. Prefix your fields (`mybundle_headline`),
+ *      and prefix them especially when the names come from editor input rather
+ *      than from your code.
  *
  *   2. getAllowedFields() IS the type gate, and it is honoured — the mapper calls
- *      it wherever the table has a type concept (tl_page, tl_content) and refuses
- *      a field your provider does not allow for that type, before apply() is
- *      reached. Tables without a type (tl_theme, tl_layout) pass null and skip it.
+ *      it wherever the table has a type concept (tl_page, tl_content, tl_module,
+ *      tl_form_field) and refuses a field your provider does not allow for that
+ *      type, before apply() is reached. Tables without a type (tl_theme,
+ *      tl_layout) pass null and skip it.
  *      Re-checking inside apply() is still good practice, since your provider is
  *      the only place that can tell a field of type A from a field of type B when
  *      getDeclaredFields() is the union over all of them.

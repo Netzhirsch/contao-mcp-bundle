@@ -9,8 +9,10 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\ModuleModel;
 use Contao\StringUtil;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Netzhirsch\ContaoMcpBundle\Service\SerializedTuple;
 use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 
 /**
  * Field mapper for tl_module. tl_module is the type-driven sibling of tl_content:
@@ -18,7 +20,8 @@ use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
  * on the module's type (selected from $GLOBALS['FE_MOD']).
  *
  * We resolve the allowed field set at runtime from the live DCA palette, exactly
- * like the Content tool. Tools pass:
+ * like the Content tool, plus the columns extensions declare through a
+ * FieldProvider (rsce_data on RSCE modules). Tools pass:
  *   - (pid, type, name) as top-level params
  *   - a `fields` dict for everything else
  */
@@ -75,8 +78,11 @@ final class FieldMapper
      */
     private const SINGLE_PAGE_FIELDS = ['jumpTo', 'overviewPage', 'rootPage'];
 
-    public function __construct(private readonly ContaoFramework $framework)
-    {
+    public function __construct(
+        private readonly ContaoFramework $framework,
+        private readonly ProviderFields $providerFields,
+        private readonly RsceElements $rsce,
+    ) {
     }
 
     /**
@@ -99,18 +105,9 @@ final class FieldMapper
             ));
         }
 
-        $allowed = $this->allowedFieldsFor($type);
-
-        foreach (array_keys($input) as $field) {
-            if (!\in_array($field, $allowed, true)) {
-                throw new \InvalidArgumentException(sprintf(
-                    'Field "%s" is not valid for module type "%s". Call module_palette_get("%s"). Allowed fields: %s',
-                    $field,
-                    $type,
-                    $type,
-                    implode(', ', $allowed),
-                ));
-            }
+        $rejected = $this->rejectedFields($type, array_map(strval(...), array_keys($input)));
+        if ($rejected !== []) {
+            throw new \InvalidArgumentException((string) reset($rejected));
         }
 
         $changed = [];
@@ -120,8 +117,13 @@ final class FieldMapper
             }
         };
 
+        // Extension-owned columns are left to their provider: it may merge
+        // into the stored value (rsce_data does), which the generic cast below
+        // would already have overwritten.
+        $providerOwned = $this->providerFields->declaredFor('tl_module');
+
         foreach ($input as $field => $value) {
-            if ($value === null) {
+            if ($value === null || \in_array($field, $providerOwned, true)) {
                 continue;
             }
             $newValue = $this->castValue($field, $value, $module->$field);
@@ -129,6 +131,15 @@ final class FieldMapper
                 $module->$field = $newValue;
                 $touch($field);
             }
+        }
+
+        // Providers last; a refused value stops the write like any other.
+        $fromProviders = $this->providerFields->apply('tl_module', $module, $input, $detectChanges, $type);
+        if ($fromProviders['errors'] !== []) {
+            throw new \InvalidArgumentException(implode(' ', $fromProviders['errors']));
+        }
+        foreach ($fromProviders['applied'] as $field) {
+            $touch($field);
         }
 
         return $changed;
@@ -141,7 +152,52 @@ final class FieldMapper
     {
         $fields = $this->resolvePalette($type)['fields'];
 
-        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+        return array_values(array_unique(array_merge(
+            self::COMMON_FIELDS,
+            $fields,
+            // Extension-owned columns, only where their provider allows them.
+            $this->providerFields->allowedFor('tl_module', $type),
+        )));
+    }
+
+    /**
+     * The fields among $fields a module of this type cannot be written with,
+     * each with the message the write tools report — for module_create/_update
+     * and for entity_duplicate's overrides alike. Core fields first, then the
+     * provider refusals (extension missing, field not valid for the type).
+     *
+     * @param list<string> $fields
+     *
+     * @return array<string, string> field => message
+     */
+    public function rejectedFields(string $type, array $fields): array
+    {
+        $allowed = $this->allowedFieldsFor($type);
+        $declared = $this->providerFields->declaredFor('tl_module');
+
+        $rejected = [];
+        $claimed = [];
+
+        foreach ($fields as $field) {
+            if (\in_array($field, $allowed, true)) {
+                continue;
+            }
+
+            if (\in_array($field, $declared, true)) {
+                $claimed[] = $field;
+                continue;
+            }
+
+            $rejected[$field] = sprintf(
+                'Field "%s" is not valid for module type "%s". Call module_palette_get("%s"). Allowed fields: %s',
+                $field,
+                $type,
+                $type,
+                implode(', ', $allowed),
+            );
+        }
+
+        return $rejected + $this->providerFields->refusals('tl_module', $claimed, $type);
     }
 
     /**
@@ -168,7 +224,18 @@ final class FieldMapper
         $adapter = $this->framework->getAdapter(Controller::class);
         $adapter->loadDataContainer('tl_module');
 
-        return DcaPalette::resolve($GLOBALS['TL_DCA']['tl_module'] ?? [], $type);
+        $dca = $GLOBALS['TL_DCA']['tl_module'] ?? [];
+
+        // An RSCE module has no palette until its edit mask runs RSCE's onload
+        // callback; rebuilt from the type's config (RscePalette), on a copy.
+        if (trim((string) ($dca['palettes'][$type] ?? '')) === '') {
+            $palette = $this->rsce->paletteFor($type, $dca, 'tl_module');
+            if ($palette !== null) {
+                $dca['palettes'][$type] = $palette;
+            }
+        }
+
+        return DcaPalette::resolve($dca, $type);
     }
 
     /**

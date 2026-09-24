@@ -8,12 +8,16 @@ use Contao\Controller;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\FormFieldModel;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 
 /**
  * Field mapper for tl_form_field. The valid column set depends on the field
  * type (text / textarea / select / radio / checkbox / captcha / submit / …),
  * so we resolve the allowed fields at runtime against the live tl_form_field
- * DCA palette — same pattern as Modules and Content elements.
+ * DCA palette — same pattern as Modules and Content elements, including the
+ * columns extensions declare through a FieldProvider (rsce_data on RSCE form
+ * fields).
  */
 final class FieldMapper
 {
@@ -42,8 +46,11 @@ final class FieldMapper
         'maxImageWidth', 'maxImageHeight',
     ];
 
-    public function __construct(private readonly ContaoFramework $framework)
-    {
+    public function __construct(
+        private readonly ContaoFramework $framework,
+        private readonly ProviderFields $providerFields,
+        private readonly RsceElements $rsce,
+    ) {
     }
 
     /**
@@ -63,15 +70,9 @@ final class FieldMapper
             ));
         }
 
-        $allowed = $this->allowedFieldsFor($type);
-
-        foreach (array_keys($input) as $field) {
-            if (!\in_array($field, $allowed, true)) {
-                throw new \InvalidArgumentException(sprintf(
-                    'Field "%s" is not valid for form field type "%s". Allowed: %s',
-                    $field, $type, implode(', ', $allowed),
-                ));
-            }
+        $rejected = $this->rejectedFields($type, array_map(strval(...), array_keys($input)));
+        if ($rejected !== []) {
+            throw new \InvalidArgumentException((string) reset($rejected));
         }
 
         $changed = [];
@@ -81,8 +82,13 @@ final class FieldMapper
             }
         };
 
+        // Extension-owned columns are left to their provider: it may merge
+        // into the stored value (rsce_data does), which the generic cast below
+        // would already have overwritten.
+        $providerOwned = $this->providerFields->declaredFor('tl_form_field');
+
         foreach ($input as $field => $value) {
-            if ($value === null) {
+            if ($value === null || \in_array($field, $providerOwned, true)) {
                 continue;
             }
             $column = $field === 'active' ? 'invisible' : $field;
@@ -91,6 +97,15 @@ final class FieldMapper
                 $f->{$column} = $newValue;
                 $touch($field);
             }
+        }
+
+        // Providers last; a refused value stops the write like any other.
+        $fromProviders = $this->providerFields->apply('tl_form_field', $f, $input, $detectChanges, $type);
+        if ($fromProviders['errors'] !== []) {
+            throw new \InvalidArgumentException(implode(' ', $fromProviders['errors']));
+        }
+        foreach ($fromProviders['applied'] as $field) {
+            $touch($field);
         }
 
         return $changed;
@@ -103,7 +118,51 @@ final class FieldMapper
     {
         $fields = $this->resolvePalette($type)['fields'];
 
-        return array_values(array_unique(array_merge(self::COMMON_FIELDS, $fields)));
+        return array_values(array_unique(array_merge(
+            self::COMMON_FIELDS,
+            $fields,
+            // Extension-owned columns, only where their provider allows them.
+            $this->providerFields->allowedFor('tl_form_field', $type),
+        )));
+    }
+
+    /**
+     * The fields among $fields a form field of this type cannot be written
+     * with, each with the message the write tools report — for
+     * form_field_create/_update and for entity_duplicate's overrides alike.
+     * Core fields first, then the provider refusals.
+     *
+     * @param list<string> $fields
+     *
+     * @return array<string, string> field => message
+     */
+    public function rejectedFields(string $type, array $fields): array
+    {
+        $allowed = $this->allowedFieldsFor($type);
+        $declared = $this->providerFields->declaredFor('tl_form_field');
+
+        $rejected = [];
+        $claimed = [];
+
+        foreach ($fields as $field) {
+            if (\in_array($field, $allowed, true)) {
+                continue;
+            }
+
+            if (\in_array($field, $declared, true)) {
+                $claimed[] = $field;
+                continue;
+            }
+
+            $rejected[$field] = sprintf(
+                'Field "%s" is not valid for form field type "%s". Allowed: %s',
+                $field,
+                $type,
+                implode(', ', $allowed),
+            );
+        }
+
+        return $rejected + $this->providerFields->refusals('tl_form_field', $claimed, $type);
     }
 
     /**
@@ -130,7 +189,18 @@ final class FieldMapper
         $adapter = $this->framework->getAdapter(Controller::class);
         $adapter->loadDataContainer('tl_form_field');
 
-        return DcaPalette::resolve($GLOBALS['TL_DCA']['tl_form_field'] ?? [], $type);
+        $dca = $GLOBALS['TL_DCA']['tl_form_field'] ?? [];
+
+        // An RSCE form field has no palette until its edit mask runs RSCE's
+        // onload callback; rebuilt from the type's config (RscePalette).
+        if (trim((string) ($dca['palettes'][$type] ?? '')) === '') {
+            $palette = $this->rsce->paletteFor($type, $dca, 'tl_form_field');
+            if ($palette !== null) {
+                $dca['palettes'][$type] = $palette;
+            }
+        }
+
+        return DcaPalette::resolve($dca, $type);
     }
 
     /**

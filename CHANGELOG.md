@@ -6,12 +6,137 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-### Fixed
-- Ein implizit nullbarer Parameter in `ProviderFieldsTest` ist jetzt explizit
-  `?bool` — unter PHP 8.4 eine Deprecation in jedem Testlauf, unter PHP 9 ein
-  Fehler.
+## [1.34.0] – 2026-09-24
+
+> Aus [#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2):
+> RSCE-Elemente und Akkordeons lassen sich jetzt über die MCP-Tools bauen,
+> als Inhaltselement, Frontend-Modul und Formularfeld, und alle Schreibwege
+> prüfen nach denselben Regeln. Das heißt auch: Der bisherige Umweg über
+> `entity_duplicate` mit rohen Overrides nimmt nur noch, was das
+> `*_update`-Tool der Tabelle nimmt.
+>
+> **Vor dem Update prüfen, wer eingeschränkte MCP-Zugänge hat:** Feldrechte
+> werden jetzt so geprüft wie im Backend. Eine Redakteursgruppe braucht für
+> jedes Feld, das die KI schreiben soll, das Feldrecht („Erlaubte Felder"),
+> so wie für die Bearbeitungsmaske. Administratoren und der Trusted-Modus sind
+> nicht betroffen.
+
+### Security
+- **Feldrechte gelten so, wie Contao sie auslegt.** Ob ein Feld das Feldrecht
+  (`alexf`) braucht, las der Guard aus `exclude ?? false`, dem Default aus
+  Contao 4. Seit Contao 5.0 ist jedes Feld mit Eingabe ausgeschlossen, sofern
+  das DCA nicht `exclude => false` sagt, und die Kern-DCAs setzen den Schlüssel
+  gar nicht mehr. Geprüft wurde deshalb auf `tl_content`, `tl_article`,
+  `tl_news` und allen anderen Kerntabellen kein einziges Feld. Ein
+  eingeschränkter Redakteur konnte über MCP Felder schreiben, die ihm die
+  Bearbeitungsmaske nie zeigt. Entschieden wird jetzt mit Contaos eigener
+  Funktion (`DataContainer::isFieldExcluded`), unverändert von 5.0 bis 6.0.
+
+  Was nichts ändert, braucht kein Recht. Das ist beim Ändern der gespeicherte
+  Wert und beim Anlegen der Wert, mit dem ein neuer Datensatz ohnehin startet
+  (DCA-Default, sonst Spalten-Default). Das Backend setzt diese Werte ebenfalls
+  ohne Rückfrage, deshalb braucht `content_create(type: "text")` kein Recht auf
+  das Typ-Feld, genau wie der Knopf „Neues Element". Bei einer Kopie zählen
+  nur die Overrides, die etwas ändern. Den Typ und die übrigen Spalten der
+  Quelle übernimmt auch der Kopieren-Knopf, ohne nach Feldrechten zu fragen.
+
+  Eine Ausnahme kommt ebenfalls aus dem Backend: `rsce_data` braucht kein
+  Feldrecht. RSCE schreibt die Spalte über die virtuellen Felder eines
+  Elements, und die setzt RSCE durchweg auf `exclude => false`. Ein
+  eingeschränkter Redakteur konfiguriert ein RSCE-Element im Backend also ohne
+  Feldrecht, und nach einem Recht auf `rsce_data` selbst fragt keine
+  Bearbeitungsmaske. Die regulären Spalten eines RSCE-Elements (`headline`,
+  `text`, …) brauchen ihr Recht wie sonst. Geprüft mit einem eingeschränkten
+  Redakteur gegen Contaos Voter im Kontext eines echten `/mcp`-Requests.
+
+  Geprüft, ob die strengere Prüfung Tool-Parameter trifft, die gar kein Feld
+  schreiben: Jeder Parameter der schreibenden Tools, der als
+  ausgeschlossenes Feld gilt, schreibt auch genau dieses Feld.
+- **`pages_create_tree` prüft die Rechte pro Knoten**, wie jetzt auch
+  `content_create_tree`. Der Enforcer sah nur `pid` und keinen einzigen Knoten.
+  Typ und Felder der Seiten gingen also in keine Prüfung ein. Jetzt durchläuft
+  jeder Knoten vor dem ersten Schreibvorgang dieselbe Prüfung wie ein
+  `page_create`-Aufruf.
+- **Overrides von `entity_duplicate` umgehen die Rechteprüfung nicht mehr.**
+  Geprüft wurde „darf unter `into_pid` anlegen". Danach setzte ein Override
+  `pid` oder `ptable` die Kopie unter einen anderen Elternteil, und dort fragte
+  niemand mehr. `id`, `pid` und `ptable` werden jetzt abgelehnt; der Elternteil
+  ist `into_pid`/`into_ptable`. Außerdem gehen die Override-Schlüssel und der
+  Typ der Kopie in die Prüfung ein: Ein ausgeschlossenes Feld braucht wie auf
+  `*_update` das Feldrecht, und ein Typ, den das Konto nicht anlegen darf, wird
+  abgelehnt. So fragt auch Contaos Kopieren-Knopf, nämlich mit der ganzen neuen
+  Zeile. Das betrifft eingeschränkte OAuth-Benutzer; Administratoren und der
+  Trusted-Modus merken keinen Unterschied.
+- **`content_create_tree` prüft die Rechte pro Knoten.** Der Enforcer sieht den
+  Baum-Aufruf einmal, gegen dessen Elternteil. Elementtyp und Felder der Knoten
+  sieht er nie. Ein Elementtyp, den das Konto nicht verwenden darf, oder ein
+  ausgeschlossenes Feld kam also hier durch und nirgends sonst. Jetzt wird jeder
+  Knoten so gefragt, wie `content_create` fragen würde, und zwar vor dem ersten
+  Schreibvorgang. Eine Ablehnung kommt als `permission_denied` mit `problems`
+  pro Pfad.
 
 ### Added
+- **RockSolid Custom Elements lassen sich konfigurieren, als Inhaltselement,
+  Frontend-Modul und Formularfeld** ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)).
+  Die ganze Einstellung eines RSCE-Elements (Raster, Button-URL,
+  Hintergrund) steckt in der JSON-Spalte `rsce_data`. Die `*_get`-Tools
+  konnten sie lesen, jeder Schreibweg lehnte sie ab. RSCE baut Palette und
+  virtuelle Felder erst im `onload_callback` der Bearbeitungsmaske auf, und
+  genau dieser Schritt fehlte hier. Themes wie themore ließen sich so nur über
+  Kopien bestehender Elemente aufbauen, mit festen Einstellungen.
+
+  `rsce_data` ist jetzt auf `rsce_*`-Typen schreibbar (mit installiertem RSCE,
+  sonst benennt die Ablehnung die Erweiterung), als JSON-Objekt oder JSON-String,
+  über `content_create`/`_update`/`_create_tree`, `module_create`/`_update`,
+  `form_field_create`/`_update` und die Overrides von `entity_duplicate`. RSCE
+  meldet jedes Element als alle drei an, sofern die Config `types` nicht
+  einschränkt, und führt die Spalte in `tl_content`, `tl_module` und
+  `tl_form_field`. Die Regeln sind überall dieselben:
+  - **Wird gemergt, nicht ersetzt.** Ein gesendeter Schlüssel ersetzt diesen
+    Schlüssel, `null` entfernt ihn, alles Nicht-Genannte bleibt. Die Lehre aus dem
+    Headline-Tupel gilt hier doppelt: Wer die Button-URL ändert, darf die
+    Hintergrundfarbe nicht zurücksetzen. Listen werden als Ganzes ersetzt.
+  - **Wird gegen die `rsce_*_config.php` geprüft.** Ein Schlüssel, den der Typ
+    nicht hat, wird abgelehnt, und die Meldung nennt die echten. Sonst landet ein
+    Tippfehler in der Datenbank, wird als angewendet gemeldet und nie gerendert.
+    Schlüssel, die schon gespeichert sind, gehen auch durch, wenn die Config sie
+    nicht mehr kennt, damit Lesen und Zurückschreiben nach einer Umbenennung
+    weiter funktioniert. Genauso werden die Werte von Select-, Radio- und
+    Checkbox-Feldern mit festen Optionen geprüft, wie es auch die
+    Backend-Widgets tun: `{"grid": "grid7Col"}` wird abgelehnt, wenn die Config
+    nur `grid1Col` bis `grid6Col` kennt, und die Meldung nennt die gültigen
+    Werte. Leer (keine Auswahl) und ein schon gespeicherter Wert gehen durch.
+    Optionen, die RSCE erst beim Bearbeiten berechnet (`options_callback`,
+    `foreignKey`), werden nicht geprüft.
+  - **Wird gespeichert wie vom Backend.** Werte-Listen werden serialisiert,
+    Dateien als Text-UUID abgelegt (die Hex-Form aus `content_get` wird
+    umgerechnet), `true`/`false` wird zu `"1"`/`""`, ein Datumsfeld nimmt ISO 8601.
+    Die Kodierung entspricht der von RSCE selbst, deshalb zeigt ein
+    Versions-Diff nur echte Änderungen.
+
+  Dazu gilt für RSCE-Typen jetzt die Palette, die ihre Bearbeitungsmaske zeigt,
+  also die regulären Spalten, die die Config über `standardFields` und
+  `standardField`-Einträge anfordert, plus die Spalten, die RSCE je Tabelle
+  immer zeigt. Beim Inhaltselement sind das `headline`, `text`, Bild, Spalten
+  und Slider, dazu `customTpl`, Titel und Veröffentlichung; beim Modul Name,
+  `headline`, CSS-ID, `customTpl` und Schutz; beim Formularfeld Spalten,
+  `text`, CSS-Klasse und `customTpl`. Was davon nicht ohnehin für jeden Typ
+  offen war, wurde bisher abgelehnt: auf Inhaltselementen etwa `headline`,
+  `text`, Bild und `customTpl`, auf Formularfeldern `text` und die Spalten,
+  überall die `standardField`-Einträge. `content_palette_get`,
+  `module_palette_get` und `form_field_palette_get` listen unter `rsce_data`
+  jeden Schlüssel des Typs mit Eingabetyp, Optionen, Pflichtangabe und dem
+  erwarteten Wertformat.
+
+  Die Config liest RSCE selbst (`CustomElements::getConfigByType`), so dass
+  Theme-Ordner, Twig-Templates und Fallbacks genau wie im Backend aufgelöst
+  werden. Lokal geprüft gegen Contao 5.7.13 mit RSCE 2.5.1 auf allen drei
+  Tabellen, einschließlich Frontend-Ausgabe der geschriebenen Daten.
+- **`content_palette_get` nennt Felder, die vom Elternelement kommen** —
+  `context_fields`, derzeit `sectionHeadline`. Eine Antwort pro Typ zeigt solche
+  Felder nie. Ohne den Hinweis erfährt man von ihnen erst durch die erste
+  Ablehnung.
+
 - **`ReactHttpReplaceTest` bewacht den `replace`-Eintrag für `react/http`.**
   Der Eintrag sieht in der `composer.json` wie ein Versehen aus und ist genau
   deshalb gefährdet: Er behauptet gegenüber Composer, das Bundle liefere
@@ -42,6 +167,85 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   dieser Test und der README-Abschnitt zu `psr/http-message` alle verschwinden.
   Bis dahin hält der Test die Entscheidung fest, samt Begründung im
   Klassenkommentar.
+
+### Changed
+- **`content_get` liefert `sectionHeadline` wie `headline` als `{value, unit}`**
+  statt der serialisierten Zeichenkette, also in der Form, in der es jetzt
+  geschrieben wird.
+- **`content_palette_get` listet Erweiterungsfelder nur noch auf Typen, die sie
+  haben.** Bisher standen alle von Providern deklarierten Felder bei jedem Typ.
+  Mit dem RSCE-Provider wäre das `rsce_data` auf einem Textelement gewesen.
+  Maßgeblich ist jetzt die Antwort des Providers pro Typ (`getAllowedFields`),
+  also dieselbe, nach der schon geschrieben wurde. Ein nicht registrierter Typ
+  heißt jetzt immer `known: false`, auch wenn ein Provider Felder für ihn meldet.
+- **Auf `tl_content`, `tl_module` und `tl_form_field` schreibt ein deklariertes
+  Feld nur noch sein Provider.** Auf `tl_content` hat der generische Mapper es
+  bisher vorher selbst in die Spalte geschrieben. Das war harmlos, solange
+  Provider nur überschrieben, aber ein Provider, der in den gespeicherten Wert
+  mergt, las dann bereits den überschriebenen. `tl_module` und `tl_form_field`
+  nehmen Provider-Felder jetzt überhaupt erst an: Ihre Mapper fragten keinen
+  Provider und lehnten jedes deklarierte Feld als unbekannt ab. Der Hinweis im
+  `FieldProvider`-Vertrag ist angepasst.
+
+### Fixed
+- **Der Smoke-Test läuft auf einer frischen Installation vollständig, also auch
+  in CI.** Beide CI-Jobs, die ihn ausführen, starten auf einer leeren Datenbank.
+  Ohne Seite, Administrator und Datei übersprangen sich der Content-Baum,
+  die Rechte-Parität, die Sortierung, der Lösch-Schutz und die fileTree-Felder,
+  und der Lauf meldete trotzdem Grün. Darunter waren genau die Prüfungen, die
+  gezeigt hätten, dass die Feldrechte nichts prüften. Fehlen solche Daten,
+  legt der Test jetzt für die Dauer des Laufs Fixtures an: einen Seitenbaum mit
+  Artikel und Nachrichtenarchiv, einen Administrator mit zufälligem, nie
+  angezeigtem Passwort und eine Datei. Danach entfernt er sie wieder, auch wenn
+  ein Abschnitt abbricht. Lokal gemessen auf einer frischen Datenbank: vorher
+  412 bestandene Prüfungen, jetzt 505. Übersprungen wird nur noch, was eine
+  nicht installierte Erweiterung braucht (changelanguage, url-rewrite, DeepL).
+- **`html_filter_preview` und der Smoke-Test kennen die Voreinstellung von
+  Contao 6.0.1.** 6.0.1 richtet `allowedTags` nach der „safe default
+  configuration" der HTML-Spezifikation aus und nimmt dabei die
+  Formular-Elemente (`input`, `label`, `button`, `form`, `select`, `textarea`
+  und weitere) ganz heraus. Das Burger-Beispiel (`<input type>` plus
+  `<label for>`) verliert dort also nicht mehr nur die Attribute, sondern beide
+  Tags. Die Tool-Beschreibung sagt das jetzt. Der Smoke-Test, der auf Contao
+  6.0.1 deshalb rot war, prüft den Attribut-Fall jetzt an Markup, das auf allen
+  unterstützten Versionen gleich gefiltert wird
+  (`<a role>`, `<img fetchpriority>`). Die Werkzeuge selbst lesen die
+  Einstellungen der Installation und waren nicht betroffen.
+- **`sectionHeadline` auf den Kindern eines Akkordeons**
+  ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)). Contao legt
+  das Feld (den Titel eines Akkordeon-Abschnitts) über den `AccordionListener`
+  (`config.onpalette`, unverändert von 5.3 bis 6.0) in die Palette jedes
+  Elements, dessen Elternteil ein `accordion` ist. Die Prüfung las die Palette
+  nur pro Typ, deshalb wurde das Feld auf genau den Elementen abgelehnt, die es
+  brauchen: `Field "sectionHeadline" is not valid for content type "text"`.
+  Titelte Akkordeons ließen sich so nicht anlegen. Jetzt zählt der Elternteil
+  nach dem Schreiben, auch bei einer Verschiebung im selben Aufruf, und in
+  `content_create_tree` der Container-Knoten, der zu dem Zeitpunkt noch gar nicht
+  existiert. Gespeichert wird wie `headline`: `{value, unit}`, ein String als
+  Kurzform, und eine Teiländerung behält die Überschriftenebene. Außerhalb eines
+  Akkordeons sagt die Ablehnung, wo das Feld gilt.
+- **`content_create_tree` prüft nach denselben Regeln wie `content_create`.**
+  Der Baum hatte eine eigene Kopie der Feldprüfung. Die kannte weder den
+  Elternteil noch die Provider-Regeln pro Typ und sagte bei Typen mit
+  dynamischer Palette „siehe `content_palette_get`", was sich im Kreis drehte.
+  Sie ist ersetzt: Namen werden über denselben Mapper geprüft (alle falschen
+  auf einmal), danach die Werte an einem Wegwerf-Element. Ein Tippfehler in
+  `rsce_data` oder eine ungültige UUID in einem verschachtelten Knoten stoppt den
+  Baum damit vor dem ersten Schreibvorgang statt nach der Hälfte der Seite. Ein
+  leeres `fields: {}` gilt jetzt als Objekt.
+- **Overrides von `entity_duplicate` nehmen auf `tl_content`, `tl_module` und
+  `tl_form_field` genau, was das `*_update`-Tool der Tabelle nimmt**
+  ([#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2)). Bisher
+  lautete die einzige Frage, ob die Tabelle die Spalte hat. Der reguläre Weg
+  lehnte ab, was der Kopierweg roh durchließ, und genau das wurde als Umweg
+  benutzt. Jetzt gilt für die Kopie ihr Typ und auf `tl_content` auch der NEUE
+  Elternteil (`sectionHeadline` beim Kopieren in ein Akkordeon). `rsce_data` geht
+  durch seinen Provider: geprüft und in die Einstellungen der Quelle gemergt.
+  Werte bleiben sonst in gespeicherter Form, wie dokumentiert. Die übrigen
+  Tabellen prüfen wie bisher gegen die Spalten.
+- Ein implizit nullbarer Parameter in `ProviderFieldsTest` ist jetzt explizit
+  `?bool` — unter PHP 8.4 eine Deprecation in jedem Testlauf, unter PHP 9 ein
+  Fehler.
 
 ## [1.33.0] – 2026-09-21
 

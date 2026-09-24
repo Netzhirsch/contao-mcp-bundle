@@ -14,6 +14,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -45,6 +46,7 @@ final class Tool
         private readonly Serializer $serializer,
         private readonly QueryFilterResolver $filterResolver,
         private readonly McpPermissionGuard $guard,
+        private readonly RsceElements $rsce,
     ) {
     }
 
@@ -164,6 +166,8 @@ final class Tool
             cssID, jumpTo (page id), pages (list<int>), rootPage (list<int>),
             navigationTpl, levelOffset, showLevel, showProtected, defineRoot,
             protected (bool), guests (bool), groups (list<int>).
+            RockSolid Custom Elements (rsce_* types): rsce_data, a JSON object with the
+            module's settings — module_palette_get(type) lists its keys.
 
             Wraps in a Versions snapshot and writes to tl_log.
         DESC,
@@ -221,7 +225,7 @@ final class Tool
      */
     #[McpTool(
         name: 'module_update',
-        description: 'Updates a tl_module row. Pass id; everything else goes in `fields`. Pass type= inside fields to switch the module to a different type (the palette of the new type is used for validation). Versions snapshot + tl_log.',
+        description: 'Updates a tl_module row. Pass id; everything else goes in `fields`. Pass type= inside fields to switch the module to a different type (the palette of the new type is used for validation). On RSCE modules rsce_data is merged into what is stored: send only the keys to change, null removes one. Versions snapshot + tl_log.',
     )]
     public function update(
         int $id,
@@ -368,7 +372,8 @@ final class Tool
         name: 'module_palette_get',
         description: 'Returns the field set valid for a given module type (live tl_module DCA palette + common columns).'
             .' Sub-palette children are listed only when their toggle is part of the palette of THIS type — Contao keeps one wide table per DCA, so a column existing on the row does not mean the type has it.'
-            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.',
+            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.'
+            .' For RockSolid Custom Elements (rsce_* types) `rsce_data` describes the JSON column that holds the module\'s settings, with every key the type defines.',
     )]
     public function paletteGet(string $type): array
     {
@@ -380,13 +385,19 @@ final class Tool
 
         $known = \in_array($type, $this->mapper->allKnownTypes(), true);
 
-        return [
+        $result = [
             'type' => $type,
             'known' => $known,
             'fields' => $fields,
             'count' => \count($fields),
             'subpalettes' => $this->mapper->subpalettesFor($type),
         ];
+
+        if ($this->rsce->handles($type)) {
+            $result['rsce_data'] = $this->rsce->describe($type, 'tl_module');
+        }
+
+        return $result;
     }
 
     // ─────────────────────────── helpers ────────────────────────────

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Security;
 
 use Contao\Controller;
+use Contao\DataContainer;
 use Contao\Database;
 use Contao\StringUtil;
 use Contao\CoreBundle\Framework\ContaoFramework;
@@ -63,6 +64,26 @@ final class McpPermissionGuard
         'delete_recursive' => ContaoCorePermissions::USER_CAN_DELETE_RECURSIVELY,
         'edit' => ContaoCorePermissions::USER_CAN_EDIT_FILE,
         'sync' => ContaoCorePermissions::USER_CAN_SYNC_DBAFS,
+    ];
+
+    /**
+     * Columns the edit mask writes without asking for their field right,
+     * although their DCA marks them excluded.
+     *
+     * rsce_data is the storage behind the virtual fields of an RSCE element,
+     * and RSCE sets every one of those fields to `exclude => false`; its save
+     * callbacks then write the column. A restricted editor therefore configures
+     * an RSCE element without any field right, and no backend form ever asks
+     * for one on rsce_data itself. Asking for it here refused exactly the edit
+     * the backend allows. The regular columns an RSCE element shows (headline,
+     * text, …) are written as themselves and checked as usual.
+     *
+     * @var array<string, list<string>>
+     */
+    private const FIELDS_WITHOUT_FIELD_RIGHT = [
+        'tl_content' => ['rsce_data'],
+        'tl_module' => ['rsce_data'],
+        'tl_form_field' => ['rsce_data'],
     ];
 
     /**
@@ -137,14 +158,17 @@ final class McpPermissionGuard
     /**
      * Per-operation parity check against Contao's voters.
      *
-     * @param string             $table     Contao table, e.g. "tl_news"
-     * @param string             $operation create|read|update|delete
-     * @param int|null           $id        record id for read/update/delete
-     * @param array<string,mixed>|null $newData fields being written (create/update) — keys are field names
+     * @param string                   $table     Contao table, e.g. "tl_news"
+     * @param string                   $operation create|read|update|delete
+     * @param int|null                 $id        record id for read/update/delete
+     * @param array<string,mixed>|null $newData   fields being written (create/update) — keys are field names
+     * @param array<string,mixed>|null $written   the fields the caller actually WRITES, when that is not
+     *                                            $newData — a copy inserts the whole source row, and only
+     *                                            its overrides are the caller's. Null: $newData.
      *
      * @return array{error: string, message: string}|null null = allowed
      */
-    public function ensureCan(string $table, string $operation, ?int $id = null, ?array $newData = null): ?array
+    public function ensureCan(string $table, string $operation, ?int $id = null, ?array $newData = null, ?array $written = null): ?array
     {
         $userId = $this->callContext->getUserId();
         if ($userId === null || $userId <= 0) {
@@ -258,8 +282,9 @@ final class McpPermissionGuard
         }
 
         // Field-level: writing an "excluded" field requires the alexf right.
-        if (\in_array($operation, ['create', 'update'], true) && \is_array($newData) && $newData !== []) {
-            $fieldDenial = $this->ensureFields($token, $table, array_keys($newData));
+        $written ??= $newData;
+        if (\in_array($operation, ['create', 'update'], true) && \is_array($written) && $written !== []) {
+            $fieldDenial = $this->ensureFields($token, $table, $written, $operation, $record);
             if ($fieldDenial !== null) {
                 return $fieldDenial;
             }
@@ -614,20 +639,53 @@ final class McpPermissionGuard
     }
 
     /**
-     * @param list<string> $fields
+     * Writing an excluded field needs the alexf right — the rule the backend
+     * applies when it builds an edit form.
+     *
+     * "Excluded" is Contao's answer (DataContainer::isFieldExcluded), not the
+     * `exclude` key alone. Since Contao 5.0 every field with an input counts as
+     * excluded unless its DCA says `exclude => false`, and the core DCAs no
+     * longer set the key at all. Reading `exclude ?? false` — the Contao 4
+     * default — therefore checked nothing on tl_content, tl_article, tl_news or
+     * any other core table: a restricted editor could write through MCP fields
+     * their backend form never shows them.
+     *
+     * A value that changes nothing is not a write. On an update that is the
+     * stored value; on a create, the value a new record starts with (the DCA
+     * default, else the column default). The backend's own create sets those
+     * without asking, so content_create(type: "text") needs no right to the
+     * type field, exactly like the "new element" button. null means "not sent"
+     * to every write tool.
+     *
+     * @param array<array-key, mixed>   $values field => value being written
+     * @param array<string, mixed>|null $record the stored row (update)
      *
      * @return array{error: string, message: string}|null
      */
-    private function ensureFields(object $token, string $table, array $fields): ?array
+    private function ensureFields(object $token, string $table, array $values, string $operation, ?array $record): ?array
     {
         $this->loadDca($table);
         $dcaFields = $GLOBALS['TL_DCA'][$table]['fields'] ?? [];
+        $dataContainer = $this->framework->getAdapter(DataContainer::class);
 
-        foreach ($fields as $field) {
-            $isExcluded = (bool) ($dcaFields[$field]['exclude'] ?? false);
-            if (!$isExcluded) {
+        foreach ($values as $field => $value) {
+            $field = (string) $field;
+
+            if ($value === null
+                || \in_array($field, self::FIELDS_WITHOUT_FIELD_RIGHT[$table] ?? [], true)
+                || !$dataContainer->isFieldExcluded($table, $field)
+            ) {
                 continue;
             }
+
+            $unchanged = match ($operation) {
+                'create' => self::isNewRecordValue(\is_array($dcaFields[$field] ?? null) ? $dcaFields[$field] : [], $value),
+                default => $record !== null && \array_key_exists($field, $record) && self::sameValue($value, $record[$field]),
+            };
+            if ($unchanged) {
+                continue;
+            }
+
             if (!$this->accessDecisionManager->decide($token, [ContaoCorePermissions::USER_CAN_EDIT_FIELD_OF_TABLE], $table.'::'.$field)) {
                 return $this->deny(
                     'permission_denied',
@@ -638,6 +696,70 @@ final class McpPermissionGuard
         }
 
         return null;
+    }
+
+    /**
+     * Whether $value is what a freshly created record holds in this field:
+     * the DCA `default` (what DC_Table::create() fills in), otherwise the
+     * column default. A default computed per request (a closure — the current
+     * date, the current user) cannot be matched and counts as a write.
+     *
+     * @param array<string, mixed> $config the field's DCA definition
+     */
+    private static function isNewRecordValue(array $config, mixed $value): bool
+    {
+        if (\array_key_exists('default', $config)) {
+            $default = $config['default'];
+
+            return !$default instanceof \Closure
+                && self::sameValue($value, \is_array($default) ? serialize($default) : $default);
+        }
+
+        $sql = $config['sql'] ?? null;
+
+        if (\is_array($sql)) {
+            return \array_key_exists('default', $sql) && self::sameValue($value, $sql['default']);
+        }
+
+        // "varchar(32) NOT NULL default 'main'", "int(10) unsigned NOT NULL default 0", "… default NULL"
+        if (\is_string($sql) && preg_match("/\\bdefault\\s+(?:'((?:[^'\\\\]|\\\\.)*)'|(null)\\b|(-?\\d+(?:\\.\\d+)?))/i", $sql, $m) === 1) {
+            if (($m[2] ?? '') !== '') {
+                return self::sameValue($value, null);
+            }
+            if (($m[3] ?? '') !== '') {
+                return self::sameValue($value, $m[3]);
+            }
+
+            return self::sameValue($value, stripslashes($m[1]));
+        }
+
+        return false;
+    }
+
+    /**
+     * Loose enough for a checkbox (true against '1' / 1, false against '' / '0'
+     * / 0, however the column stores it), strict for everything else. A value
+     * that is not scalar — a headline object, a list — never counts as
+     * unchanged: comparing it against the serialised column would be a guess.
+     */
+    private static function sameValue(mixed $value, mixed $current): bool
+    {
+        $stored = match (true) {
+            $current === null => '',
+            \is_bool($current) => $current ? '1' : '',
+            \is_scalar($current) => (string) $current,
+            default => null,
+        };
+
+        if ($stored === null) {
+            return false;
+        }
+
+        if (\is_bool($value)) {
+            return \in_array($stored, $value ? ['1'] : ['', '0'], true);
+        }
+
+        return \is_scalar($value) && (string) $value === $stored;
     }
 
     /** @var array<string, string>|null table → owning backend-module name */

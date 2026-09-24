@@ -55,11 +55,13 @@ final class Serializer
     private const STRING_LIST_FIELDS = ['mooHeaders', 'sliderTypes', 'cssClasses', 'galleryTplOptions'];
 
     /**
-     * Headline tuple: serialised {value, unit}.
+     * Headline tuples: serialised {value, unit}. sectionHeadline (the section
+     * title of an accordion child) is written as the same object, so it reads
+     * back as one too.
      *
      * @var list<string>
      */
-    private const HEADLINE_TUPLE_FIELDS = ['headline'];
+    private const HEADLINE_TUPLE_FIELDS = ['headline', 'sectionHeadline'];
 
     /**
      * tinyint flags rendered as PHP bool.

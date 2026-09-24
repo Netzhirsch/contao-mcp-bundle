@@ -223,6 +223,56 @@ final class ProviderFieldsTest extends TestCase
     }
 
     /**
+     * A palette answer built from declaredFor() offered rsce_data on a text
+     * element. What can be WRITTEN on a type is narrower: an installed
+     * extension, and its provider's per-type answer.
+     */
+    public function testOnlyFieldsTheProviderAllowsOnTheTypeCountAsWritable(): void
+    {
+        $subject = $this->fields(
+            $this->typedProvider('tl_content', [
+                'netzhirsch_component_card' => ['component_headline'],
+                'netzhirsch_component_quote' => ['component_quote'],
+            ]),
+            $this->provider('tl_content', ['missing_extension_field'], available: false),
+        );
+
+        self::assertSame(['component_headline'], $subject->allowedFor('tl_content', 'netzhirsch_component_card'));
+        self::assertSame([], $subject->allowedFor('tl_content', 'text'));
+        self::assertSame(['component_headline', 'component_quote'], $subject->allowedFor('tl_content', null));
+    }
+
+    /**
+     * content_create_tree and entity_duplicate check before their first write.
+     * They must refuse what apply() refuses, in the same words.
+     */
+    public function testRefusalsAreWhatApplyWouldSayWithoutApplying(): void
+    {
+        $wasApplied = false;
+        $subject = $this->fields(
+            $this->typedProvider('tl_content', [
+                'netzhirsch_component_card' => ['component_headline'],
+                'netzhirsch_component_quote' => ['component_quote'],
+            ], $wasApplied),
+            $this->provider('tl_content', ['missing_extension_field'], available: false),
+        );
+
+        $refusals = $subject->refusals(
+            'tl_content',
+            ['component_headline', 'component_quote', 'missing_extension_field', 'text'],
+            'netzhirsch_component_card',
+        );
+
+        self::assertSame(['component_quote', 'missing_extension_field'], array_keys($refusals));
+        self::assertStringContainsString('not valid for type "netzhirsch_component_card"', $refusals['component_quote']);
+        self::assertStringContainsString('not installed', $refusals['missing_extension_field']);
+        self::assertFalse($wasApplied);
+
+        $applied = $subject->apply('tl_content', $this->model(), ['component_quote' => 'x'], true, 'netzhirsch_component_card');
+        self::assertSame([$refusals['component_quote']], $applied['errors']);
+    }
+
+    /**
      * tl_theme and tl_layout have no type concept, so there is nothing to gate
      * on. Passing no type must not turn into "allowed for type ''".
      */

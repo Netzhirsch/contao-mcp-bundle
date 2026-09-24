@@ -4,14 +4,21 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tool\Duplicate;
 
+use Contao\ContentModel;
+use Contao\FormFieldModel;
+use Contao\ModuleModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Contao\Versions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Netzhirsch\ContaoMcpBundle\Service\RecordDuplicator;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
+use Netzhirsch\ContaoMcpBundle\Tool\Content\FieldMapper as ContentFieldMapper;
+use Netzhirsch\ContaoMcpBundle\Tool\FormField\FieldMapper as FormFieldFieldMapper;
+use Netzhirsch\ContaoMcpBundle\Tool\Module\FieldMapper as ModuleFieldMapper;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -59,6 +66,18 @@ final class Tool
         'tl_form', 'tl_form_field',
     ];
 
+    /**
+     * The tables whose columns depend on the record's type: table => the
+     * model a provider works on, the tool that lists the types.
+     *
+     * @var array<string, array{0: class-string<\Contao\Model>, 1: string}>
+     */
+    private const TYPE_DRIVEN = [
+        'tl_content' => [ContentModel::class, 'content_types_list'],
+        'tl_module' => [ModuleModel::class, 'module_types_list'],
+        'tl_form_field' => [FormFieldModel::class, 'form_field_types_list'],
+    ];
+
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly Connection $connection,
@@ -66,6 +85,10 @@ final class Tool
         private readonly McpPermissionGuard $guard,
         private readonly AuthorResolver $authorResolver,
         private readonly LoggerInterface $logger,
+        private readonly ContentFieldMapper $contentMapper,
+        private readonly ModuleFieldMapper $moduleMapper,
+        private readonly FormFieldFieldMapper $formFieldMapper,
+        private readonly ProviderFields $providerFields,
     ) {
     }
 
@@ -119,7 +142,14 @@ final class Tool
                                Values are strings, numbers, booleans or null — `published: false`
                                is written as 0, so an unpublished copy needs no follow-up call.
                                A column the table does not have is rejected before anything
-                               is copied.
+                               is copied, and so are id, pid and ptable (the parent is
+                               into_pid / into_ptable). On tl_content, tl_module and
+                               tl_form_field the same fields are accepted as on the table's
+                               *_update tool for the copy's type (tl_content: also its new
+                               parent — sectionHeadline when copying into an accordion), and
+                               rsce_data on RSCE records is merged into the source's settings.
+                               Your backend field permissions apply as they do on the regular
+                               write tools.
 
             Conventions mirrored from Contao's own copy:
               - doNotCopy fields are NOT carried over. They are refilled from the DCA
@@ -182,16 +212,47 @@ final class Tool
             $intoPtable = (string) ($source['ptable'] ?? 'tl_article');
         }
 
-        // Create parity under the target parent.
+        try {
+            $overridesArr = $this->checkedOverrides($table, $source, $intoPid, $intoPtable, $this->normaliseOverrides($overrides));
+        } catch (\InvalidArgumentException $e) {
+            return ['error' => 'invalid_input', 'message' => $e->getMessage()];
+        }
+
+        // Create parity under the target parent, asked with what the copy WILL
+        // be: its type (Contao's own copy button asks with the whole new row,
+        // so a type the account may not create is refused there too) and every
+        // override. Before, only pid/ptable went in, and an excluded field was
+        // writable through overrides alone.
         $newData = ['pid' => $intoPid];
         if ($intoPtable !== null) {
             $newData['ptable'] = $intoPtable;
         }
-        if (($denied = $this->guard->ensureCan($table, 'create', null, $newData)) !== null) {
-            return $denied;
+        if (\array_key_exists('type', $source)) {
+            $newData['type'] = (string) ($overridesArr['type'] ?? $source['type']);
+        }
+        $newData += $overridesArr;
+
+        // Field rights, though, only for what the CALLER writes: the overrides
+        // that change something. Copying does not edit the source's type or
+        // headline — the backend copies them without asking — and demanding
+        // the field right for them would make MCP stricter than the button.
+        $written = [];
+        foreach ($overridesArr as $column => $value) {
+            $column = (string) $column;
+            $before = $source[$column] ?? null;
+
+            if (\is_scalar($value) && \is_scalar($before) && (string) $value === (string) $before) {
+                continue; // the copy keeps the source's value — nothing is written
+            }
+
+            // null sets the column to NULL here; to the guard null means "not
+            // sent", so it is handed over as the empty value it writes.
+            $written[$column] = $value ?? '';
         }
 
-        $overridesArr = $this->normaliseOverrides($overrides);
+        if (($denied = $this->guard->ensureCan($table, 'create', null, $newData, $written)) !== null) {
+            return $denied;
+        }
 
         try {
             $tree = $this->duplicator->duplicate(
@@ -232,6 +293,115 @@ final class Tool
             'copied' => $tree['copied'],
             'tree' => $tree['children'],
         ];
+    }
+
+    /**
+     * Holds overrides to the rules the regular write tools apply.
+     *
+     * They used to go into the INSERT with one question asked — does the table
+     * have that column. The v1.33.0 report used exactly that as a workaround:
+     * content_update refused rsce_data and sectionHeadline, a duplicate with
+     * overrides wrote both without a check. One route blocking what another
+     * lets through raw is not a validation, it is two.
+     *
+     *   - id, pid, ptable are refused on every table. A copy gets a new id,
+     *     and its parent is into_pid / into_ptable — the parent the permission
+     *     check above looks at. An override landed the copy somewhere else,
+     *     after that check.
+     *   - On the type-driven tables — tl_content, tl_module, tl_form_field —
+     *     overrides take exactly what the table's *_update tool takes for the
+     *     copy's type (on tl_content also for its NEW parent, so sectionHeadline
+     *     when copying into an accordion), and extension columns such as
+     *     rsce_data go through their provider: validated, merged into the
+     *     source's value, stored in the provider's form.
+     *
+     * Values stay in stored form otherwise ("Serialised columns must be passed
+     * as their stored string"): that is the documented contract of overrides,
+     * and existing calls rely on it.
+     *
+     * @param array<string, mixed> $source
+     * @param array<string, mixed> $overrides
+     *
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function checkedOverrides(string $table, array $source, int $intoPid, ?string $intoPtable, array $overrides): array
+    {
+        foreach (['id', 'pid', 'ptable'] as $column) {
+            if (\array_key_exists($column, $overrides)) {
+                throw new \InvalidArgumentException($column === 'id'
+                    ? 'overrides: "id" cannot be set — a copy always gets a new id. Nothing was copied.'
+                    : sprintf('overrides: "%s" cannot be set — the parent of the copy is into_pid / into_ptable, and that is where it is permission-checked. Nothing was copied.', $column));
+            }
+        }
+
+        if (!isset(self::TYPE_DRIVEN[$table]) || $overrides === []) {
+            return $overrides;
+        }
+
+        [$modelClass, $typesTool] = self::TYPE_DRIVEN[$table];
+        $keys = array_map(strval(...), array_keys($overrides));
+        $type = (string) ($overrides['type'] ?? $source['type'] ?? '');
+
+        $known = match ($table) {
+            'tl_content' => $this->contentMapper->allKnownTypes(),
+            'tl_module' => $this->moduleMapper->allKnownTypes(),
+            default => $this->formFieldMapper->listTypes(),
+        };
+        if (!\in_array($type, $known, true)) {
+            throw new \InvalidArgumentException(sprintf('overrides: unknown type "%s" — see %s. Nothing was copied.', $type, $typesTool));
+        }
+
+        $rejected = match ($table) {
+            'tl_content' => $this->contentMapper->rejectedFields(
+                $type,
+                $keys,
+                $this->contentMapper->parentTypeOf((string) ($intoPtable ?? $source['ptable'] ?? ''), $intoPid),
+            ),
+            'tl_module' => $this->moduleMapper->rejectedFields($type, $keys),
+            default => $this->formFieldMapper->rejectedFields($type, $keys),
+        };
+        if ($rejected !== []) {
+            throw new \InvalidArgumentException('overrides: '.self::sentences($rejected).' Nothing was copied.');
+        }
+
+        $owned = array_intersect_key($overrides, array_flip($this->providerFields->declaredFor($table)));
+        if ($owned === []) {
+            return $overrides;
+        }
+
+        // The provider works on a model; a throwaway one carrying the source
+        // row gives it the value to merge into, and is never saved.
+        $probe = new $modelClass();
+        $probe->setRow($source);
+        $probe->type = $type;
+
+        $result = $this->providerFields->apply($table, $probe, $owned, false, $type);
+        if ($result['errors'] !== []) {
+            throw new \InvalidArgumentException('overrides: '.self::sentences($result['errors']).' Nothing was copied.');
+        }
+
+        foreach ($result['applied'] as $field) {
+            $overrides[$field] = $probe->$field;
+        }
+
+        return $overrides;
+    }
+
+    /**
+     * The refusals as one text, each ending like a sentence — the mappers'
+     * messages end in a field list, and "…, rsce_data Nothing was copied."
+     * reads as one broken sentence.
+     *
+     * @param array<array-key, string> $messages
+     */
+    private static function sentences(array $messages): string
+    {
+        return implode(' ', array_map(
+            static fn (string $message): string => rtrim($message, '. ').'.',
+            array_values(array_unique($messages)),
+        ));
     }
 
     /**

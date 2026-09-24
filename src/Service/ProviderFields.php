@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Service;
 
 use Contao\Model;
+use Netzhirsch\ContaoMcpBundle\Tool\Contract\FieldProvider;
 
 /**
  * The extension-field plumbing every table-specific FieldMapper needs.
@@ -44,6 +45,69 @@ final class ProviderFields
     }
 
     /**
+     * The provider fields that can actually be written on this type: declared
+     * by an INSTALLED extension whose provider allows them here.
+     *
+     * declaredFor() answers "is this key known at all" and includes missing
+     * extensions on purpose, so the write path can name them. A palette answer
+     * built from it would offer `rsce_data` on a text element — a column only
+     * an RSCE type has.
+     *
+     * $type is null for tables without a type concept; every declared field
+     * of an available provider counts there, as the gate in apply() is skipped.
+     *
+     * @return list<string>
+     */
+    public function allowedFor(string $table, ?string $type): array
+    {
+        $fields = [];
+        foreach ($this->registry->availableForTable($table) as $provider) {
+            $declared = $provider->getDeclaredFields();
+            $fields = array_merge(
+                $fields,
+                $type === null ? $declared : array_intersect($declared, $provider->getAllowedFields($type)),
+            );
+        }
+
+        return array_values(array_unique($fields));
+    }
+
+    /**
+     * What apply() would refuse for these keys, without applying anything.
+     *
+     * A batch tool has to know before its first write — content_create_tree
+     * checks every node up front, entity_duplicate every override — and it
+     * has to say it in the same words, or the same mistake reads differently
+     * depending on which tool made it.
+     *
+     * @param list<string> $keys
+     *
+     * @return array<string, string> field => message (one message may cover several fields)
+     */
+    public function refusals(string $table, array $keys, ?string $type = null): array
+    {
+        $out = [];
+
+        foreach ($this->registry->forTable($table) as $provider) {
+            $claims = array_values(array_intersect($keys, $provider->getDeclaredFields()));
+            if ($claims === []) {
+                continue;
+            }
+
+            $refusal = $this->gate($provider, $claims, $type);
+            if ($refusal === null) {
+                continue;
+            }
+
+            foreach ($refusal[1] as $field) {
+                $out[$field] ??= $refusal[0];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Reads provider-owned columns for the MCP response. Only available
      * providers contribute — a field whose extension is gone would otherwise
      * report a value nothing can write back.
@@ -80,41 +144,15 @@ final class ProviderFields
         $errors = [];
 
         foreach ($this->registry->forTable($table) as $provider) {
-            $claims = array_intersect(array_keys($input), $provider->getDeclaredFields());
+            $claims = array_values(array_intersect(array_keys($input), $provider->getDeclaredFields()));
             if ($claims === []) {
                 continue;
             }
 
-            if (!$provider->isAvailable()) {
-                $errors[] = sprintf(
-                    'Field(s) %s require the %s extension, which is not installed in this Contao project.',
-                    implode(', ', $claims),
-                    $provider->getRequiredExtension(),
-                );
+            $refusal = $this->gate($provider, $claims, $type);
+            if ($refusal !== null) {
+                $errors[] = $refusal[0];
                 continue;
-            }
-
-            // The per-type gate the contract promises. It used to be honoured
-            // only by the page mapper, so a provider that filtered correctly in
-            // getAllowedFields() still had its apply() called on every type
-            // here — and a provider that trusted the contract instead of
-            // re-checking wrote to the wrong record. Silently: no error, a
-            // value in the wrong place. Reported by the bootstrap bundle,
-            // whose fields span several component types.
-            //
-            // $type is null for tables that have no type concept (tl_theme,
-            // tl_layout); there is nothing to gate on there.
-            if ($type !== null) {
-                $wrongType = array_values(array_diff($claims, $provider->getAllowedFields($type)));
-                if ($wrongType !== []) {
-                    $errors[] = sprintf(
-                        'Field(s) %s are provided by %s but are not valid for type "%s".',
-                        implode(', ', $wrongType),
-                        $provider->getRequiredExtension(),
-                        $type,
-                    );
-                    continue;
-                }
             }
 
             try {
@@ -129,5 +167,55 @@ final class ProviderFields
         }
 
         return ['applied' => $applied, 'errors' => $errors];
+    }
+
+    /**
+     * Why a provider may not take these fields here, or null when it may.
+     *
+     * The per-type half is the gate the contract promises. It used to be
+     * honoured only by the page mapper, so a provider that filtered correctly
+     * in getAllowedFields() still had its apply() called on every type — and a
+     * provider that trusted the contract instead of re-checking wrote to the
+     * wrong record. Silently: no error, a value in the wrong place. Reported by
+     * the bootstrap bundle, whose fields span several component types.
+     *
+     * $type is null for tables that have no type concept (tl_theme,
+     * tl_layout); there is nothing to gate on there.
+     *
+     * @param list<string> $claims the provider's fields present in the input
+     *
+     * @return array{0: string, 1: list<string>}|null the message and the fields it covers
+     */
+    private function gate(FieldProvider $provider, array $claims, ?string $type): ?array
+    {
+        if (!$provider->isAvailable()) {
+            return [
+                sprintf(
+                    'Field(s) %s require the %s extension, which is not installed in this Contao project.',
+                    implode(', ', $claims),
+                    $provider->getRequiredExtension(),
+                ),
+                $claims,
+            ];
+        }
+
+        if ($type === null) {
+            return null;
+        }
+
+        $wrongType = array_values(array_diff($claims, $provider->getAllowedFields($type)));
+        if ($wrongType === []) {
+            return null;
+        }
+
+        return [
+            sprintf(
+                'Field(s) %s are provided by %s but are not valid for type "%s".',
+                implode(', ', $wrongType),
+                $provider->getRequiredExtension(),
+                $type,
+            ),
+            $wrongType,
+        ];
     }
 }

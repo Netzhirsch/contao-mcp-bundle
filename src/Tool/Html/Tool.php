@@ -22,8 +22,10 @@ use PhpMcp\Server\Attributes\McpTool;
  * The consequence is invisible in every answer the MCP server gives. Storing
  * `<input type="checkbox">` and `<label for="…">` reads back verbatim and
  * renders as `<input>` and `<label>`: the two attributes that made the markup
- * work are gone, and nothing anywhere reported it. Storing an inline `<svg>`
- * reads back verbatim and renders as escaped text.
+ * work are gone, and nothing anywhere reported it. (That is Contao up to
+ * 6.0.0; 6.0.1 follows the HTML spec's safe default and drops form elements
+ * altogether.) Storing an inline `<svg>` reads back verbatim and renders as
+ * escaped text.
  *
  * So: `html_filter_info` answers "what is allowed here", and
  * `html_filter_preview` answers "what will this exact markup become" BEFORE it
@@ -94,10 +96,12 @@ final class Tool
             {tag, attribute} pairs (not in allowedAttributes for that tag, nor in the `*`
             entry).
 
-            Typical finds: `type` and `for` are not allowed attributes, so a
-            checkbox-plus-label construction renders as `<input>` and `<label>` and stops
-            working; `svg` and `path` are not allowed tags, so an inline icon renders as
-            escaped text. Both read back from the database unchanged.
+            Typical finds: `role` is not an allowed attribute, so a link with
+            role="button" loses it; up to Contao 6.0.0 `type` and `for` are not allowed
+            either, so a checkbox-plus-label construction renders as `<input>` and
+            `<label>` and stops working, and from 6.0.1 on form elements are not allowed
+            tags at all. `svg` and `path` are not allowed tags, so an inline icon renders
+            as escaped text. All of these read back from the database unchanged.
 
             If the markup has to survive as written, use the `unfiltered_html` content
             element or module type instead of widening the site-wide settings.

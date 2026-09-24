@@ -39,6 +39,14 @@ System-Einstellungen.
   Backend** — kein Pairing-Fenster, keine geöffnete Registrierung. Wer
   registrieren will, kann es weiterhin: im Default-Modus `restricted`
   ausschließlich im 15-Minuten-Pairing-Fenster.
+- **Rechte-Parität**: Die Rechte des Backend-Benutzers gelten für die KI 1:1,
+  durchgesetzt über Contaos eigene Voter statt nachgebaut. Ein Feld zu
+  schreiben braucht zusätzlich sein Feldrecht („Erlaubte Felder" in der
+  Benutzergruppe), wo Contao es verlangt. Seit Contao 5 ist das jedes Feld mit
+  Eingabe, sofern das DCA es nicht mit `exclude => false` freigibt. Ein Wert, der
+  nichts ändert (beim Anlegen der Default, beim Ändern der gespeicherte Wert),
+  braucht kein Recht, wie im Backend. Ebenso `rsce_data`: RSCE schreibt die
+  Spalte über virtuelle Felder, die nie ein Feldrecht verlangen.
 - **Volltextsuche über die Website**: `search_query` durchsucht Contaos
   Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
   oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.
@@ -67,6 +75,11 @@ System-Einstellungen.
   Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
   `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`)
   und **Übersetzen mit DeepL** (`numero2/contao-deepl`, siehe unten).
+- **RockSolid Custom Elements**: RSCE-Elemente (`rsce_*`) lassen sich als
+  Inhaltselement, Frontend-Modul und Formularfeld anlegen **und** konfigurieren.
+  `rsce_data` wird gegen die
+  `rsce_*_config.php` geprüft, in das Gespeicherte gemergt und so abgelegt, wie
+  es das Backend ablegt (siehe unten).
 - **Author-Pass-Through**: Writes laufen unter dem echten OAuth-User in
   `tl_log` + `tl_version`.
 - **Löschungen sind rückholbar**: Was die KI löscht, landet inklusive
@@ -265,11 +278,18 @@ ab. Auf Contao 5 ist das Flag überflüssig.
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
 
-Geht ~200 Asserts gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
-Newsletter/Comments/Theme/Layout/Templates/Maintenance + External-ID +
-Audit-Regressions + Key-Rotation + Rate-Limit + MCP-Activity-Log),
-erstellt eigene Testdaten, räumt am Ende wieder auf. Soll grün
-durchlaufen.
+Geht rund 500 Asserts gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
+Newsletter/Comments/Theme/Layout/Templates/Maintenance + Content-Baum +
+Rechte-Parität + External-ID + Audit-Regressions + Key-Rotation + Rate-Limit +
+MCP-Activity-Log), erstellt eigene Testdaten, räumt am Ende wieder auf. Soll
+grün durchlaufen.
+
+Auf einer **frischen Installation** (keine Root-Seite, kein Administrator oder
+keine Datei) legt der Test die fehlenden Fixtures für die Dauer des Laufs an:
+einen Seitenbaum mit Artikel, einen Administrator mit zufälligem, nie
+angezeigtem Passwort und eine Datei. Danach entfernt er sie wieder, auch wenn
+ein Abschnitt abbricht. So laufen in CI dieselben Abschnitte wie auf einer
+gepflegten Installation. `--keep` lässt auch die Fixtures stehen.
 
 Zusätzlich gibt es eine isolierte PHPUnit-Suite (`vendor/bin/phpunit`)
 für OAuth-Crypto-Edge-Cases (dual-key Rotation, IAT single-use,
@@ -503,6 +523,15 @@ erzeugt (`headline` bei News, `question` bei FAQs) und folgt einem `overrides`,
 das die Kopie umbenennt. Name und Titel macht das Werkzeug **nicht** eindeutig —
 dafür ist `overrides` da.
 
+`overrides` ist kein Rohzugang: `id`, `pid` und `ptable` sind gesperrt (der
+Elternteil ist `into_pid`/`into_ptable`, dort wird er auch geprüft), und die
+Feldrechte des Kontos gelten wie auf den `*_update`-Tools. Auf `tl_content`,
+`tl_module` und `tl_form_field` nehmen Overrides genau die Felder, die das
+`*_update`-Tool der Tabelle für den Typ der Kopie nimmt, auf `tl_content` auch
+für ihren **neuen** Elternteil. `rsce_data` wird dabei in die Einstellungen der
+Quelle gemergt. So entsteht aus einem vorbereiteten RSCE-Element eine Kopie mit
+anderer Button-URL.
+
 `tl_user` und `tl_member` sind bewusst nicht dabei: Contaos Kopieren-Knopf
 landet dort in der Bearbeitungsmaske, damit ein Mensch Benutzername und E-Mail
 eindeutig macht, bevor gespeichert wird.
@@ -545,17 +574,65 @@ abgelehnt; dafür ist `page_update` zuständig.
 übersetzen und danach einen **leeren** Alias an `page_update` schicken — Contao
 erzeugt ihn dann über den Slug-Service aus dem neuen Titel neu.
 
+## RockSolid Custom Elements (RSCE)
+
+Ein RSCE-Element speichert seine ganze Einstellung (Raster, Button-URL,
+Hintergrund) in **einer** JSON-Spalte, `rsce_data`. RSCE meldet jedes Element als
+Inhaltselement, Frontend-Modul und Formularfeld an, sofern die Config `types`
+nicht einschränkt, und führt die Spalte in `tl_content`, `tl_module` und
+`tl_form_field`. Palette und Felder baut RSCE erst in der Bearbeitungsmaske auf.
+Mit installiertem `madeyourday/contao-rocksolid-custom-elements` schreiben
+`content_create`, `content_update`, `content_create_tree`, `module_create`,
+`module_update`, `form_field_create`, `form_field_update` und die Overrides von
+`entity_duplicate` diese Spalte trotzdem auf allen `rsce_*`-Typen:
+
+```
+content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", "bgColor": null}})
+module_create(theme_id: 1, type: "rsce_teaser", name: "Teaser Startseite", fields: {"rsce_data": {"grid": "grid3Col"}})
+```
+
+- **Gemergt, nicht ersetzt.** Ein gesendeter Schlüssel wird ersetzt, `null`
+  entfernt einen, alles Nicht-Genannte bleibt. Eine Liste (`inputType: list`) wird
+  als Ganzes ersetzt.
+- **Geprüft.** Einen Schlüssel, den der Typ laut `rsce_*_config.php` nicht hat,
+  lehnt das Tool ab und nennt dabei die vorhandenen. Ebenso einen Wert, den ein
+  Select-, Radio- oder Checkbox-Feld mit festen Optionen nicht anbietet, wie im
+  Backend. Was schon gespeichert ist, geht auch dann durch, wenn die Config es
+  nicht mehr kennt. Optionen aus `options_callback` oder `foreignKey` entstehen
+  erst beim Bearbeiten und werden nicht geprüft.
+- **Gespeichert wie vom Backend.** Werte-Listen werden serialisiert, Dateien als
+  UUID abgelegt (die Hex-Form aus `content_get` wird umgerechnet),
+  `true`/`false` wird zu `"1"`/`""`, Datumsfelder werden zum Timestamp (ISO 8601
+  wird umgerechnet).
+
+`content_palette_get`, `module_palette_get` und `form_field_palette_get` listen
+für einen `rsce_*`-Typ unter `rsce_data` jeden Schlüssel mit Eingabetyp, Optionen
+und erwartetem Wertformat. In `fields` stehen die regulären Spalten, die die
+Bearbeitungsmaske des Typs in dieser Tabelle zeigt: beim Inhaltselement etwa
+`headline`, Bild und `customTpl`, beim Modul Name, `headline` und `customTpl`,
+beim Formularfeld `text`, CSS-Klasse und `customTpl`. Die Config liest RSCE
+selbst, Theme-Ordner und Twig-Templates werden also aufgelöst wie im Backend.
+
 ## Wie Tools Fehler melden
 
 Ein Tool, das nicht tun kann, was es soll, gibt ein strukturiertes Ergebnis
 zurück statt einer Ausnahme — mit `error`, einer `message` im Klartext und,
-wo es hilft, der Liste des Erlaubten. Zwei Fälle, die man kennen sollte:
+wo es hilft, der Liste des Erlaubten. Drei Fälle, die man kennen sollte:
 
 **Ein Feld, das der Datensatztyp nicht hat**, wird abgelehnt und nennt den Typ:
 
 ```
 Field "gibtsNicht" is not valid for content type "text".
 Use content_palette_get("text") to see allowed fields. Currently allowed: pid, ptable, …
+```
+
+**Ein Feld, das vom Elternelement kommt**, gilt nur dort. Contao legt
+`sectionHeadline` (den Titel eines Akkordeon-Abschnitts) nur Elementen **in**
+einem Akkordeon in die Palette. `content_palette_get` nennt solche Felder unter
+`context_fields`, und außerhalb sagt die Ablehnung, wo das Feld gilt:
+
+```
+Field "sectionHeadline" only exists on an element inside an element of type "accordion" — …
 ```
 
 **Ein Parameter, den das Tool nicht hat**, ebenso — mit Vorschlag bei einem

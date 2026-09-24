@@ -331,7 +331,7 @@ Fünf Tools für die Arbeit an einer ganzen Site — Settings ändern, Insert-Ta
   - **Kaskade automatisch** (DCA `ctable`): Artikel → Inhaltselemente (inkl. verschachtelte), Container-CE → Kinder, Seite → Artikel (+ deren Inhalt).
   - `with_children=true` (nur `tl_page`) kopiert zusätzlich den ganzen **Unterseiten-Baum**.
   - `into_pid`/`into_ptable`: neues Elternziel (Default: gleiche Eltern → Kopie an Ort und Stelle).
-  - `overrides`: Felder, die auf der **obersten** Kopie gesetzt werden (z. B. `{"title": "…"}`).
+  - `overrides`: Felder, die auf der **obersten** Kopie gesetzt werden (z. B. `{"title": "…"}`). `id`, `pid` und `ptable` sind gesperrt, der Elternteil ist `into_pid`/`into_ptable`. Auf `tl_content`, `tl_module` und `tl_form_field` gelten dieselben Felder wie beim `*_update`-Tool der Tabelle (Typ der Kopie, auf `tl_content` zusätzlich der neue Elternteil), und `rsce_data` wird in die Einstellungen der Quelle gemergt. Feldrechte gelten wie auf den `*_update`-Tools.
   - **Wie der Backend-Copy:** `doNotCopy`-Felder werden nicht übernommen, der **Alias wird neu generiert** (eindeutig, via Slug), die **External-ID-Spalten auf NULL** zurückgesetzt, die Kopie ans Sortier-Ende gehängt. Eine duplizierte **Root-Seite** bekommt `fallback`+`dns` geleert (Eindeutigkeit) — danach via `page_update` setzen.
   - **Rechte-Parität:** Quelle lesbar **und** Ziel beschreibbar (gleiche Voter/Pagemount-Scope wie die CRUD-Tools). Versions-Snapshot + tl_log für den primären Datensatz.
 

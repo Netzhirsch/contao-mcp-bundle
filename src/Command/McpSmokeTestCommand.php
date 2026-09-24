@@ -145,6 +145,186 @@ final class McpSmokeTestCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $keep = (bool) $input->getOption('keep');
+        $fixtures = $this->seedFreshInstall($output);
+
+        try {
+            return $this->runChecks($input, $output);
+        } finally {
+            // Also when a section throws: a fixture page left behind on a real
+            // install would be a page nobody created.
+            $this->removeFixtures($fixtures, $output, $keep);
+        }
+    }
+
+    /**
+     * What a fresh installation lacks for the smoke test to reach all of its
+     * sections: a page tree, an administrator, an article with two elements
+     * (sorting), a news archive whose jumpTo points at the page (the delete
+     * guard) and one file in the upload folder (the fileTree fields).
+     *
+     * CI starts every run on an empty database. Without these, the content
+     * tree, the permission parity checks, sorting and the fileTree fields
+     * skipped themselves and still counted as a pass — among them the checks
+     * that would have shown the field rights doing nothing. Created only where
+     * there is none and removed afterwards; an installation with pages, an
+     * admin and files is not touched.
+     *
+     * @return array{pages: list<int>, users: list<int>, news_archives: list<int>, files: list<string>}
+     */
+    private function seedFreshInstall(OutputInterface $output): array
+    {
+        $seeded = ['pages' => [], 'users' => [], 'news_archives' => [], 'files' => []];
+        $suffix = dechex(random_int(0, 0xFFFFFF));
+
+        if ((int) $this->connection->fetchOne("SELECT COUNT(*) FROM tl_page WHERE type = 'root'") === 0) {
+            $this->connection->insert('tl_page', [
+                'pid' => 0, 'sorting' => 128, 'tstamp' => time(), 'title' => 'MCP smoke root',
+                'alias' => 'mcp-smoke-root-'.$suffix, 'type' => 'root', 'published' => 1,
+                'fallback' => 1, 'language' => 'en',
+            ]);
+            $rootId = (int) $this->connection->lastInsertId();
+            $seeded['pages'][] = $rootId;
+
+            $this->connection->insert('tl_page', [
+                'pid' => $rootId, 'sorting' => 128, 'tstamp' => time(), 'title' => 'MCP smoke page',
+                'alias' => 'mcp-smoke-page-'.$suffix, 'type' => 'regular', 'published' => 1,
+            ]);
+            $pageId = (int) $this->connection->lastInsertId();
+
+            $this->connection->insert('tl_article', [
+                'pid' => $pageId, 'sorting' => 128, 'tstamp' => time(), 'title' => 'MCP smoke article',
+                'alias' => 'mcp-smoke-article-'.$suffix, 'inColumn' => 'main', 'published' => 1,
+            ]);
+            $articleId = (int) $this->connection->lastInsertId();
+
+            foreach ([128, 256] as $sorting) {
+                $this->connection->insert('tl_content', [
+                    'pid' => $articleId, 'ptable' => 'tl_article', 'sorting' => $sorting, 'tstamp' => time(),
+                    'type' => 'text', 'text' => '<p>MCP smoke</p>',
+                ]);
+            }
+
+            if ($this->connection->createSchemaManager()->tablesExist(['tl_news_archive'])) {
+                $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => 'MCP smoke archive', 'jumpTo' => $pageId]);
+                $seeded['news_archives'][] = (int) $this->connection->lastInsertId();
+            }
+        }
+
+        if ((int) $this->connection->fetchOne("SELECT COUNT(*) FROM tl_files WHERE type = 'file'") === 0) {
+            // A 1×1 PNG, registered in the DBAFS the way a sync would.
+            $path = 'files/mcp-smoke-'.$suffix.'.png';
+            $absolute = $this->projectDir.'/'.$path;
+            $png = (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', true);
+
+            // Shaped like the version-1 UUIDs the DBAFS creates — Contao's
+            // Validator accepts nothing else, and the file tools ask it.
+            $uuid = random_bytes(16);
+            $uuid[6] = \chr((\ord($uuid[6]) & 0x0F) | 0x10);
+            $uuid[8] = \chr((\ord($uuid[8]) & 0x3F) | 0x80);
+
+            if (is_dir(\dirname($absolute)) && file_put_contents($absolute, $png) !== false) {
+                $this->connection->insert('tl_files', [
+                    'tstamp' => time(), 'uuid' => $uuid, 'type' => 'file', 'path' => $path,
+                    'extension' => 'png', 'hash' => md5($png), 'found' => 1, 'name' => basename($path),
+                ]);
+                $seeded['files'][] = $path;
+            }
+        }
+
+        if ((int) $this->connection->fetchOne('SELECT COUNT(*) FROM tl_user WHERE admin = 1') === 0) {
+            // Nobody logs in with it: the password is random and never shown.
+            $this->connection->insert('tl_user', [
+                'tstamp' => time(), 'username' => 'mcp-smoke-admin-'.$suffix, 'name' => 'MCP smoke admin',
+                'email' => 'mcp-smoke-admin-'.$suffix.'@example.invalid', 'language' => 'en',
+                'password' => password_hash(bin2hex(random_bytes(32)), \PASSWORD_DEFAULT),
+                'admin' => 1, 'disable' => 0, 'dateAdded' => time(),
+            ]);
+            $seeded['users'][] = (int) $this->connection->lastInsertId();
+        }
+
+        $what = array_filter([
+            $seeded['pages'] !== [] ? 'a page tree with an article' : null,
+            $seeded['news_archives'] !== [] ? 'a news archive' : null,
+            $seeded['users'] !== [] ? 'an administrator' : null,
+            $seeded['files'] !== [] ? 'a file' : null,
+        ]);
+        if ($what !== []) {
+            $output->writeln(sprintf(
+                "<comment>Fresh installation:</comment> seeded %s for this run — removed again at the end.\n",
+                implode(', ', $what),
+            ));
+        }
+
+        return $seeded;
+    }
+
+    /**
+     * @param array{pages: list<int>, users: list<int>, news_archives: list<int>, files: list<string>} $fixtures
+     */
+    private function removeFixtures(array $fixtures, OutputInterface $output, bool $keep): void
+    {
+        if ($fixtures === ['pages' => [], 'users' => [], 'news_archives' => [], 'files' => []]) {
+            return;
+        }
+
+        if ($keep) {
+            $output->writeln('<info>--keep was passed — the seeded fixtures stay as well.</info>');
+
+            return;
+        }
+
+        foreach ($fixtures['news_archives'] as $archiveId) {
+            $this->connection->executeStatement('DELETE FROM tl_news WHERE pid = ?', [$archiveId]);
+            $this->connection->delete('tl_news_archive', ['id' => $archiveId]);
+        }
+
+        foreach ($fixtures['files'] as $path) {
+            $this->connection->delete('tl_files', ['path' => $path]);
+            if (is_file($this->projectDir.'/'.$path)) {
+                unlink($this->projectDir.'/'.$path);
+            }
+        }
+
+        // The whole tree below the seeded root, with whatever a section left
+        // on it: a forgotten article must not keep the fixture alive.
+        $pages = $fixtures['pages'];
+        for ($level = $pages; $level !== [];) {
+            $level = array_map('intval', $this->connection->fetchFirstColumn(
+                'SELECT id FROM tl_page WHERE pid IN ('.implode(',', $level).')',
+            ));
+            $pages = [...$pages, ...$level];
+        }
+
+        if ($pages !== []) {
+            $in = implode(',', $pages);
+            $articles = array_map('intval', $this->connection->fetchFirstColumn("SELECT id FROM tl_article WHERE pid IN ({$in})"));
+
+            for ($parents = $articles, $ptable = 'tl_article'; $parents !== []; $ptable = 'tl_content') {
+                $children = array_map('intval', $this->connection->fetchFirstColumn(
+                    'SELECT id FROM tl_content WHERE ptable = ? AND pid IN ('.implode(',', $parents).')',
+                    [$ptable],
+                ));
+                $this->connection->executeStatement(
+                    'DELETE FROM tl_content WHERE ptable = ? AND pid IN ('.implode(',', $parents).')',
+                    [$ptable],
+                );
+                $parents = $children;
+            }
+
+            $this->connection->executeStatement("DELETE FROM tl_article WHERE pid IN ({$in})");
+            $this->connection->executeStatement("DELETE FROM tl_page WHERE id IN ({$in})");
+        }
+
+        foreach ($fixtures['users'] as $userId) {
+            $this->connection->delete('tl_user', ['id' => $userId]);
+        }
+
+        $output->writeln('  removed the seeded fixtures');
+    }
+
+    private function runChecks(InputInterface $input, OutputInterface $output): int
+    {
+        $keep = (bool) $input->getOption('keep');
         $stamp = 'mcp_smoke_'.dechex(random_int(0, 0xFFFFFF));
 
         // Contao\Versions reads from request_stack->getCurrentRequest()->server
@@ -334,6 +514,14 @@ final class McpSmokeTestCommand extends Command
         $textFieldId = (int) ($textFieldResult['id'] ?? 0);
         if ($textFieldId > 0) {
             $created['form_field'][] = $textFieldId;
+
+            // RSCE keeps rsce_data on tl_form_field too. With or without RSCE,
+            // a text field refuses it by naming the extension, which shows the
+            // form-field provider is wired.
+            $expect('rsce_data on a text form field names the extension',
+                $this->formFieldTool->update($textFieldId, ['rsce_data' => '{}']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
         }
 
         // Create a select field with options
@@ -1966,6 +2154,73 @@ final class McpSmokeTestCommand extends Command
                     ['denial' => $this->permissionGuard->ensureCan('tl_page', 'read', 1)],
                     fn ($r) => \is_array($r['denial']) && ($r['denial']['error'] ?? null) === 'permission_denied');
 
+                // (d4) Field rights, decided the way Contao decides them. Since
+                // Contao 5.0 every field with an input is excluded unless the
+                // DCA opts out, and the core DCAs no longer set the key — the
+                // guard read `exclude ?? false` and so checked no core field.
+                // An editor with the article module, a page of their own and
+                // the field right to `text` only; Contao's real voters decide.
+                $parentPageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type = 'regular' ORDER BY id LIMIT 1");
+                if ($parentPageId > 0) {
+                    $this->connection->insert('tl_user_group', [
+                        'tstamp' => time(),
+                        'name' => $stamp.'_fieldgroup',
+                        'modules' => serialize(['article']),
+                        'pagemounts' => serialize([$parentPageId]),
+                        'alexf' => serialize(['tl_content::text']),
+                        'elements' => serialize(['text', 'headline']),
+                        'netzhirschMcpAccess' => 1,
+                    ]);
+                    $fieldGroupId = (int) $this->connection->lastInsertId();
+
+                    $row['username'] = $stamp.'_fielduser';
+                    $row['email'] = $stamp.'_fields@example.invalid';
+                    $row['disable'] = 0;
+                    $row['inherit'] = 'group';
+                    $row['groups'] = serialize([$fieldGroupId]);
+                    $quotedField = [];
+                    foreach ($row as $col => $val) {
+                        $quotedField[$this->connection->quoteIdentifier((string) $col)] = $val;
+                    }
+                    $this->connection->insert('tl_user', $quotedField);
+                    $fieldUserId = (int) $this->connection->lastInsertId();
+
+                    // A page the editor owns (so its article rights are theirs),
+                    // with one article on it.
+                    $this->connection->insert('tl_page', [
+                        'pid' => $parentPageId, 'sorting' => 99999, 'tstamp' => time(), 'title' => $stamp.'_fieldpage',
+                        'alias' => $stamp.'-fieldpage', 'type' => 'regular', 'published' => 1,
+                        'includeChmod' => 1, 'cuser' => $fieldUserId, 'chmod' => serialize(['u1', 'u2', 'u3', 'u4', 'u5', 'u6']),
+                    ]);
+                    $fieldPageId = (int) $this->connection->lastInsertId();
+                    $this->connection->insert('tl_article', [
+                        'pid' => $fieldPageId, 'sorting' => 128, 'tstamp' => time(), 'title' => $stamp.'_fieldarticle',
+                        'alias' => $stamp.'-fieldarticle', 'inColumn' => 'main', 'published' => 1,
+                    ]);
+                    $fieldArticleId = (int) $this->connection->lastInsertId();
+
+                    $this->mcpCallContext->setIdentity($fieldUserId, 'smoke-fields', null, null);
+                    $inArticle = ['ptable' => 'tl_article', 'pid' => $fieldArticleId];
+
+                    $expect('an editor may write what their form shows (text, default type)',
+                        $this->permissionGuard->ensureCan('tl_content', 'create', null, $inArticle + ['type' => 'text', 'text' => '<p>x</p>']),
+                        fn ($r) => $r === null);
+                    $expect('but not a field their group does not allow',
+                        $this->permissionGuard->ensureCan('tl_content', 'create', null, $inArticle + ['type' => 'text', 'headline' => 'x']),
+                        fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), '"headline"'));
+                    $expect('nor another element type without the right to the type field',
+                        $this->permissionGuard->ensureCan('tl_content', 'create', null, $inArticle + ['type' => 'headline']),
+                        fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), '"type"'));
+                    $expect('and content_create_tree refuses that node before writing anything',
+                        $this->contentTool->createTree('tl_article', $fieldArticleId, [
+                            ['type' => 'text', 'fields' => ['text' => '<p>x</p>']],
+                            ['type' => 'text', 'fields' => ['text' => '<p>x</p>', 'headline' => 'x']],
+                        ]),
+                        fn ($r) => ($r['error'] ?? '') === 'permission_denied' && ($r['problems'][0]['path'] ?? '') === '2');
+                } else {
+                    $output->writeln('  <fg=yellow>⊝ no regular page — skipping the field-rights checks</>');
+                }
+
                 // (e) Trusted mode (auth_mode=none → no identity) allows everything.
                 $this->mcpCallContext->clear();
                 $expect('trusted mode (no identity) allows page create', $this->permissionGuard->ensureCan('tl_page', 'create', null, ['title' => 'x']), fn ($r) => $r === null);
@@ -1976,6 +2231,19 @@ final class McpSmokeTestCommand extends Command
                 }
                 if (($disabledUserId ?? 0) > 0) {
                     $this->connection->delete('tl_user', ['id' => $disabledUserId]);
+                }
+                if (($fieldArticleId ?? 0) > 0) {
+                    $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $fieldArticleId]);
+                    $this->connection->delete('tl_article', ['id' => $fieldArticleId]);
+                }
+                if (($fieldPageId ?? 0) > 0) {
+                    $this->connection->delete('tl_page', ['id' => $fieldPageId]);
+                }
+                if (($fieldUserId ?? 0) > 0) {
+                    $this->connection->delete('tl_user', ['id' => $fieldUserId]);
+                }
+                if (($fieldGroupId ?? 0) > 0) {
+                    $this->connection->delete('tl_user_group', ['id' => $fieldGroupId]);
                 }
             }
         } else {
@@ -3463,6 +3731,107 @@ final class McpSmokeTestCommand extends Command
                 $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$dupId]);
             }
 
+            // ── fields from the parent, one rule for every write route ─────
+            //
+            // Reported against v1.33.0: sectionHeadline — the title of an
+            // accordion section — was refused on the children of an accordion,
+            // because Contao adds it to their palette from the PARENT
+            // (AccordionListener, config.onpalette). The only way around was
+            // entity_duplicate, whose overrides wrote any column unchecked.
+            $output->writeln("\n<comment>Felder vom Elternelement (Akkordeon) + einheitliche Regeln</comment>");
+
+            $accordionTree = $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                ['type' => 'accordion', 'sorting' => 1024, 'children' => [
+                    ['type' => 'text', 'fields' => ['text' => '<p>Antwort eins</p>', 'sectionHeadline' => ['value' => 'Frage eins', 'unit' => 'h3']]],
+                    ['type' => 'text', 'fields' => ['text' => '<p>Antwort zwei</p>', 'sectionHeadline' => 'Frage zwei']],
+                ]],
+            ]);
+            $expect('an accordion is built with titled sections in one call', $accordionTree,
+                static fn ($r) => ($r['created'] ?? 0) === 3 && ($r['failed'] ?? 1) === 0);
+
+            $accordionId = 0;
+            $sectionIds = [];
+            foreach ($accordionTree['elements'] ?? [] as $element) {
+                if (($element['type'] ?? '') === 'accordion') {
+                    $accordionId = (int) $element['id'];
+                } elseif (isset($element['id'])) {
+                    $sectionIds[] = (int) $element['id'];
+                }
+            }
+
+            $expect('the section title reads back as {value, unit}',
+                $sectionIds !== [] ? $this->contentTool->get($sectionIds[0], ['sectionHeadline']) : [],
+                static fn ($r) => ($r['sectionHeadline'] ?? null) === ['value' => 'Frage eins', 'unit' => 'h3']);
+
+            $expect('changing only the title keeps its heading level',
+                $sectionIds !== [] ? $this->contentTool->update($sectionIds[0], ['sectionHeadline' => ['value' => 'Frage eins, neu']]) : [],
+                static fn ($r) => ($r['sectionHeadline'] ?? null) === ['value' => 'Frage eins, neu', 'unit' => 'h3']);
+
+            $expect('outside an accordion the refusal names the accordion',
+                $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                    ['type' => 'element_group', 'children' => [
+                        ['type' => 'text', 'fields' => ['text' => '<p>x</p>', 'sectionHeadline' => 'Titel']],
+                    ]],
+                ]),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && ($r['problems'][0]['path'] ?? '') === '1.1'
+                    && str_contains((string) ($r['problems'][0]['error'] ?? ''), '"accordion"'));
+
+            // Values are checked before the first write too, not only names.
+            $expect('a bad value in a nested node stops the tree before anything exists',
+                $this->contentTool->createTree('tl_article', $ctreeArticleId, [
+                    ['type' => 'text', 'fields' => ['text' => '<p>ok</p>']],
+                    ['type' => 'element_group', 'children' => [
+                        ['type' => 'image', 'fields' => ['singleSRC' => 'not-a-uuid']],
+                    ]],
+                ]),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && ($r['problems'][0]['path'] ?? '') === '2.1'
+                    && str_contains((string) ($r['problems'][0]['error'] ?? ''), 'singleSRC'));
+            $expect('and nothing was created by the refused trees',
+                (int) $this->connection->fetchOne(
+                    'SELECT COUNT(*) FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]),
+                static fn (int $n) => $n === 4);
+
+            $expect('content_palette_get says which fields come from the parent',
+                $this->contentTool->paletteGet('text'),
+                static fn ($r) => str_contains((string) ($r['context_fields']['sectionHeadline'] ?? ''), 'accordion')
+                    && !\in_array('sectionHeadline', $r['fields'] ?? [], true)
+                    && !\in_array('rsce_data', $r['fields'] ?? [], true));
+
+            // With or without RSCE installed, a text element refuses rsce_data
+            // by naming the extension ("not installed" or "not valid for type
+            // text") — which shows the provider is wired: an unclaimed column
+            // would be refused as unknown.
+            $expect('rsce_data on a text element names the extension',
+                $sectionIds !== [] ? $this->contentTool->update($sectionIds[0], ['rsce_data' => '{"grid":"grid3Col"}']) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
+
+            // entity_duplicate: the same fields as content_update, no raw path.
+            $expect('an override cannot move the copy past the permission check',
+                $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0], overrides: (object) ['pid' => $ctreeArticleId]) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), 'into_pid'));
+            $expect('an override the type does not have is refused like on content_update',
+                $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0], overrides: (object) ['linkTitle' => 'x']) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), 'linkTitle'));
+            $expect('copied out of the accordion, the section title is refused',
+                $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0], into_pid: $ctreeArticleId,
+                    into_ptable: 'tl_article', overrides: (object) ['sectionHeadline' => 'x']) : [],
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), '"accordion"'));
+
+            $sectionCopy = $sectionIds !== [] ? $this->duplicateTool->duplicate('tl_content', $sectionIds[0],
+                overrides: (object) ['sectionHeadline' => serialize(['value' => 'Frage drei', 'unit' => 'h3'])]) : [];
+            $expect('copied within the accordion, it is accepted', $sectionCopy,
+                static fn ($r) => ($r['duplicated'] ?? false) === true);
+            $expect('and lands in the copy',
+                isset($sectionCopy['new_id']) ? $this->contentTool->get((int) $sectionCopy['new_id'], ['sectionHeadline']) : [],
+                static fn ($r) => ($r['sectionHeadline']['value'] ?? '') === 'Frage drei');
+
+            if ($accordionId > 0) {
+                $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $accordionId]);
+            }
+
             $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_content', $groupId]);
             $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $ctreeArticleId]);
             $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$ctreeArticleId]);
@@ -3500,6 +3869,23 @@ final class McpSmokeTestCommand extends Command
                 static fn (array $r) => $r[0] !== [] && $r[0] === $r[1]);
             $expect('and the override named the copy', $copyRow['name'] ?? null,
                 static fn ($v) => $v === $stamp.'_mod_kopie');
+
+            // Module overrides follow module_update's rules now: a column of
+            // another module type is refused before anything is copied.
+            $expect('a module override the type does not have is refused like on module_update',
+                $this->duplicateTool->duplicate('tl_module', $srcModuleId, overrides: (object) ['html' => '<b>x</b>']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), '"html"'));
+
+            // RSCE keeps rsce_data on tl_module as well. With or without RSCE,
+            // a navigation module refuses it by naming the extension, which
+            // shows the module provider is wired.
+            $expect('rsce_data on a navigation module names the extension',
+                $this->moduleTool->update($srcModuleId, ['rsce_data' => '{"grid":"grid3Col"}']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'madeyourday/contao-rocksolid-custom-elements'));
+            $expect('and module_palette_get does not offer it on a navigation module',
+                $this->moduleTool->paletteGet('navigation'),
+                static fn ($r) => ($r['known'] ?? false) === true && !\in_array('rsce_data', $r['fields'] ?? [], true));
 
             $this->connection->executeStatement(
                 'DELETE FROM tl_module WHERE id IN ('.implode(',', array_filter([$srcModuleId, $modCopyId])).')');
@@ -3999,19 +4385,26 @@ final class McpSmokeTestCommand extends Command
                 && \in_array('a', $r['allowed_tags'] ?? [], true)
                 && \in_array('href', $r['allowed_attributes']['a'] ?? [], true));
 
-        // The exact case that killed the mobile burger: both tags are allowed,
-        // both attributes are not, and the read-back showed neither.
-        $burger = $this->htmlTool->filterPreview(
-            '<input type="checkbox" id="nav-toggle"><label for="nav-toggle">Menu</label>',
+        // The failure that killed the mobile burger: the tag stays, the
+        // attribute that made it work goes, and the read-back shows neither.
+        // The burger itself (<input type> + <label for>) no longer shows it
+        // everywhere: Contao 6.0.1 follows the HTML spec's safe default and
+        // drops form elements as a whole. A link with role="button" and an
+        // image with fetchpriority are filtered the same on every supported
+        // version.
+        $dropped = $this->htmlTool->filterPreview(
+            '<a href="#nav" id="nav-toggle" role="button">Menu</a><img src="files/menu.png" alt="" fetchpriority="high">',
         );
-        $expect('a dropped attribute is named with its tag', $burger,
+        $expect('a dropped attribute is named with its tag', $dropped,
             static fn ($r) => ($r['changed'] ?? false) === true
-                && \in_array(['tag' => 'input', 'attribute' => 'type'], $r['removed_attributes'] ?? [], true)
-                && \in_array(['tag' => 'label', 'attribute' => 'for'], $r['removed_attributes'] ?? [], true));
-        $expect('and the output shows what actually renders', $burger,
-            static fn ($r) => !str_contains((string) $r['output'], 'type=')
-                && !str_contains((string) $r['output'], 'for=')
-                && str_contains((string) $r['output'], 'id='));
+                && ($r['removed_tags'] ?? ['x']) === []
+                && \in_array(['tag' => 'a', 'attribute' => 'role'], $r['removed_attributes'] ?? [], true)
+                && \in_array(['tag' => 'img', 'attribute' => 'fetchpriority'], $r['removed_attributes'] ?? [], true));
+        $expect('and the output shows what actually renders', $dropped,
+            static fn ($r) => !str_contains((string) $r['output'], 'role=')
+                && !str_contains((string) $r['output'], 'fetchpriority=')
+                && str_contains((string) $r['output'], 'id=')
+                && str_contains((string) $r['output'], 'href='));
 
         $expect('a dropped tag is reported as a tag, not as its attributes',
             $this->htmlTool->filterPreview('<svg viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>'),

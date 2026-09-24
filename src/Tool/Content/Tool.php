@@ -14,6 +14,7 @@ use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
+use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
@@ -49,6 +50,7 @@ final class Tool
         private readonly Serializer $serializer,
         private readonly Connection $connection,
         private readonly McpPermissionGuard $guard,
+        private readonly RsceElements $rsce,
     ) {
     }
 
@@ -233,6 +235,10 @@ final class Tool
               - space:  object {top, bottom}
               - invisible / start / stop: the standard publish gate
               - customTpl:  template name from templates_list("ce_")
+              - sectionHeadline: same shape as headline — the section title of an element
+                            INSIDE an accordion (ptable="tl_content", pid=<accordion id>)
+              - rsce_data:  RockSolid Custom Elements (rsce_* types) — a JSON object with the
+                            element's settings; content_palette_get(type) lists its keys
 
             Wraps in a Versions snapshot and writes to tl_log.
         DESC,
@@ -293,7 +299,7 @@ final class Tool
      */
     #[McpTool(
         name: 'content_update',
-        description: 'Updates fields of a content element. Pass id; everything else goes in `fields` (JSON object validated against the type\'s palette). Pass type= inside fields to switch the element to another type (the palette of the new type is used for validation). Versions snapshot + tl_log.',
+        description: 'Updates fields of a content element. Pass id; everything else goes in `fields` (JSON object validated against the type\'s palette and the element\'s parent). Pass type= inside fields to switch the element to another type (the palette of the new type is used for validation). On RSCE elements rsce_data is merged into what is stored: send only the keys to change, null removes one. Versions snapshot + tl_log.',
     )]
     /**
      * @param object|null $fields tl_content columns to change as a JSON object. Pass type= here to switch element type. Use content_palette_get(type) for allowed keys.
@@ -456,10 +462,13 @@ final class Tool
             Why: every separate tool call costs a full framework boot on top of the actual
             work, plus a round-trip. A twelve-block page is one call instead of twelve.
 
-            Everything checkable is checked BEFORE the first write — unknown types, unknown
-            field keys per type, malformed nodes — and reported for the whole tree with
-            nothing created. Runtime failures can still happen mid-run: that node is
-            reported with its error and its children are skipped, siblings continue. There
+            Everything checkable is checked BEFORE the first write — unknown types, field
+            keys and values per node (the same rules content_create applies, including
+            fields a node gets from its container, e.g. sectionHeadline for the children of
+            an accordion node), your backend permissions per node, malformed nodes — and
+            reported for the whole tree with nothing created. Runtime failures can still
+            happen mid-run: that node is reported with its error and its children are
+            skipped, siblings continue. There
             is no transaction and no bulk undo; every element carries its own version entry,
             so a partial result stays as it is and the per-node ids let a retry pick up
             instead of duplicating.
@@ -481,7 +490,7 @@ final class Tool
 
         $problems = [];
         $count = 0;
-        $this->validateElementNodes($elements, '', $problems, $count);
+        $this->validateElementNodes($elements, '', $problems, $count, $this->mapper->parentTypeOf($ptable, $pid));
 
         if ($count > self::MAX_TREE_ELEMENTS) {
             return [
@@ -497,6 +506,17 @@ final class Tool
                 'error' => 'invalid_input',
                 'message' => 'The tree was rejected before anything was created.',
                 'problems' => $problems,
+            ];
+        }
+
+        $denials = [];
+        $this->checkElementPermissions($elements, '', $ptable, $pid, $denials);
+
+        if ($denials !== []) {
+            return [
+                'error' => 'permission_denied',
+                'message' => 'The tree was rejected before anything was created: your backend account may not create every one of these elements.',
+                'problems' => $denials,
             ];
         }
 
@@ -516,8 +536,9 @@ final class Tool
     /**
      * @param array<int, mixed>          $nodes
      * @param list<array<string, mixed>> $problems
+     * @param string|null                $parentType type of the element these nodes go into (null: article, news, …)
      */
-    private function validateElementNodes(array $nodes, string $path, array &$problems, int &$count): void
+    private function validateElementNodes(array $nodes, string $path, array &$problems, int &$count, ?string $parentType): void
     {
         foreach ($nodes as $i => $node) {
             $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
@@ -543,21 +564,24 @@ final class Tool
                 $type = null;
             }
 
-            // Field keys are checked per type up front. They would be rejected
-            // at write time anyway, but by then the earlier siblings exist and
-            // the caller has half a page to clean up.
+            // Fields are checked per node up front, by the same mapper and in
+            // the same words as content_create — names first (every bad one),
+            // then values on a throwaway element. They would be refused at
+            // write time anyway, but by then the earlier siblings exist and the
+            // caller has half a page to clean up. The node's parent is its
+            // container in THIS tree: a child of an accordion node may carry
+            // sectionHeadline although the accordion does not exist yet.
             $fields = $node['fields'] ?? null;
-            if ($fields !== null && (!\is_array($fields) || array_is_list($fields))) {
+            if ($fields !== null && (!\is_array($fields) || ($fields !== [] && array_is_list($fields)))) {
                 $problems[] = ['path' => $here, 'error' => '`fields` must be a JSON object'];
             } elseif (\is_array($fields) && $type !== null) {
-                $allowed = $this->mapper->allowedFieldsFor($type);
-                foreach (array_keys($fields) as $field) {
-                    if (!\in_array($field, $allowed, true)) {
-                        $problems[] = [
-                            'path' => $here,
-                            'error' => sprintf('"%s" is not a field of content type "%s" — see content_palette_get("%s")', $field, $type, $type),
-                        ];
-                    }
+                $rejected = $this->mapper->rejectedFields($type, array_map(strval(...), array_keys($fields)), $parentType);
+                foreach ($rejected as $field => $message) {
+                    $problems[] = ['path' => $here, 'field' => $field, 'error' => $message];
+                }
+
+                if ($rejected === [] && ($refusal = $this->mapper->check($type, $fields, $parentType)) !== null) {
+                    $problems[] = ['path' => $here, 'error' => $refusal];
                 }
             }
 
@@ -567,7 +591,49 @@ final class Tool
                 continue;
             }
             if (\is_array($children) && $children !== []) {
-                $this->validateElementNodes($children, $here, $problems, $count);
+                $this->validateElementNodes($children, $here, $problems, $count, $type);
+            }
+        }
+    }
+
+    /**
+     * Permission parity with content_create, node by node.
+     *
+     * The enforcer checks the tree call once, against its parent. It never sees
+     * a node's type or fields — so an element type the backend account may not
+     * use, or an excluded field it may not edit, went through here and nowhere
+     * else. Each node is asked what content_create would have asked: a
+     * top-level node with the tree's parent, a nested node by type and fields
+     * (its container is created by the same call, inside the parent the top
+     * level was checked against).
+     *
+     * Not memoised by type and field names: whether a field counts as written
+     * depends on its value (sending a field's default is no write), so two
+     * nodes with the same keys can get different answers.
+     *
+     * @param array<int, mixed>          $nodes
+     * @param list<array<string, mixed>> $denials
+     */
+    private function checkElementPermissions(array $nodes, string $path, ?string $ptable, ?int $pid, array &$denials): void
+    {
+        foreach ($nodes as $i => $node) {
+            $here = $path === '' ? (string) ($i + 1) : $path.'.'.($i + 1);
+            $type = (string) $node['type'];
+            $fields = \is_array($node['fields'] ?? null) ? $node['fields'] : [];
+
+            $denied = $this->guard->ensureCan(
+                'tl_content',
+                'create',
+                null,
+                ($ptable === null ? [] : ['ptable' => $ptable, 'pid' => $pid]) + ['type' => $type] + $fields,
+            );
+
+            if ($denied !== null) {
+                $denials[] = ['path' => $here, 'type' => $type, 'error' => (string) ($denied['message'] ?? 'permission_denied')];
+            }
+
+            if (\is_array($node['children'] ?? null) && $node['children'] !== []) {
+                $this->checkElementPermissions($node['children'], $here, null, null, $denials);
             }
         }
     }
@@ -678,32 +744,33 @@ final class Tool
         name: 'content_palette_get',
         description: 'Returns the list of fields valid for a given content type (built from the live tl_content DCA palette + always-allowed core fields).'
             .' Sub-palette children are listed only when their toggle is part of the palette of THIS type — Contao keeps one wide table per DCA, so a column existing on the row does not mean the type has it.'
-            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.',
+            .' `subpalettes` maps each toggle to the fields it opens; a toggle and its children may be set in the same call.'
+            .' `context_fields` are fields an element gets from its PARENT rather than its type (sectionHeadline inside an accordion).'
+            .' For RockSolid Custom Elements (rsce_* types) `rsce_data` describes the JSON column that holds the element\'s settings, with every key the type defines.',
     )]
     public function paletteGet(string $type): array
     {
         try {
             $fields = $this->mapper->allowedFieldsFor($type);
+            $hasPalette = $this->mapper->hasPalette($type);
         } catch (\Throwable $e) {
             return ['error' => 'load_failed', 'message' => $e->getMessage()];
         }
 
-        if ($fields === FieldMapper::COMMON_FIELDS) {
-            // Two very different situations produce the same short field list,
-            // and answering both with "call content_types_list" sends a caller
-            // in a circle when the type is listed there: unknown type, versus a
-            // registered type whose palette is assembled at edit time.
-            $known = \in_array($type, $this->mapper->allKnownTypes(), true);
+        // Two very different situations produce the same short field list,
+        // and answering both with "call content_types_list" sends a caller in a
+        // circle when the type is listed there: unknown type, versus a
+        // registered type whose palette is assembled at edit time.
+        if (!\in_array($type, $this->mapper->allKnownTypes(), true)) {
+            return [
+                'type' => $type,
+                'known' => false,
+                'message' => sprintf('Type "%s" is not registered in this installation — call content_types_list for the types that exist.', $type),
+                'fields' => $fields,
+            ];
+        }
 
-            if (!$known) {
-                return [
-                    'type' => $type,
-                    'known' => false,
-                    'message' => sprintf('Type "%s" is not registered in this installation — call content_types_list for the types that exist.', $type),
-                    'fields' => $fields,
-                ];
-            }
-
+        if (!$hasPalette && array_diff($fields, FieldMapper::COMMON_FIELDS) === []) {
             return [
                 'type' => $type,
                 'known' => true,
@@ -720,13 +787,33 @@ final class Tool
             ];
         }
 
-        return [
+        $result = [
             'type' => $type,
             'known' => true,
             'fields' => $fields,
             'count' => \count($fields),
             'subpalettes' => $this->mapper->subpalettesFor($type),
         ];
+
+        // Answered per type, a palette never shows what the PARENT adds. Said
+        // here, the first refusal of sectionHeadline is not where a caller
+        // learns that it exists.
+        $context = $this->mapper->contextFields();
+        if ($context !== []) {
+            $result['context_fields'] = array_map(
+                static fn (string $parent): string => sprintf(
+                    'only on an element inside an element of type "%1$s" (ptable "tl_content", pid = the %1$s element)',
+                    $parent,
+                ),
+                $context,
+            );
+        }
+
+        if ($this->rsce->handles($type)) {
+            $result['rsce_data'] = $this->rsce->describe($type);
+        }
+
+        return $result;
     }
 
     // ───────────────────────── private helpers ──────────────────────

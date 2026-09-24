@@ -39,8 +39,13 @@ URL rewrites, form leads, maintenance and system settings.
   want it: in the default `restricted` mode only while the 15-minute pairing
   window is open.
 - **Permission parity**: every backend user's rights apply to the AI 1:1 —
-  enforced through Contao's own voters, not reimplemented. Writing a DCA field
-  marked `excluded` additionally requires the `alexf` right for that field.
+  enforced through Contao's own voters, not reimplemented. Writing a field
+  additionally requires its `alexf` right ("allowed fields" in the user group)
+  wherever Contao requires it — since Contao 5 that is every field with an input
+  unless its DCA opts out with `exclude => false`. A value that changes nothing
+  (a default on create, the stored value on update) needs no right, just as in
+  the backend. Neither does `rsce_data`: RSCE writes the column through virtual
+  fields that never ask for a field right.
 - **Full-text site search**: `search_query` queries Contao's own search index
   (`tl_search`), so it also finds text produced by modules, includes or
   extensions that the CRUD tools cannot see. Protected pages are always excluded;
@@ -69,6 +74,11 @@ URL rewrites, form leads, maintenance and system settings.
   newsletter, comments, `url_rewrite_*` (terminal42), — read-only —
   `leads_list` + `lead_get` for form submissions (`terminal42/contao-leads`),
   and **DeepL translation** (`numero2/contao-deepl`, see below).
+- **RockSolid Custom Elements**: RSCE elements (`rsce_*`) can be created **and**
+  configured as content elements, frontend modules and form fields. `rsce_data`
+  is checked against the
+  `rsce_*_config.php`, merged into what is stored and saved the way the backend
+  saves it (see below).
 - **Author pass-through**: writes are recorded under the real OAuth user in
   `tl_log` and `tl_version`, with a distinct log source so AI actions can be told
   apart from manual ones.
@@ -634,6 +644,15 @@ not 1970), the alias is regenerated from the right field (`headline` for news,
 `question` for FAQs) and follows an `overrides` that renames the copy. Names and
 titles are **not** made unique — that is what `overrides` is for.
 
+`overrides` is not a raw path around the checks. `id`, `pid` and `ptable` are
+refused, because the parent is `into_pid`/`into_ptable` and that is where it is
+checked. The account's field permissions apply as they do on the `*_update`
+tools. On `tl_content`, `tl_module` and `tl_form_field`, overrides take exactly
+the fields the table's `*_update` tool takes for the copy's type, on `tl_content`
+also for its **new** parent, and `rsce_data` is merged into the source's
+settings. That is how a prepared RSCE element becomes a copy with a
+different button URL.
+
 `tl_user` and `tl_member` are deliberately absent: Contao's copy button lands
 you in the edit mask there, so a human can make the username and e-mail unique
 before anything is saved.
@@ -675,17 +694,65 @@ refused here; `page_update` owns that one.
 first and then send an **empty** alias to `page_update` — Contao regenerates it
 from the new title through the Slug service.
 
+## RockSolid Custom Elements (RSCE)
+
+An RSCE element keeps its whole configuration (grid, button URL, background) in
+**one** JSON column, `rsce_data`. RSCE registers every element as a content
+element, a frontend module and a form field unless its config restricts `types`,
+and keeps the column in `tl_content`, `tl_module` and `tl_form_field`. It only
+builds the palette and the fields in the edit mask. With
+`madeyourday/contao-rocksolid-custom-elements` installed, `content_create`,
+`content_update`, `content_create_tree`, `module_create`, `module_update`,
+`form_field_create`, `form_field_update` and the overrides of `entity_duplicate`
+still write that column on every `rsce_*` type:
+
+```
+content_update(id: 812, fields: {"rsce_data": {"buttonUrl": "{{link_url::12}}", "bgColor": null}})
+module_create(theme_id: 1, type: "rsce_teaser", name: "Home teaser", fields: {"rsce_data": {"grid": "grid3Col"}})
+```
+
+- **Merged, not replaced.** A key you send replaces that key, `null` removes
+  one, and everything you leave out stays. A list (`inputType: list`) is replaced
+  as a whole.
+- **Checked.** A key the type does not have according to its `rsce_*_config.php`
+  is refused, and the message names the ones it has. So is a value a select,
+  radio or checkbox field with fixed options does not offer, as in the backend.
+  What is already stored passes even when the config no longer knows it.
+  Options from an `options_callback` or `foreignKey` only exist at edit time and
+  are not checked.
+- **Stored the way the backend stores it.** Lists of values are serialised,
+  files become UUIDs (the hex form `content_get` prints is converted),
+  `true`/`false` becomes `"1"`/`""`, and date fields become timestamps (ISO 8601
+  is converted).
+
+For an `rsce_*` type, `content_palette_get`, `module_palette_get` and
+`form_field_palette_get` list every key under `rsce_data`, with input type,
+options and the expected value format. `fields` holds the regular columns the
+type's edit mask shows in that table: `headline`, image and `customTpl` on a
+content element, name, `headline` and `customTpl` on a module, `text`, CSS class
+and `customTpl` on a form field. RSCE reads the config itself, so theme folders
+and Twig templates resolve as they do in the backend.
+
 ## How tools report errors
 
 A tool that cannot do what it was asked returns a structured result rather than
 throwing — with `error`, a plain-language `message` and, where it helps, the
-list of what is allowed. Two cases worth knowing:
+list of what is allowed. Three cases worth knowing:
 
 **A field the record type does not have** is refused, naming the type:
 
 ```
 Field "gibtsNicht" is not valid for content type "text".
 Use content_palette_get("text") to see allowed fields. Currently allowed: pid, ptable, …
+```
+
+**A field that comes from the parent element** only applies there. Contao adds
+`sectionHeadline` (the title of an accordion section) only to the palette of
+elements **inside** an accordion. `content_palette_get` lists such fields under
+`context_fields`, and anywhere else the refusal says where the field applies:
+
+```
+Field "sectionHeadline" only exists on an element inside an element of type "accordion" — …
 ```
 
 **A parameter the tool does not have** likewise — with a suggestion on a typo
@@ -756,6 +823,13 @@ part of it. It belongs before every release tag:
 ```bash
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
+
+On a **fresh installation** (no root page, no administrator or no file) it
+seeds the missing fixtures for the duration of the run: a page tree with an
+article, an administrator with a random password that is never shown, and a
+file. It removes them again afterwards, also when a section aborts, so CI runs
+the same sections as a maintained installation. `--keep` leaves the fixtures in
+place as well.
 
 Release order: `composer verify` → smoke test → commit → push → **wait for CI to
 go green** → only then tag.
