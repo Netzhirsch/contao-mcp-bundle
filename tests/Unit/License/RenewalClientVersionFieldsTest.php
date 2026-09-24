@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\License;
 
+use Composer\InstalledVersions;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\License\LicenseStore;
 use Netzhirsch\ContaoMcpBundle\License\RenewalClient;
+use Netzhirsch\ContaoMcpBundle\License\VersionString;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -83,9 +85,9 @@ final class RenewalClientVersionFieldsTest extends TestCase
 
         foreach ($captured as [$url, $body]) {
             self::assertIsArray($body, $url);
-            self::assertArrayHasKey('bundle_version', $body, $url);
-            self::assertArrayHasKey('contao_version', $body, $url);
-            self::assertArrayHasKey('php_version', $body, $url);
+            foreach (self::sendableFields() as $field) {
+                self::assertArrayHasKey($field, $body, $url);
+            }
 
             // …and the original body survives. `+=` exists so that a later
             // rewrite of post() cannot displace product or token.
@@ -123,9 +125,29 @@ final class RenewalClientVersionFieldsTest extends TestCase
         /** @var array<string, string> $result */
         $result = $fields->invoke($client);
 
-        self::assertSame(
-            ['bundle_version', 'contao_version', 'php_version'],
-            array_keys($result),
-        );
+        self::assertSame(self::sendableFields(), array_keys($result));
+    }
+
+    /**
+     * The three fields, minus bundle_version where this checkout cannot send it.
+     *
+     * When the bundle's own tests run, the bundle is the root package, and its
+     * version is whatever Composer guessed from the checkout: `dev-master` on
+     * master, `dev-feature/x` on a branch with a slash. The slash is outside
+     * the server's rules, so the field is left out, as described above. That
+     * is the behaviour under test, not a failure. Which branch CI runs on must
+     * not decide these tests. The other two fields are always sendable here.
+     *
+     * @return list<string>
+     */
+    private static function sendableFields(): array
+    {
+        $bundle = InstalledVersions::isInstalled('netzhirsch/contao-mcp-bundle')
+            ? (string) InstalledVersions::getPrettyVersion('netzhirsch/contao-mcp-bundle')
+            : 'dev';
+
+        return VersionString::sanitise($bundle) === ''
+            ? ['contao_version', 'php_version']
+            : ['bundle_version', 'contao_version', 'php_version'];
     }
 }
