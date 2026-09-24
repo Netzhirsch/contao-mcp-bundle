@@ -6,11 +6,14 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.34.0] – 2026-09-24
+
 > Aus [#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2):
-> RSCE-Elemente und Akkordeons lassen sich jetzt über die Content-Tools bauen,
-> und alle Schreibwege prüfen nach denselben Regeln. Das heißt auch: Der
-> bisherige Umweg über `entity_duplicate` mit rohen Overrides nimmt nur noch,
-> was `content_update` nimmt.
+> RSCE-Elemente und Akkordeons lassen sich jetzt über die MCP-Tools bauen,
+> als Inhaltselement, Frontend-Modul und Formularfeld, und alle Schreibwege
+> prüfen nach denselben Regeln. Das heißt auch: Der bisherige Umweg über
+> `entity_duplicate` mit rohen Overrides nimmt nur noch, was das
+> `*_update`-Tool der Tabelle nimmt.
 >
 > **Vor dem Update prüfen, wer eingeschränkte MCP-Zugänge hat:** Feldrechte
 > werden jetzt so geprüft wie im Backend. Eine Redakteursgruppe braucht für
