@@ -66,14 +66,7 @@ jobs:
       - name: Cache composer downloads
         uses: actions/cache@v5
         with:
-          # Only the downloaded archives, never composer's package METADATA.
-          # A restored metadata cache once resolved doctrine/dbal 4.5.0 although
-          # contao/conflicts excludes >=4.5.0 — Contao knows that release breaks
-          # contao:migrate. The run failed on SQL Contao itself had generated
-          # (ALTER TABLE tl_message_queue ENGINE = , with no engine), and the same
-          # commit had been green days earlier. Archives are safe to keep: they
-          # are content-addressed. Metadata is not.
-          path: ~/.cache/composer/files
+          path: ~/.cache/composer
           key: composer-phpstan-${{ hashFiles('composer.json') }}
           restore-keys: |
             composer-phpstan-
@@ -122,14 +115,7 @@ jobs:
       - name: Cache composer downloads
         uses: actions/cache@v5
         with:
-          # Only the downloaded archives, never composer's package METADATA.
-          # A restored metadata cache once resolved doctrine/dbal 4.5.0 although
-          # contao/conflicts excludes >=4.5.0 — Contao knows that release breaks
-          # contao:migrate. The run failed on SQL Contao itself had generated
-          # (ALTER TABLE tl_message_queue ENGINE = , with no engine), and the same
-          # commit had been green days earlier. Archives are safe to keep: they
-          # are content-addressed. Metadata is not.
-          path: ~/.cache/composer/files
+          path: ~/.cache/composer
           key: composer-phpunit-${{ hashFiles('composer.json') }}
           restore-keys: |
             composer-phpunit-
@@ -221,14 +207,7 @@ jobs:
       - name: Cache composer downloads
         uses: actions/cache@v5
         with:
-          # Only the downloaded archives, never composer's package METADATA.
-          # A restored metadata cache once resolved doctrine/dbal 4.5.0 although
-          # contao/conflicts excludes >=4.5.0 — Contao knows that release breaks
-          # contao:migrate. The run failed on SQL Contao itself had generated
-          # (ALTER TABLE tl_message_queue ENGINE = , with no engine), and the same
-          # commit had been green days earlier. Archives are safe to keep: they
-          # are content-addressed. Metadata is not.
-          path: ~/.cache/composer/files
+          path: ~/.cache/composer
           key: composer-${{ matrix.php }}-${{ matrix.contao }}-${{ hashFiles('bundle/composer.json') }}
           restore-keys: |
             composer-${{ matrix.php }}-${{ matrix.contao }}-
@@ -252,11 +231,21 @@ jobs:
           # would have brought along. Everything after this point is identical
           # for both legs, which is the point: the bundle must not be able to
           # tell how the app around it was built.
+          # contao/conflicts is what a Managed Edition pulls in, and it is the
+          # only thing stopping Composer from picking a release Contao knows is
+          # broken. Hand-writing composer.json left it out, so this leg installed
+          # doctrine/dbal 4.5.0 — excluded by contao/conflicts as >=4.5.0 — and
+          # contao:migrate then emitted "ALTER TABLE tl_message_queue ENGINE = "
+          # with no engine and died. The 5.x leg never saw it because
+          # create-project brings the guard along.
           if [[ "${{ matrix.contao }}" == ^6* ]]; then
               mkdir -p app && cd app
               cat > composer.json <<JSON
           {
-              "require": { "contao/manager-bundle": "${{ matrix.contao }}" },
+              "require": {
+                  "contao/manager-bundle": "${{ matrix.contao }}",
+                  "contao/conflicts": "@dev"
+              },
               "extra": { "contao-component-dir": "assets" },
               "scripts": {
                   "post-install-cmd": ["@php vendor/bin/contao-setup"],
