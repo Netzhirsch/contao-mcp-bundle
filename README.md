@@ -411,6 +411,55 @@ MCP_PREVIEW_BASIC_AUTH="user:pass"
 Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
 `.env.local`, nie in der Antwort oder im Log.
 
+## Dateien hochladen
+
+Für kleine Dateien genügt `file_upload` mit `content_base64`. Oberhalb von rund
+50 KB bricht das: Der MCP-Transport kürzt lange Base64-Zeichenketten. Bisher
+blieb nur `source_url` — der Server holt die Datei selbst —, und das setzt
+voraus, dass sie auf einem öffentlich erreichbaren Host liegt. Für etwas, das
+ein Client gerade erst erzeugt hat, ist das keine Option.
+
+Dafür gibt es den gechunkten Weg:
+
+```
+file_upload_begin(parent_path, name, total_size_bytes, overwrite?, meta?, sha256?)
+  → { upload_id, chunk_size_recommended, next_sequence }
+
+file_upload_chunk(upload_id, sequence, content_base64)   ← mehrfach, in Reihenfolge
+  → { received_bytes, remaining_bytes, next_sequence, complete }
+
+file_upload_finish(upload_id)
+  → wie file_upload
+
+file_upload_abort(upload_id)
+```
+
+**Wichtig beim Zerlegen:** die **rohen Bytes** in Scheiben schneiden und jede
+Scheibe einzeln base64-kodieren. Nicht die ganze Datei kodieren und dann die
+Base64-Zeichenkette zerschneiden.
+
+Was wann geprüft wird:
+
+| Zeitpunkt | Prüfung |
+|---|---|
+| `begin` | Zielordner, Dateiname, Endung gegen `tl_settings.uploadTypes`, angekündigte Größe gegen `maxFileSize`, `meta` |
+| jeder `chunk` | Reihenfolge (lückenlos, genau einmal), laufende Summe ≤ angekündigte Größe |
+| `finish` | Summe stimmt, `sha256` stimmt, **Magic Bytes gegen die Endung**, aktives Markup, Überschreiben |
+
+Die Inhaltsprüfung sitzt bewusst am Ende: Ein einzelner Chunk sagt nichts über
+die Datei aus, in der er landet. Eine `.png`, die in Wahrheit HTML ist, fliegt
+deshalb erst beim Abschluss auf — aber sie fliegt auf, und geschrieben wird
+nichts.
+
+Die Zwischenablage liegt unter `var/mcp/uploads/<id>/`, Verzeichnis `0700`,
+Dateien `0600`, außerhalb des Web-Roots. Eine Sitzung gehört dem Backend-Benutzer,
+der sie geöffnet hat, und verfällt nach einer Stunde; beim nächsten `begin`
+werden abgelaufene Reste entfernt. Ein eigener Cron ist dafür nicht nötig.
+
+Schlägt `finish` fehl, weil etwas am Ziel nicht stimmt — Datei existiert bereits,
+Ordner verschwunden —, **bleibt die Sitzung bestehen**, damit nicht alles noch
+einmal übertragen werden muss.
+
 ## OpenGraph & X-Cards
 
 Braucht [`numero2/contao-opengraph3`](https://github.com/numero2/contao-opengraph3)

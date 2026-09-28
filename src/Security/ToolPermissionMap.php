@@ -126,6 +126,16 @@ final class ToolPermissionMap
         'files_search' => ['kind' => 'file', 'op' => 'read'],
         'file_get' => ['kind' => 'file', 'op' => 'read'],
         'file_upload' => ['kind' => 'file', 'op' => 'upload'],
+
+        // The chunked upload is one upload split across calls, so every leg of
+        // it needs the same right the one-shot tool needs — including the abort,
+        // which throws bytes away. Gating only the finish would let anyone
+        // without upload rights park data in var/ and make the owner's transfer
+        // fail on a size or sequence they did not cause.
+        'file_upload_begin' => ['kind' => 'file', 'op' => 'upload'],
+        'file_upload_chunk' => ['kind' => 'file', 'op' => 'upload'],
+        'file_upload_finish' => ['kind' => 'file', 'op' => 'upload'],
+        'file_upload_abort' => ['kind' => 'file', 'op' => 'upload'],
         'file_delete' => ['kind' => 'file', 'op' => 'delete'],
         'file_rename' => ['kind' => 'file', 'op' => 'rename'],
         'file_move' => ['kind' => 'file', 'op' => 'move'],

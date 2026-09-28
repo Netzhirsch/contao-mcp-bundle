@@ -15,6 +15,7 @@ use Contao\Folder as ContaoFolder;
 use Contao\StringUtil;
 use Netzhirsch\ContaoMcpBundle\Security\OutboundUrlGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
+use Netzhirsch\ContaoMcpBundle\Service\McpCallContext;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
@@ -77,6 +78,7 @@ final class Tool
         private readonly string $projectDir,
         private readonly HttpClientInterface $httpClient,
         private readonly OutboundUrlGuard $outboundGuard,
+        private readonly McpCallContext $callContext,
     ) {
     }
 
@@ -482,7 +484,7 @@ final class Tool
      */
     #[McpTool(
         name: 'file_upload',
-        description: 'Uploads a new file. parent_path is the destination folder relative to the upload directory ("" for root). Provide the content EITHER as content_base64 (raw bytes, base-64) OR as source_url (the server pulls the file itself — REQUIRED for files above ~50 KB, since inline base64 is truncated by the MCP transport). source_url must be http/https to a public host (private/loopback/link-local addresses are refused). Validates extension against tl_settings.uploadTypes and size against tl_settings.maxFileSize. Refuses to overwrite by default (pass overwrite=true). meta is an optional {locale: {title, alt, link, caption}} dict. Logged to tl_log.',
+        description: 'Uploads a new file. parent_path is the destination folder relative to the upload directory ("" for root). Provide the content EITHER as content_base64 (raw bytes, base-64) OR as source_url (the server pulls the file itself — REQUIRED for files above ~50 KB, since inline base64 is truncated by the MCP transport). source_url must be http/https to a public host (private/loopback/link-local addresses are refused). If the bytes are yours and there is no URL to give — a file you just produced — use file_upload_begin / file_upload_chunk / file_upload_finish instead; that path has no size ceiling. Validates extension against tl_settings.uploadTypes and size against tl_settings.maxFileSize. Refuses to overwrite by default (pass overwrite=true). meta is an optional {locale: {title, alt, link, caption}} dict. Logged to tl_log.',
     )]
     public function upload(
         string $parent_path,
@@ -540,6 +542,383 @@ final class Tool
                 ];
             }
         }
+
+        return $this->storeBytes($parent_path, $parentAbs, $name, $bytes, $overwrite, $meta);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'file_upload_begin',
+        description: <<<'DESC'
+            Opens a chunked upload, for bytes you hold yourself and cannot put on a
+            public URL. Use this instead of file_upload whenever the file is above
+            ~50 KB: inline base64 is truncated by the transport, and source_url needs
+            a host the server can reach.
+
+            Everything that can be checked before a byte is sent is checked here —
+            destination folder, file name, extension against tl_settings.uploadTypes,
+            the declared size against tl_settings.maxFileSize, and the meta payload.
+            You will not transfer a megabyte only to be told the extension is refused.
+
+            Pass total_size_bytes exactly: the transfer is rejected if the sum of the
+            chunks does not match it. Pass sha256 of the whole file to have the server
+            verify what arrived.
+
+            Returns upload_id, the recommended chunk size and when the session expires.
+            Then call file_upload_chunk in order, then file_upload_finish.
+            DESC,
+    )]
+    public function uploadBegin(
+        string $parent_path,
+        string $name,
+        int $total_size_bytes,
+        bool $overwrite = false,
+        #[Schema(type: 'object', additionalProperties: self::META_ITEM_SCHEMA, description: 'Localised file metadata: {locale: {title, alt, link, caption}}.')] mixed $meta = null,
+        ?string $sha256 = null,
+    ): array {
+        $this->framework->initialize();
+
+        try {
+            $parentAbs = $this->paths->resolveAbsolute($parent_path);
+        } catch (\InvalidArgumentException $e) {
+            return ['error' => 'invalid_path', 'message' => $e->getMessage()];
+        }
+
+        if (!is_dir($parentAbs)) {
+            return ['error' => 'parent_not_found', 'message' => "Parent folder is not a directory: {$parent_path}"];
+        }
+
+        if ($total_size_bytes <= 0) {
+            return ['error' => 'invalid_input', 'message' => 'total_size_bytes must be the exact size of the file in bytes.'];
+        }
+
+        if ($sha256 !== null && preg_match('/^[0-9a-fA-F]{64}$/', $sha256) !== 1) {
+            return ['error' => 'invalid_input', 'message' => 'sha256 must be 64 hex characters, or omitted.'];
+        }
+
+        // Name, extension and size, judged now rather than after the transfer.
+        $validation = $this->makeValidator()->validateUpload($name, $total_size_bytes);
+
+        if (!($validation['ok'] ?? false)) {
+            unset($validation['ok']);
+
+            return $validation;
+        }
+
+        if ($meta !== null) {
+            try {
+                UploadValidator::encodeMeta($meta);
+            } catch (\InvalidArgumentException $e) {
+                return ['error' => 'invalid_meta', 'message' => $e->getMessage()];
+            }
+        }
+
+        $targetRelative = ($parent_path === '' ? '' : trim($parent_path, '/').'/').$name;
+
+        if (file_exists($parentAbs.\DIRECTORY_SEPARATOR.$name) && !$overwrite) {
+            return ['error' => 'file_exists', 'message' => "File already exists: {$targetRelative}. Pass overwrite=true to replace."];
+        }
+
+        $sessions = $this->sessions();
+        $sessions->sweep();
+
+        try {
+            $id = $sessions->create([
+                'parent_path' => $parent_path,
+                'name' => $name,
+                'total_size_bytes' => $total_size_bytes,
+                'overwrite' => $overwrite,
+                'meta' => $meta,
+                'sha256' => $sha256 === null ? null : strtolower($sha256),
+                'user_id' => $this->callContext->getUserId(),
+            ]);
+        } catch (\Throwable $e) {
+            return ToolError::opaque($this->logger, $e, 'upload_begin_failed', ['parent_path' => $parent_path]);
+        }
+
+        return [
+            'upload_id' => $id,
+            'target_path' => $targetRelative,
+            'total_size_bytes' => $total_size_bytes,
+            'chunk_size_recommended' => UploadSessions::CHUNK_SIZE_RECOMMENDED,
+            'expires_in_seconds' => UploadSessions::TTL_SECONDS,
+            'next_sequence' => 0,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'file_upload_chunk',
+        description: <<<'DESC'
+            Sends the next slice of a chunked upload. sequence starts at 0 and must go
+            up by one each call — the answer tells you the next one it expects, so a
+            lost or repeated call is refused instead of silently corrupting the file.
+
+            content_base64 is that slice of the RAW file, base-64 encoded. Do not
+            base64 the whole file and then cut the base64 string: slice the bytes,
+            encode each slice.
+
+            The running total may not exceed the declared total_size_bytes.
+            DESC,
+    )]
+    public function uploadChunk(string $upload_id, int $sequence, string $content_base64): array
+    {
+        $sessions = $this->sessions();
+        $manifest = $sessions->load($upload_id);
+
+        if ($manifest === null) {
+            return [
+                'error' => 'upload_not_found',
+                'message' => 'No open upload with that id — it was never started, already finished, or expired. Start a new one with file_upload_begin.',
+            ];
+        }
+
+        if (($denied = $this->denyForeignSession($manifest)) !== null) {
+            return $denied;
+        }
+
+        $expected = (int) $manifest['next_sequence'];
+
+        if ($sequence !== $expected) {
+            return [
+                'error' => 'out_of_sequence',
+                'message' => sprintf('Expected sequence %d, got %d. Chunks must arrive in order and exactly once.', $expected, $sequence),
+                'next_sequence' => $expected,
+                'received_bytes' => (int) $manifest['received_bytes'],
+            ];
+        }
+
+        $clean = preg_replace('/\s+/', '', $content_base64) ?? $content_base64;
+        $bytes = base64_decode($clean, true);
+
+        if ($bytes === false || $bytes === '') {
+            return [
+                'error' => 'invalid_base64',
+                'message' => 'content_base64 is not valid base64 after whitespace stripping, or decoded to nothing.',
+            ];
+        }
+
+        $total = (int) $manifest['total_size_bytes'];
+        $after = (int) $manifest['received_bytes'] + \strlen($bytes);
+
+        if ($after > $total) {
+            $sessions->discard($upload_id);
+
+            return [
+                'error' => 'size_exceeded',
+                'message' => sprintf(
+                    'The chunks add up to %d bytes, more than the %d declared at begin. The upload was discarded.',
+                    $after,
+                    $total,
+                ),
+            ];
+        }
+
+        try {
+            $manifest = $sessions->append($manifest, $bytes);
+        } catch (\Throwable $e) {
+            return ToolError::opaque($this->logger, $e, 'upload_chunk_failed', ['upload_id' => $upload_id]);
+        }
+
+        return [
+            'accepted' => true,
+            'received_bytes' => (int) $manifest['received_bytes'],
+            'remaining_bytes' => $total - (int) $manifest['received_bytes'],
+            'next_sequence' => (int) $manifest['next_sequence'],
+            'complete' => (int) $manifest['received_bytes'] === $total,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'file_upload_finish',
+        description: <<<'DESC'
+            Completes a chunked upload: checks that the chunks add up to the declared
+            size, verifies sha256 when one was given, and only then runs the same
+            content checks a one-shot file_upload runs — magic bytes against the
+            extension, active markup, the overwrite decision — before the file is
+            written and registered in tl_files.
+
+            Those checks deliberately happen here and not per chunk: a single slice
+            says nothing about the file it ends up in.
+
+            Returns the same shape as file_upload.
+            DESC,
+    )]
+    public function uploadFinish(string $upload_id): array
+    {
+        $this->framework->initialize();
+
+        $sessions = $this->sessions();
+        $manifest = $sessions->load($upload_id);
+
+        if ($manifest === null) {
+            return [
+                'error' => 'upload_not_found',
+                'message' => 'No open upload with that id — it was never started, already finished, or expired.',
+            ];
+        }
+
+        if (($denied = $this->denyForeignSession($manifest)) !== null) {
+            return $denied;
+        }
+
+        $total = (int) $manifest['total_size_bytes'];
+        $received = (int) $manifest['received_bytes'];
+
+        if ($received !== $total) {
+            return [
+                'error' => 'incomplete',
+                'message' => sprintf('%d of %d bytes arrived. Send the rest before finishing.', $received, $total),
+                'received_bytes' => $received,
+                'remaining_bytes' => $total - $received,
+                'next_sequence' => (int) $manifest['next_sequence'],
+            ];
+        }
+
+        $bytes = $sessions->bytes($upload_id);
+
+        if (\strlen($bytes) !== $total) {
+            $sessions->discard($upload_id);
+
+            return [
+                'error' => 'buffer_mismatch',
+                'message' => 'The buffered file does not have the declared size any more. The upload was discarded; start again.',
+            ];
+        }
+
+        $expectedHash = $manifest['sha256'] ?? null;
+
+        if (\is_string($expectedHash) && $expectedHash !== hash('sha256', $bytes)) {
+            $sessions->discard($upload_id);
+
+            return [
+                'error' => 'checksum_mismatch',
+                'message' => 'The assembled file does not match the sha256 given at begin. The upload was discarded; start again.',
+            ];
+        }
+
+        // The folder is resolved again rather than trusted from the manifest:
+        // it may have been renamed or removed while the transfer was running.
+        try {
+            $parentAbs = $this->paths->resolveAbsolute((string) $manifest['parent_path']);
+        } catch (\InvalidArgumentException $e) {
+            $sessions->discard($upload_id);
+
+            return ['error' => 'invalid_path', 'message' => $e->getMessage()];
+        }
+
+        if (!is_dir($parentAbs)) {
+            $sessions->discard($upload_id);
+
+            return [
+                'error' => 'parent_not_found',
+                'message' => sprintf('The destination folder "%s" no longer exists. The upload was discarded.', (string) $manifest['parent_path']),
+            ];
+        }
+
+        $result = $this->storeBytes(
+            (string) $manifest['parent_path'],
+            $parentAbs,
+            (string) $manifest['name'],
+            $bytes,
+            (bool) $manifest['overwrite'],
+            $manifest['meta'] ?? null,
+        );
+
+        // Keep the session when the store refused, so the caller can fix the
+        // cause — an overwrite flag, a folder — without sending everything
+        // again. It expires on its own either way.
+        if (!isset($result['error'])) {
+            $sessions->discard($upload_id);
+        }
+
+        return $result + ['chunked' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[McpTool(
+        name: 'file_upload_abort',
+        description: 'Throws away an unfinished chunked upload and its buffered bytes. Sessions also expire on their own, so this is for tidiness, not for correctness.',
+    )]
+    public function uploadAbort(string $upload_id): array
+    {
+        $sessions = $this->sessions();
+        $manifest = $sessions->load($upload_id);
+
+        if ($manifest === null) {
+            return ['aborted' => false, 'message' => 'No open upload with that id.'];
+        }
+
+        if (($denied = $this->denyForeignSession($manifest)) !== null) {
+            return $denied;
+        }
+
+        $sessions->discard($upload_id);
+
+        return ['aborted' => true, 'upload_id' => $upload_id];
+    }
+
+    /**
+     * An upload belongs to whoever opened it.
+     *
+     * Two connectors can be mid-transfer at the same time, and an id that leaked
+     * into a log must not let one of them finish — or discard — the other's
+     * file. In trusted mode there is no user to compare, and the deployment has
+     * already said it trusts its callers.
+     *
+     * @param array<string, mixed> $manifest
+     *
+     * @return array<string, mixed>|null
+     */
+    private function denyForeignSession(array $manifest): ?array
+    {
+        $owner = $manifest['user_id'] ?? null;
+        $caller = $this->callContext->getUserId();
+
+        if ($owner === null || $caller === null || (int) $owner === $caller) {
+            return null;
+        }
+
+        return [
+            'error' => 'upload_not_found',
+            'message' => 'No open upload with that id — it was never started, already finished, or expired.',
+        ];
+    }
+
+    private function sessions(): UploadSessions
+    {
+        return new UploadSessions($this->projectDir);
+    }
+
+    /**
+     * Validates the finished bytes and puts them on disk.
+     *
+     * Shared by the one-shot upload and the chunked one on purpose: this is
+     * where the extension check, the magic-byte check, the overwrite decision,
+     * the DBAFS entry and the log line live. Two copies of that would be two
+     * places for a check to go missing, and the chunked path is exactly the one
+     * where a missing check would matter most.
+     *
+     * @return array<string, mixed>
+     */
+    private function storeBytes(
+        string $parent_path,
+        string $parentAbs,
+        string $name,
+        string $bytes,
+        bool $overwrite,
+        mixed $meta,
+    ): array {
+        $validator = $this->makeValidator();
 
         $validation = $validator->validateUpload($name, \strlen($bytes));
         if (!($validation['ok'] ?? false)) {
