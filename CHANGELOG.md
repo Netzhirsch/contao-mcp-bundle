@@ -6,6 +6,37 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **Gechunkter Datei-Upload: `file_upload_begin` / `file_upload_chunk` /
+  `file_upload_finish` / `file_upload_abort`.**
+
+  `file_upload` konnte Bytes bisher nur inline als Base64 nehmen — und das
+  bricht oberhalb von rund 50 KB, weil der Transport lange Zeichenketten
+  kürzt. Der Ausweg war `source_url`, also: Die Datei muss schon auf einem
+  öffentlich erreichbaren Host liegen. Für etwas, das ein Client gerade
+  erzeugt hat, gab es damit **gar keinen** Weg.
+
+  Geprüft wird gestaffelt, und zwar bewusst: Endung, Zielordner, angekündigte
+  Größe und `meta` schon bei `begin` — niemand überträgt erst ein Megabyte, um
+  dann zu erfahren, dass die Endung nicht erlaubt ist. Reihenfolge und laufende
+  Summe bei jedem Chunk. **Magic Bytes, aktives Markup, Prüfsumme und die
+  Überschreib-Entscheidung erst beim Abschluss**, weil eine einzelne Scheibe
+  nichts über die Datei aussagt, in der sie landet.
+
+  Der Schreibpfad ist derselbe wie beim einstufigen Upload: Prüfung, Ablage,
+  `tl_files`-Eintrag und `tl_log`-Zeile wurden in eine gemeinsame Methode
+  gezogen, statt sie ein zweites Mal zu schreiben. Zwei Fassungen wären zwei
+  Orte, an denen eine Prüfung fehlen kann — und der gechunkte Weg ist genau
+  der, bei dem das am meisten wehtut.
+
+  Die Zwischenablage liegt unter `var/mcp/uploads/<id>/` (Verzeichnis `0700`,
+  Dateien `0600`, außerhalb des Web-Roots), gehört dem Backend-Benutzer, der
+  sie geöffnet hat, und verfällt nach einer Stunde. Abgelaufene Reste räumt
+  der nächste `begin` weg; ein eigener Cron ist nicht nötig.
+
+  Scheitert `finish` am Ziel — Datei existiert schon, Ordner ist weg —, bleibt
+  die Sitzung erhalten, damit nicht alles erneut übertragen werden muss.
+
 ## [1.35.0] – 2026-09-28
 
 > Neue Erweiterungsunterstützung, keine Änderung an vorhandenem Verhalten:

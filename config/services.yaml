@@ -15,6 +15,8 @@ services:
             # UploadValidator wraps Contao\Config (not a service) — the File
             # Tool instantiates it on demand via the framework adapter.
             - '../src/Tool/File/UploadValidator.php'
+            # Same reason: the File Tool builds it with the project dir.
+            - '../src/Tool/File/UploadSessions.php'
             # Value object carrying the record a usage lookup is about — has
             # scalar constructor arguments, so it must not be autowired.
             - '../src/Service/Usage/UsageTarget.php'
@@ -30,6 +32,8 @@ services:
             # Helper classes that are NOT @McpTool-annotated and have
             # constructor deps the container can't autowire.
             - '../src/Tool/File/UploadValidator.php'
+            # Same reason: the File Tool builds it with the project dir.
+            - '../src/Tool/File/UploadSessions.php'
             # Refusal is an exception carrying an error code, not a service.
             - '../src/Tool/Extension/OpenGraph/Refusal.php'
 
