@@ -6,6 +6,11 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.36.0] – 2026-09-28
+
+> Dateien lassen sich jetzt hochladen, ohne sie vorher irgendwo öffentlich
+> abzulegen. `file_upload` bleibt unverändert; der neue Weg kommt daneben.
+
 ### Added
 - **Gechunkter Datei-Upload: `file_upload_begin` / `file_upload_chunk` /
   `file_upload_finish` / `file_upload_abort`.**
