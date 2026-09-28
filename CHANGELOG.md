@@ -6,6 +6,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.35.0] – 2026-09-28
+
+> Neue Erweiterungsunterstützung, keine Änderung an vorhandenem Verhalten:
+> Ist `numero2/contao-opengraph3` installiert, sind dessen OpenGraph- und
+> X-Card-Felder über MCP les- und schreibbar — über eigene Werkzeuge und über
+> die generischen Wege. Ohne die Erweiterung ändert sich nichts.
+
 ### Added
 - **OpenGraph & X-Cards: `numero2/contao-opengraph3` wird direkt unterstützt.**
   Neu sind `opengraph_get`, `opengraph_set` und `opengraph_types` sowie ein
