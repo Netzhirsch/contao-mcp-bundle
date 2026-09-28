@@ -73,7 +73,8 @@ System-Einstellungen.
 - **Optionale Extension-Tools**: erscheinen automatisch, sobald das jeweilige
   Bundle installiert ist (sonst sauberer `extension_not_available`-Fehler):
   Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
-  `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`)
+  `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`),
+  **OpenGraph & X-Cards** (`numero2/contao-opengraph3`, siehe unten)
   und **Übersetzen mit DeepL** (`numero2/contao-deepl`, siehe unten).
 - **RockSolid Custom Elements**: RSCE-Elemente (`rsce_*`) lassen sich als
   Inhaltselement, Frontend-Modul und Formularfeld anlegen **und** konfigurieren.
@@ -409,6 +410,65 @@ MCP_PREVIEW_BASIC_AUTH="user:pass"
 
 Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
 `.env.local`, nie in der Antwort oder im Log.
+
+## OpenGraph & X-Cards
+
+Braucht [`numero2/contao-opengraph3`](https://github.com/numero2/contao-opengraph3)
+(ab v5, Contao 5.7+). Ohne die Erweiterung melden die Tools sauber
+`extension_not_available`.
+
+```bash
+composer require numero2/contao-opengraph3
+vendor/bin/contao-console contao:migrate
+```
+
+Die Erweiterung hängt ihre Felder an `tl_page`, `tl_news`,
+`tl_calendar_events` und `tl_faq`. Der Haken dabei: Von den rund 60 Feldern
+sind nur neun echte Spalten — **alle übrigen liegen in der Spalte
+`og_properties`**, einer serialisierten Liste aus `[Feldname, Wert]`. Und
+welche davon gültig sind, hängt am gewählten `og_type`. Das Backend-Widget
+**verwirft beim nächsten Speichern stillschweigend** jede Eigenschaft, die
+nicht zum Typ passt.
+
+Deshalb gibt es drei Tools:
+
+| Tool | Zweck |
+|---|---|
+| `opengraph_get(table, id)` | Spalten **und** Eigenschaften als *eine* flache Map, dazu `allowed_types`, `valid_properties` und `stale_properties` |
+| `opengraph_set(table, id, fields, dry_run)` | schreibt dieselbe flache Map zurück; verteilt selbst auf Spalte oder Blob |
+| `opengraph_types(table)` | welche `og_type`-Werte die Tabelle zulässt und welche Eigenschaften jeder freischaltet |
+
+`stale_properties` ist der Blick auf vorhandenen Schaden: Eigenschaften, die
+gespeichert sind, aber nicht zum aktuellen `og_type` gehören — sie
+verschwinden beim nächsten Backend-Speichern.
+
+Eine unpassende Eigenschaft wird **abgelehnt statt geschrieben**, mit Nennung
+des Typs, der sie erlauben würde:
+
+> og_type "article" does not keep "og_product_brand" (needs og_type "product").
+> This is refused rather than written because the Backend widget discards
+> properties outside the current type the next time the record is saved …
+
+Typ und Eigenschaften lassen sich in **einem** Aufruf setzen — maßgeblich ist
+dann der Typ aus diesem Aufruf:
+
+```json
+{ "table": "tl_news", "id": 12, "fields": {
+    "og_type": "article",
+    "og_title": "Neue Halle eröffnet",
+    "og_description": "Kurzfassung für soziale Netzwerke",
+    "og_article_author": "Redaktion",
+    "og_image": "files/og/halle.jpg"
+}}
+```
+
+Tabellen können den Typ einschränken: `tl_news` akzeptiert nur `article`,
+`tl_calendar_events` nur `website`. `og_image` und `twitter_image` nehmen eine
+Hex-UUID, eine UUID mit Bindestrichen **oder** einen Dateipfad.
+
+Die Felder sind außerdem über die generischen Wege erreichbar: `page_get`
+liefert sie jetzt mit, und `page_update(extras: {...})` schreibt sie — mit
+derselben Typprüfung, weil beide denselben Field-Provider durchlaufen.
 
 ## Übersetzen mit DeepL
 

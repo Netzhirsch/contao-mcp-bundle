@@ -18,6 +18,8 @@ services:
             # Value object carrying the record a usage lookup is about — has
             # scalar constructor arguments, so it must not be autowired.
             - '../src/Service/Usage/UsageTarget.php'
+            # Refusal is an exception carrying an error code, not a service.
+            - '../src/Tool/Extension/OpenGraph/Refusal.php'
 
     # Tools are resolved by php-mcp/server through the PSR-11 container via FQCN.
     # Symfony's service_container only exposes public services, so tools must be public.
@@ -28,6 +30,8 @@ services:
             # Helper classes that are NOT @McpTool-annotated and have
             # constructor deps the container can't autowire.
             - '../src/Tool/File/UploadValidator.php'
+            # Refusal is an exception carrying an error code, not a service.
+            - '../src/Tool/Extension/OpenGraph/Refusal.php'
 
     # page_preview fetches the page over its PUBLIC url, so a staging instance
     # behind HTTP basic auth answers 401 before Contao ever runs. The scalar

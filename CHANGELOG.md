@@ -6,6 +6,40 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **OpenGraph & X-Cards: `numero2/contao-opengraph3` wird direkt unterstützt.**
+  Neu sind `opengraph_get`, `opengraph_set` und `opengraph_types` sowie ein
+  Field-Provider je Tabelle (`tl_page`, `tl_news`, `tl_calendar_events`,
+  `tl_faq`).
+
+  Vorher waren die Felder über MCP praktisch unerreichbar — gemessen, nicht
+  vermutet: `page_get` lieferte sie gar nicht, `page_update` hat keine
+  Parameter dafür, und `entity_field_patch` ist Suchen&Ersetzen, kann ein
+  leeres Feld also nicht füllen.
+
+  Der Grund war keine Lücke, sondern zwei Schutzmechanismen, die zu Recht
+  griffen: `og_type` bezieht seine Optionen aus einem `options_callback`, den
+  der Skalar-Schreiber nicht auswerten kann, und `og_properties` ist ein
+  eigenes Widget über einem Blob. Beide wurden verweigert statt geraten. Ein
+  **Field-Provider** ist die dafür vorgesehene Naht: Die Felder gehören damit
+  einer Stelle, die das Format kennt — und werden dadurch auch über die
+  generischen Wege les- und schreibbar. `page_get` liefert sie jetzt mit.
+
+  Der eigentliche Wert liegt in einer Regel, die von außen unsichtbar ist: Von
+  den rund 60 Feldern sind nur neun echte Spalten, alle übrigen liegen in
+  `og_properties` — und welche dort gültig sind, hängt am `og_type`. Das
+  Backend-Widget **verwirft beim nächsten Speichern stillschweigend**, was
+  nicht passt. Ein solcher Schreibzugriff scheitert also nicht, er verschwindet
+  Wochen später. Deshalb wird abgelehnt statt geschrieben, mit Nennung des
+  Typs, der das Feld erlauben würde. `opengraph_get` meldet zusätzlich unter
+  `stale_properties`, was bereits gespeichert ist und beim nächsten Speichern
+  verloren ginge.
+
+  Ebenfalls berücksichtigt: Tabellen können den Typ einschränken (`tl_news`
+  nur `article`, `tl_calendar_events` nur `website`), `og_image` und
+  `twitter_image` sind `binary(16)` und nehmen Hex-UUID, UUID mit
+  Bindestrichen oder einen Dateipfad.
+
 ## [1.34.0] – 2026-09-24
 
 > Aus [#2](https://github.com/Netzhirsch/contao-mcp-bundle/issues/2):
