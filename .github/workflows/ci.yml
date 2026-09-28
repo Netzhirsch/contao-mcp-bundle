@@ -66,7 +66,14 @@ jobs:
       - name: Cache composer downloads
         uses: actions/cache@v5
         with:
-          path: ~/.cache/composer
+          # Only the downloaded archives, never composer's package METADATA.
+          # A restored metadata cache once resolved doctrine/dbal 4.5.0 although
+          # contao/conflicts excludes >=4.5.0 — Contao knows that release breaks
+          # contao:migrate. The run failed on SQL Contao itself had generated
+          # (ALTER TABLE tl_message_queue ENGINE = , with no engine), and the same
+          # commit had been green days earlier. Archives are safe to keep: they
+          # are content-addressed. Metadata is not.
+          path: ~/.cache/composer/files
           key: composer-phpstan-${{ hashFiles('composer.json') }}
           restore-keys: |
             composer-phpstan-
@@ -115,7 +122,14 @@ jobs:
       - name: Cache composer downloads
         uses: actions/cache@v5
         with:
-          path: ~/.cache/composer
+          # Only the downloaded archives, never composer's package METADATA.
+          # A restored metadata cache once resolved doctrine/dbal 4.5.0 although
+          # contao/conflicts excludes >=4.5.0 — Contao knows that release breaks
+          # contao:migrate. The run failed on SQL Contao itself had generated
+          # (ALTER TABLE tl_message_queue ENGINE = , with no engine), and the same
+          # commit had been green days earlier. Archives are safe to keep: they
+          # are content-addressed. Metadata is not.
+          path: ~/.cache/composer/files
           key: composer-phpunit-${{ hashFiles('composer.json') }}
           restore-keys: |
             composer-phpunit-
@@ -207,7 +221,14 @@ jobs:
       - name: Cache composer downloads
         uses: actions/cache@v5
         with:
-          path: ~/.cache/composer
+          # Only the downloaded archives, never composer's package METADATA.
+          # A restored metadata cache once resolved doctrine/dbal 4.5.0 although
+          # contao/conflicts excludes >=4.5.0 — Contao knows that release breaks
+          # contao:migrate. The run failed on SQL Contao itself had generated
+          # (ALTER TABLE tl_message_queue ENGINE = , with no engine), and the same
+          # commit had been green days earlier. Archives are safe to keep: they
+          # are content-addressed. Metadata is not.
+          path: ~/.cache/composer/files
           key: composer-${{ matrix.php }}-${{ matrix.contao }}-${{ hashFiles('bundle/composer.json') }}
           restore-keys: |
             composer-${{ matrix.php }}-${{ matrix.contao }}-
