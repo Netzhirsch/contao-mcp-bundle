@@ -32,6 +32,26 @@ final class FieldOwner
     ];
 
     /**
+     * numero2/contao-opengraph3 hangs the same ten columns on tl_page, tl_news,
+     * tl_calendar_events and tl_faq, so listing them per table would be forty
+     * entries that all say the same thing.
+     *
+     * The redirect earns its place on `og_properties` above all: that column is
+     * a serialised list of [name, value] pairs holding 52 of the extension's 62
+     * fields, and a generic write replaces the whole blob with whatever string
+     * it was handed. The rest are ordinary columns, but the tool knows which
+     * og:type keeps which property — knowledge the caller would otherwise have
+     * to reconstruct from the DCA.
+     *
+     * @var list<string>
+     */
+    private const OPENGRAPH_COLUMNS = [
+        'og_title', 'og_type', 'og_image', 'og_properties',
+        'twitter_site', 'twitter_creator', 'twitter_card',
+        'twitter_title', 'twitter_description', 'twitter_image',
+    ];
+
+    /**
      * @param list<string>                        $fields
      * @param array<string, array<string, string>> $declared from {@see ExtensionFieldOwnerMap}
      */
@@ -67,6 +87,10 @@ final class FieldOwner
 
         if (isset(self::OWNED[$key])) {
             return self::OWNED[$key];
+        }
+
+        if (\in_array($field, self::OPENGRAPH_COLUMNS, true)) {
+            return sprintf('opengraph_set(table: "%s", id: <id>, fields: {"%s": …})', $table, $field);
         }
 
         $hints = $declared[$key] ?? null;

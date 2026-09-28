@@ -164,6 +164,15 @@ final class ToolPermissionMap
         'deepl_translate_records' => ['kind' => 'dc_arg', 'op' => 'update'],
         'deepl_translate_page_tree' => ['kind' => 'dc', 'table' => 'tl_page', 'op' => 'update'],
 
+        // OpenGraph (numero2/contao-opengraph3). The table is an argument, and
+        // the fields sit on records the caller must already be allowed to edit
+        // — an og:title is part of the page it belongs to, not a separate
+        // permission. opengraph_types answers from the DCA alone: no record is
+        // read, so there is nothing to gate beyond having the tool at all.
+        'opengraph_get' => ['kind' => 'dc_arg', 'op' => 'read'],
+        'opengraph_set' => ['kind' => 'dc_arg', 'op' => 'update'],
+        'opengraph_types' => ['kind' => 'none'],
+
         // Read-only introspection of the site-wide output filter. No record is
         // touched and the answer is the same for every caller, so there is no
         // table to gate on.

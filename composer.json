@@ -54,6 +54,7 @@
         "contao/newsletter-bundle": "^5.3 || ^6.0",
         "friendsofsymfony/http-cache-bundle": "^3.0",
         "numero2/contao-deepl": "^1.0",
+        "numero2/contao-opengraph3": "^5.0",
         "terminal42/contao-leads": "^3.3",
         "terminal42/contao-url-rewrite": "^1.8"
     },
@@ -67,6 +68,7 @@
         "contao/news-bundle": "Required for news_* tools.",
         "contao/newsletter-bundle": "Required for newsletter_* tools.",
         "numero2/contao-deepl": "Required for deepl_* tools (translation). Also supplies the DEEPL_API_KEY configuration both it and this bundle read.",
+        "numero2/contao-opengraph3": "Required for opengraph_* tools (OpenGraph + X/Twitter card fields on pages, news, events and FAQs).",
         "terminal42/contao-leads": "Required for leads_list + lead_get (read-only access to form submissions).",
         "terminal42/contao-url-rewrite": "Required for url_rewrite_* tools."
     },
