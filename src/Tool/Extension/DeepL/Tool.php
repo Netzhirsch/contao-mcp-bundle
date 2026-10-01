@@ -134,10 +134,25 @@ final class Tool
             return $err + ['available' => false];
         }
 
+        $glossary = $this->client->glossaryConfig();
+
         $out = [
             'available' => true,
             'required_extension' => Client::REQUIRED_EXTENSION,
             'translatable_tables' => TranslatableFields::tables(),
+            // A glossary that is configured but never reached looks exactly like
+            // one that works, right up until someone checks the terminology. So
+            // say what is set up and what it needs: no source language means no
+            // pair, and without a pair DeepL applies no glossary at all.
+            'glossary' => [
+                'source_lang' => $glossary['source_lang'],
+                'configured_pairs' => $glossary['pairs'],
+                'note' => $glossary['pairs'] === []
+                    ? 'No glossaries configured (contao.deepl.glossaries). Requires numero2/contao-deepl 1.2.0 or newer.'
+                    : ($glossary['source_lang'] === null
+                        ? 'Glossaries are configured but contao.deepl.source_lang is empty — pass source_lang on the translation call, or set it, otherwise no glossary can apply.'
+                        : 'Applied automatically when the source/target pair matches one of configured_pairs.'),
+            ],
         ];
 
         try {

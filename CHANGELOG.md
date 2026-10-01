@@ -6,6 +6,32 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- **DeepL-Glossare greifen jetzt auch über MCP.** `numero2/contao-deepl` 1.2.0
+  bringt konfigurierbare Glossare mit — aber nur für den Backend-Knopf. Unsere
+  `deepl_*`-Werkzeuge gehen aus guten Gründen einen eigenen Weg (HTML-
+  `tag_handling`, Kostensignal, eigener Cache), und damit bekam die eigene
+  Terminologie, wer über MCP übersetzte, schlicht nicht. Ein Unterschied, den
+  niemand sieht, bis jemand die Begriffe prüft.
+
+  Der Client liest jetzt dieselben Parameter wie der Host —
+  `contao.deepl.source_lang` und `contao.deepl.glossaries` — und löst das
+  Glossar nach **denselben** Regeln auf: regionale Varianten fallen weg
+  (`en-US` und `en-GB` teilen das `de-en`-Glossar), das Paar wird
+  groß-/kleinschreibungsunabhängig verglichen, gleiche Sprache auf beiden
+  Seiten bekommt keines. Konfiguriert wird weiterhin nur an einer Stelle.
+
+  Der Übersetzungs-Cache trägt die Glossar-ID im Schlüssel. Ohne das käme nach
+  dem Einrichten eines Glossars die alte, glossarlose Übersetzung aus dem
+  Cache zurück — geprüft mit einem gemeinsamen Cache und zwei Clients.
+
+  `deepl_status` meldet die Lage unter `glossary`, samt des Falls „Glossare
+  konfiguriert, aber `source_lang` leer": ohne Paar kein Glossar, und ein
+  solches Setup sieht sonst aus wie ein funktionierendes.
+
+  Installationen auf Host 1.0.x bleiben unberührt — die beiden Parameter gibt
+  es dort nicht, und sie werden defensiv gelesen statt blind abgefragt.
+
 ## [1.36.0] – 2026-09-28
 
 > Dateien lassen sich jetzt hochladen, ohne sie vorher irgendwo öffentlich
