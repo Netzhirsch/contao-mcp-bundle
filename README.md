@@ -543,10 +543,40 @@ Danach erscheinen vier Tools. Fehlt eines von beidem, antworten sie mit
 
 | Tool | Wofür |
 |---|---|
-| `deepl_status` | Verfügbarkeit, Zielsprachen, optional der Kontostand |
+| `deepl_status` | Verfügbarkeit, Zielsprachen, Glossar-Lage, optional der Kontostand |
 | `deepl_translate` | Freitext rein, Übersetzung raus — rührt keinen Datensatz an |
 | `deepl_translate_records` | Ein oder mehrere Datensätze **einer** Tabelle |
 | `deepl_translate_page_tree` | Seite + Meta + Artikel + Inhalte + alle Unterseiten |
+
+### Glossare
+
+Ab `numero2/contao-deepl` **1.2.0** lassen sich DeepL-Glossare konfigurieren —
+und sie greifen **auch über MCP**. Bis dahin galt das nur für den Backend-Knopf:
+Wer über die Tools übersetzte, bekam die eigene Terminologie nicht. Konfiguriert
+wird weiterhin nur an einer Stelle:
+
+```yaml
+contao:
+    deepl:
+        source_lang: de
+        glossaries:
+            de-en: "a1b2c3d4-…"   # Glossar-ID aus der DeepL-Weboberfläche
+```
+
+Die Regeln sind dieselben wie im Backend, bewusst bis ins Detail: Regionale
+Varianten fallen weg (`en-US` und `en-GB` nutzen beide das `de-en`-Glossar), das
+Paar wird ohne Rücksicht auf Groß-/Kleinschreibung verglichen, und ein Paar aus
+derselben Sprache bekommt kein Glossar.
+
+**Ohne Quellsprache kein Glossar.** DeepL braucht das Paar; fehlt
+`source_lang` und gibt der Aufruf auch keine mit, wird ohne Glossar übersetzt.
+`deepl_status` meldet genau das unter `glossary` — einschließlich des Falls
+„Glossare konfiguriert, aber `source_lang` leer", der sonst aussieht wie ein
+funktionierendes Setup.
+
+Der Übersetzungs-Cache unterscheidet Glossar- von glossarloser Übersetzung. Ein
+nachträglich konfiguriertes Glossar liefert also sofort neue Ergebnisse, statt
+alte aus dem Cache zu wiederholen.
 
 **Übersetzbar** sind `tl_page`, `tl_article`, `tl_content`, `tl_news`,
 `tl_news_archive`, `tl_calendar_events`, `tl_calendar`, `tl_faq`,

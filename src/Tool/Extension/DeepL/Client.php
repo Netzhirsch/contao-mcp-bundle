@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Extension\DeepL;
 
 use DeepL\DeepLClient;
+use DeepL\LanguageCode;
 use DeepL\TranslateTextOptions;
 use numero2\DeepLBundle\DeepLBundle;
 use Psr\Cache\CacheItemPoolInterface;
@@ -59,6 +60,17 @@ final class Client
 
     /** Parameter numero2\DeepLBundle\DependencyInjection\DeepLExtension::prepend() sets. */
     private const KEY_PARAMETER = 'contao.deepl.api_key';
+
+    /**
+     * The two the host extension gained in 1.2.0, when glossary support landed.
+     *
+     * Both are read through has() rather than get(): an installation still on
+     * 1.0.x has neither, and ParameterBag::get() throws on an unknown name. The
+     * composer constraint is ^1.0, so that installation is one we promised to
+     * keep working.
+     */
+    private const SOURCE_LANG_PARAMETER = 'contao.deepl.source_lang';
+    private const GLOSSARIES_PARAMETER = 'contao.deepl.glossaries';
 
     /**
      * DeepL accepts at most 50 texts per request. The character ceiling is ours:
@@ -156,6 +168,13 @@ final class Client
         $targetLang = strtoupper(trim($targetLang));
         $sourceLang = ($sourceLang === null || trim($sourceLang) === '') ? null : strtoupper(trim($sourceLang));
 
+        // Same fallback the Backend button uses: when the caller did not name a
+        // source, the configured one applies. Without a source there can be no
+        // glossary — DeepL needs the pair — so this is also what makes the
+        // configured glossaries reachable at all.
+        $sourceLang ??= $this->defaultSourceLang();
+        $glossaryId = $this->glossaryFor($sourceLang, $targetLang);
+
         $translations = [];
         $pending = [];   // unique text => list of indexes waiting for it
         $detected = null;
@@ -166,7 +185,7 @@ final class Client
                 continue;
             }
 
-            $memoKey = $this->memoKey($text, $targetLang, $sourceLang, $html);
+            $memoKey = $this->memoKey($text, $targetLang, $sourceLang, $html, $glossaryId);
             if (isset($this->memo[$memoKey])) {
                 $translations[$i] = $this->memo[$memoKey];
                 $this->charactersReused += mb_strlen($text);
@@ -180,10 +199,15 @@ final class Client
             $pending[$text][] = $i;
         }
 
-        $pending = $this->takeFromCache($pending, $translations, $targetLang, $sourceLang, $html);
+        $pending = $this->takeFromCache($pending, $translations, $targetLang, $sourceLang, $html, $glossaryId);
 
         foreach ($this->chunk(array_keys($pending)) as $chunk) {
             $options = $html ? [TranslateTextOptions::TAG_HANDLING => 'html'] : [];
+
+            if ($glossaryId !== null) {
+                $options[TranslateTextOptions::GLOSSARY] = $glossaryId;
+            }
+
             $results = $this->deepl()->translateText($chunk, $sourceLang, $targetLang, $options);
             ++$this->requests;
 
@@ -193,7 +217,7 @@ final class Client
                 $this->charactersSubmitted += mb_strlen($source);
                 $detected ??= $result->detectedSourceLang;
 
-                $this->remember($source, $result->text, $targetLang, $sourceLang, $html);
+                $this->remember($source, $result->text, $targetLang, $sourceLang, $html, $glossaryId);
 
                 foreach ($pending[$source] as $index) {
                     $translations[$index] = $result->text;
@@ -223,7 +247,7 @@ final class Client
      *
      * @return array<string, list<int>> the still-unresolved subset of $pending
      */
-    private function takeFromCache(array $pending, array &$translations, string $targetLang, ?string $sourceLang, bool $html): array
+    private function takeFromCache(array $pending, array &$translations, string $targetLang, ?string $sourceLang, bool $html, ?string $glossaryId): array
     {
         if ($pending === []) {
             return $pending;
@@ -231,7 +255,7 @@ final class Client
 
         $keys = [];
         foreach (array_keys($pending) as $text) {
-            $keys[$this->cacheKey((string) $text, $targetLang, $sourceLang, $html)] = (string) $text;
+            $keys[$this->cacheKey((string) $text, $targetLang, $sourceLang, $html, $glossaryId)] = (string) $text;
         }
 
         try {
@@ -251,7 +275,7 @@ final class Client
                 continue;
             }
 
-            $this->memo[$this->memoKey($text, $targetLang, $sourceLang, $html)] = $value;
+            $this->memo[$this->memoKey($text, $targetLang, $sourceLang, $html, $glossaryId)] = $value;
             $this->charactersReused += mb_strlen($text);
 
             foreach ($pending[$text] as $index) {
@@ -263,12 +287,12 @@ final class Client
         return $pending;
     }
 
-    private function remember(string $source, string $translation, string $targetLang, ?string $sourceLang, bool $html): void
+    private function remember(string $source, string $translation, string $targetLang, ?string $sourceLang, bool $html, ?string $glossaryId): void
     {
-        $this->memo[$this->memoKey($source, $targetLang, $sourceLang, $html)] = $translation;
+        $this->memo[$this->memoKey($source, $targetLang, $sourceLang, $html, $glossaryId)] = $translation;
 
         try {
-            $item = $this->cache->getItem($this->cacheKey($source, $targetLang, $sourceLang, $html));
+            $item = $this->cache->getItem($this->cacheKey($source, $targetLang, $sourceLang, $html, $glossaryId));
             $item->set($translation);
             $item->expiresAfter(self::CACHE_TTL_SECONDS);
             $this->cache->save($item);
@@ -277,16 +301,102 @@ final class Client
         }
     }
 
-    private function memoKey(string $text, string $targetLang, ?string $sourceLang, bool $html): string
+    /**
+     * The source language configured for the site, or null when there is none.
+     *
+     * Read defensively: `contao.deepl.source_lang` only exists from host version
+     * 1.2.0 on, and our constraint is ^1.0.
+     */
+    private function defaultSourceLang(): ?string
     {
-        return $targetLang.'|'.($sourceLang ?? '-').'|'.($html ? 'h' : 'p').'|'.$text;
+        if (!$this->parameters->has(self::SOURCE_LANG_PARAMETER)) {
+            return null;
+        }
+
+        $configured = $this->parameters->get(self::SOURCE_LANG_PARAMETER);
+        $configured = \is_string($configured) ? strtoupper(trim($configured)) : '';
+
+        return $configured === '' ? null : $configured;
     }
 
-    private function cacheKey(string $text, string $targetLang, ?string $sourceLang, bool $html): string
+    /**
+     * The glossary id for a language pair, resolved exactly the way the host
+     * extension resolves it.
+     *
+     * "Exactly" is the point: operator and editor configure one list, and a
+     * term translated through the Backend button has to come out the same way
+     * when it goes through MCP. Any divergence here would be a difference
+     * nobody could see until a customer noticed their terminology was applied
+     * in one place and not the other — so the rules are mirrored rather than
+     * re-invented: regional variants are dropped (en-US and en-GB share the
+     * de-en glossary), the pair is matched case-insensitively, and a pair whose
+     * two halves are the same language has no glossary.
+     *
+     * @see \numero2\DeepLBundle\Api\DeepLApi::getGlossaryId()
+     */
+    public function glossaryFor(?string $sourceLang, string $targetLang): ?string
+    {
+        if ($sourceLang === null || $targetLang === '' || !$this->parameters->has(self::GLOSSARIES_PARAMETER)) {
+            return null;
+        }
+
+        $glossaries = $this->parameters->get(self::GLOSSARIES_PARAMETER);
+
+        if (!\is_array($glossaries) || $glossaries === []) {
+            return null;
+        }
+
+        $source = strtolower(LanguageCode::removeRegionalVariant($sourceLang));
+        $target = strtolower(LanguageCode::removeRegionalVariant($targetLang));
+
+        if ($source === $target) {
+            return null;
+        }
+
+        foreach ($glossaries as $pair => $id) {
+            if (strtolower((string) $pair) === $source.'-'.$target && \is_string($id) && $id !== '') {
+                return $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * What the operator configured, for `deepl_status` to report — a glossary
+     * that is set up but never reached should be visible as such.
+     *
+     * @return array{source_lang: string|null, pairs: list<string>}
+     */
+    public function glossaryConfig(): array
+    {
+        $glossaries = $this->parameters->has(self::GLOSSARIES_PARAMETER)
+            ? $this->parameters->get(self::GLOSSARIES_PARAMETER)
+            : [];
+
+        $pairs = [];
+
+        if (\is_array($glossaries)) {
+            foreach ($glossaries as $pair => $id) {
+                if (\is_string($id) && $id !== '') {
+                    $pairs[] = strtolower((string) $pair);
+                }
+            }
+        }
+
+        return ['source_lang' => $this->defaultSourceLang(), 'pairs' => $pairs];
+    }
+
+    private function memoKey(string $text, string $targetLang, ?string $sourceLang, bool $html, ?string $glossaryId): string
+    {
+        return $targetLang.'|'.($sourceLang ?? '-').'|'.($html ? 'h' : 'p').'|'.($glossaryId ?? '-').'|'.$text;
+    }
+
+    private function cacheKey(string $text, string $targetLang, ?string $sourceLang, bool $html, ?string $glossaryId): string
     {
         // PSR-6 forbids {}()/\@: in keys — a hex digest sidesteps all of them
         // and keeps the key length bounded regardless of the text.
-        return 'nh_mcp_deepl.'.hash('sha256', $this->memoKey($text, $targetLang, $sourceLang, $html));
+        return 'nh_mcp_deepl.'.hash('sha256', $this->memoKey($text, $targetLang, $sourceLang, $html, $glossaryId));
     }
 
     /**
