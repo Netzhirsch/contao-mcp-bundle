@@ -6,6 +6,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.37.0] – 2026-10-01
+
+> Wer `numero2/contao-deepl` 1.2.0 fährt und Glossare konfiguriert hat, bekommt
+> seine Terminologie ab jetzt auch über MCP — bisher nur über den Backend-Knopf.
+> Ohne Glossare ändert sich nichts, auf älteren Fassungen des Hosts ebenfalls
+> nicht.
+
 ### Added
 - **DeepL-Glossare greifen jetzt auch über MCP.** `numero2/contao-deepl` 1.2.0
   bringt konfigurierbare Glossare mit — aber nur für den Backend-Knopf. Unsere
