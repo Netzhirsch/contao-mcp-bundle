@@ -38,6 +38,25 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   auf Contao 5.7 LTS.
 
 ### Changed
+- **Der Pfad des Endpunkts ist einstellbar.** `path` unter
+  *MCP-Server → Konfiguration* (Standard `mcp`) legt jetzt fest, wo der
+  Endpunkt liegt: `<backend_url>/<path>`, dazu `/<path>/healthz`,
+  `/<path>/.well-known/oauth-authorization-server` und
+  `/.well-known/oauth-protected-resource/<path>`. Bisher lag er fest unter
+  `/mcp`, während Backend-Anzeige und OAuth-Metadaten den eingestellten Pfad
+  ankündigten — ein anderer Wert konnte den OAuth-Login bei Clients scheitern
+  lassen, die die angekündigte Resource-URL mit der aufgerufenen vergleichen.
+  Der neue Pfad gilt ab dem Speichern, ohne `cache:clear`; der alte antwortet
+  dann nicht mehr. Verbundene Clients brauchen die neue URL, ihre Tokens
+  bleiben gültig. Erlaubt sind Kleinbuchstaben, Ziffern, `-` und `_`, auch in
+  mehreren Segmenten (`ki/mcp`). Abgelehnt werden Pfade im Backend
+  (`contao.backend.route_prefix`), in einem Verzeichnis von `public/` und der
+  Alias einer vorhandenen Seite, die der Endpunkt sonst verdecken würde.
+
+  **Wer `path` schon geändert hatte, findet den Endpunkt nach dem Update
+  dort** — bis 1.37.1 lag er trotzdem unter `/mcp`. Die Status-Seite zeigt die
+  gültige URL. Ein gespeicherter Wert, den das Formular heute ablehnen würde,
+  wird ignoriert; der Endpunkt bleibt dann unter `/mcp`.
 - **Der Smoke-Test läuft auch ohne die optionalen Contao-Bundles durch.** Fehlte
   `contao/news-bundle`, brach `contao:mcp:smoke-test` nach der Hälfte mit
   „Table tl_news_archive doesn't exist" ab: News dient an vielen Stellen als
@@ -66,8 +85,8 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
     Liste. Ohne die Datei lässt sich die Lizenz nicht erneuern.
   - **Konfiguration:** `auth_mode` steht standardmäßig auf `oauth`, nicht auf
     `none`; `config.json` entsteht erst beim ersten Speichern, bis dahin
-    antwortet `/mcp` mit 503; `path` verschiebt den Endpunkt nicht, der liegt
-    fest unter `/mcp`. Die übrigen Schlüssel stehen jetzt in der Tabelle.
+    antwortet `/mcp` mit 503. Die übrigen Schlüssel stehen jetzt in der
+    Tabelle.
   - **Was an den Lizenzserver geht:** Die Erneuerung schickt auch das bisherige
     Token mit, die Testphase auch die E-Mail-Adresse.
   - **Support:** `composer.json` (und damit Packagist) und die deutsche README

@@ -55,10 +55,13 @@ use Symfony\Component\Routing\Attribute\Route;
  *     block instead of streaming. Affects nothing currently — none of our
  *     tools emit streams.
  *
- * Routes:
- *   POST /mcp                                       — JSON-RPC tool-call endpoint
- *   GET  /.well-known/oauth-authorization-server    — RFC 8414 metadata
- *   GET  /mcp/.well-known/oauth-authorization-server — same, MCP-spec location
+ * Routes (<path> is `path` from var/mcp/config.json, "mcp" by default; those
+ * are matched by {@see \Netzhirsch\ContaoMcpBundle\EventListener\McpEndpointRouteListener},
+ * so a path saved in the backend applies without a cache:clear):
+ *   POST /<path>                                       — JSON-RPC tool-call endpoint
+ *   GET  /.well-known/oauth-authorization-server       — RFC 8414 metadata
+ *   GET  /<path>/.well-known/oauth-authorization-server — same, MCP-spec location
+ *   GET  /.well-known/oauth-protected-resource[/<path>] — RFC 9728 metadata
  *
  * Both well-known paths advertise the OAuth endpoints on the Contao backend
  * (`/_mcp_oauth/*`) so Claude's mcp-remote bridge can complete the OAuth
@@ -96,12 +99,6 @@ final class McpController
      * BatchRequest. Returns the matching JSON-RPC envelope (or 204 for
      * notification-only batches).
      */
-    #[Route(
-        path: '/mcp',
-        name: 'netzhirsch_contao_mcp_controller',
-        methods: ['POST', 'OPTIONS'],
-        defaults: ['_scope' => 'frontend'],
-    )]
     public function handle(Request $request): Response
     {
         // CORS preflight — Inspector / mcp-remote both probe with OPTIONS
@@ -336,12 +333,6 @@ final class McpController
      * @return JsonResponse
      */
     #[Route(
-        path: '/mcp/.well-known/oauth-authorization-server',
-        name: 'netzhirsch_contao_mcp_oauth_metadata_mcp_path',
-        methods: ['GET'],
-        defaults: ['_scope' => 'frontend'],
-    )]
-    #[Route(
         path: '/.well-known/oauth-authorization-server',
         name: 'netzhirsch_contao_mcp_oauth_metadata_root',
         methods: ['GET'],
@@ -399,12 +390,6 @@ final class McpController
      * `/.well-known/oauth-protected-resource/<path>`), because clients differ
      * on which they construct.
      */
-    #[Route(
-        path: '/.well-known/oauth-protected-resource/mcp',
-        name: 'netzhirsch_contao_mcp_oauth_prm_mcp_path',
-        methods: ['GET'],
-        defaults: ['_scope' => 'frontend'],
-    )]
     #[Route(
         path: '/.well-known/oauth-protected-resource',
         name: 'netzhirsch_contao_mcp_oauth_prm_root',

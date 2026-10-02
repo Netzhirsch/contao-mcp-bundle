@@ -399,7 +399,10 @@ jobs:
               --password=ci-Backend-check-1 --admin --language=en
 
           mkdir -p var/backend-check
-          php -S 127.0.0.1:8000 -t public > var/backend-check/server.log 2>&1 &
+          # public/index.php as the router script: without one, PHP's built-in
+          # server answers paths with a dot segment (/.well-known/…) with its
+          # own 404 before Contao sees them.
+          php -S 127.0.0.1:8000 -t public public/index.php > var/backend-check/server.log 2>&1 &
           for i in {1..30}; do
               curl -fs -o /dev/null http://127.0.0.1:8000/contao/login && break
               sleep 1
@@ -432,28 +435,48 @@ jobs:
               fi
           done
 
+          # save_config PATH saves MCP-Server → Konfiguration the way an
+          # operator does, through the form. The page is fetched again each
+          # time, writing the jar: its request token belongs to the CSRF cookie
+          # that comes with it.
+          save_config() {
+              local page=var/backend-check/config-form.html action token
+              curl -fsS -b "$JAR" -c "$JAR" -o "$page" "http://127.0.0.1:8000/contao?do=netzhirsch_mcp_config"
+              action=$(grep -oP '<form class="tl_form tl_edit_form"[^>]*action="\K[^"]+' "$page" | head -1 | sed 's/&amp;/\&/g')
+              token=$(grep -oP 'name="REQUEST_TOKEN" value="\K[^"]+' "$page" | head -1)
+              curl -fsS -b "$JAR" -c "$JAR" -o /dev/null \
+                  --data-urlencode FORM_SUBMIT=mcp_server_action \
+                  --data-urlencode "REQUEST_TOKEN=$token" \
+                  --data-urlencode action=save_config \
+                  --data-urlencode "path=$1" \
+                  --data-urlencode pagination_limit=500 \
+                  --data-urlencode auth_mode=oauth \
+                  --data-urlencode backend_url=http://127.0.0.1:8000 \
+                  --data-urlencode oauth_registration_mode=restricted \
+                  --data-urlencode cimd_mode=trusted \
+                  --data-urlencode lazy_mode=0 \
+                  "http://127.0.0.1:8000/contao$action"
+          }
+
+          # probe METHOD PATH STATUS [TEXT [BODY]]: one request, the status it
+          # must answer with and a string its response must contain.
+          probe() {
+              local out=var/backend-check/probe.out code data=()
+              [[ -n "${5:-}" ]] && data=(-d "$5")
+              code=$(curl -sS -o "$out" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' "${data[@]}" "http://127.0.0.1:8000$2")
+              if [[ "$code" == "$3" ]] && { [[ -z "${4:-}" ]] || grep -qF -- "$4" "$out"; }; then
+                  echo "$1 $2: $code"
+              else
+                  echo "::error::$1 $2 answered $code, expected $3${4:+ containing $4}"
+                  FAILED=1
+              fi
+          }
+          PING='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+
           # The smoke test leaves var/mcp/config.json as it found it: on this
           # fresh app, absent, and /mcp answers 503 until a configuration has
-          # been saved. Save one the way an operator does, through the form on
-          # MCP-Server → Konfiguration, which this also proves works.
-          # Fetched again, writing the jar this time: the form's request token
-          # belongs to the CSRF cookie that comes with the page.
-          CONFIG_PAGE=var/backend-check/config-form.html
-          curl -fsS -b "$JAR" -c "$JAR" -o "$CONFIG_PAGE" "http://127.0.0.1:8000/contao?do=netzhirsch_mcp_config"
-          ACTION=$(grep -oP '<form class="tl_form tl_edit_form"[^>]*action="\K[^"]+' "$CONFIG_PAGE" | head -1 | sed 's/&amp;/\&/g')
-          TOKEN=$(grep -oP 'name="REQUEST_TOKEN" value="\K[^"]+' "$CONFIG_PAGE" | head -1)
-          curl -fsS -b "$JAR" -c "$JAR" -o /dev/null \
-              --data-urlencode FORM_SUBMIT=mcp_server_action \
-              --data-urlencode "REQUEST_TOKEN=$TOKEN" \
-              --data-urlencode action=save_config \
-              --data-urlencode path=mcp \
-              --data-urlencode pagination_limit=500 \
-              --data-urlencode auth_mode=oauth \
-              --data-urlencode backend_url=http://127.0.0.1:8000 \
-              --data-urlencode oauth_registration_mode=restricted \
-              --data-urlencode cimd_mode=trusted \
-              --data-urlencode lazy_mode=0 \
-              "http://127.0.0.1:8000/contao$ACTION"
+          # been saved.
+          save_config mcp
           if grep -q '"backend_url": "http://127.0.0.1:8000"' var/mcp/config.json 2>/dev/null; then
               echo "configuration saved through MCP-Server → Konfiguration"
           else
@@ -461,25 +484,33 @@ jobs:
               FAILED=1
           fi
 
-          # The endpoint answers without a session: a probe, and a JSON-RPC
-          # call that is either served (auth_mode none) or asks for a token.
-          CODE=$(curl -sS -o var/backend-check/healthz.json -w '%{http_code}' http://127.0.0.1:8000/mcp/healthz)
-          echo "/mcp/healthz: $CODE"
-          [[ "$CODE" == 200 ]] || { echo "::error::/mcp/healthz answered $CODE"; FAILED=1; }
-          CODE=$(curl -sS -o var/backend-check/mcp.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
-              -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' http://127.0.0.1:8000/mcp)
-          echo "POST /mcp: $CODE"
-          [[ "$CODE" == 200 || "$CODE" == 401 ]] || { echo "::error::POST /mcp answered $CODE"; FAILED=1; }
+          # The endpoint answers without a session: the probe, a JSON-RPC call
+          # that asks for a token, and the documents that say where to get one.
+          probe GET /mcp/healthz 200 '"status":"ok"'
+          probe POST /mcp 401 'Bearer' "$PING"
+          probe GET /mcp 405
+          probe GET /.well-known/oauth-authorization-server 200 '"issuer"'
+          probe GET /mcp/.well-known/oauth-authorization-server 200 '"issuer"'
+          probe GET /.well-known/oauth-protected-resource 200 '"resource"'
+          probe GET /.well-known/oauth-protected-resource/mcp 200 '127.0.0.1:8000\/mcp"'
 
-          # The .well-known metadata is asked of the router, not the server:
-          # PHP's built-in server answers paths with a dot segment with its
-          # own 404 on some PHP versions, before Contao is even reached.
-          for ROUTE in /.well-known/oauth-authorization-server /mcp/.well-known/oauth-authorization-server \
-                  /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/mcp; do
-              vendor/bin/contao-console router:match --env=prod "$ROUTE" > /dev/null \
-                  && echo "$ROUTE: routed" \
-                  || { echo "::error::No route matches $ROUTE"; FAILED=1; }
-          done
+          # The endpoint follows `path` the moment it is saved — no
+          # cache:clear — and leaves the old one to Contao.
+          save_config ki/mcp
+          grep -q '"path": "ki/mcp"' var/mcp/config.json \
+              || { echo "::error::The path ki/mcp was not saved"; FAILED=1; }
+          probe POST /ki/mcp 401 'Bearer' "$PING"
+          probe GET /ki/mcp/healthz 200 '"status":"ok"'
+          probe GET /ki/mcp/.well-known/oauth-authorization-server 200 '"issuer"'
+          probe GET /.well-known/oauth-protected-resource/ki/mcp 200 '127.0.0.1:8000\/ki\/mcp"'
+          probe POST /mcp 404 '' "$PING"
+          probe GET /mcp/healthz 404
+
+          # A path inside the backend is refused, and the saved one stays.
+          save_config contao/mcp
+          grep -q '"path": "ki/mcp"' var/mcp/config.json \
+              && echo "path contao/mcp refused" \
+              || { echo "::error::The backend path contao/mcp was saved as the MCP endpoint"; FAILED=1; }
           exit $FAILED
 
       # Upload Contao + Symfony logs on failure so we can post-mortem

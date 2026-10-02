@@ -177,11 +177,11 @@ wurde, antwortet auf `/mcp` mit **503** und nennt das Backend-Modul. Erst dort
 wählt man den Modus — `none` bleibt möglich, aber nur als ausdrückliche
 Entscheidung für einen privaten oder Loopback-Host.
 
-Die Route `/mcp` ist nach der Migration sofort registriert
-(`<backend_url>/mcp`) — Apache/PHP-FPM serviert sie wie jede andere
-Symfony-Route. Kein Daemon, kein Port, kein Reverse-Proxy nötig. Antworten gibt
-sie, sobald die Konfiguration einmal gespeichert und eine Lizenz oder Testphase
-aktiv ist.
+Der Endpunkt ist nach der Migration sofort da, unter `<backend_url>/mcp` (der
+Pfad ist einstellbar, siehe [Konfiguration](#konfiguration)) — Apache/PHP-FPM
+serviert ihn wie jede andere Symfony-Route. Kein Daemon, kein Port, kein
+Reverse-Proxy nötig. Antworten gibt er, sobald die Konfiguration einmal
+gespeichert und eine Lizenz oder Testphase aktiv ist.
 
 ### 4. Lizenz aktivieren (30 Tage kostenlos)
 
@@ -318,7 +318,8 @@ ab. Auf Contao 5 ist das Flag überflüssig.
 
 ## Transport und Protokoll
 
-Streamable HTTP auf einem einzigen Endpunkt, `POST /mcp`. Einen **SSE-Kanal gibt
+Streamable HTTP auf einem einzigen Endpunkt, `POST /mcp` (oder der eingestellte
+Pfad). Einen **SSE-Kanal gibt
 es nicht** — keinen GET-Stream und keine vom Server angestoßenen Nachrichten,
 nur JSON als Anfrage und Antwort. Protokollrevision **2025-03-26**; Clients mit
 **2024-11-05** werden ebenfalls angenommen. Jeder MCP-Client, der Streamable HTTP
@@ -390,7 +391,8 @@ OAuth-Konfig + `warnings: [...]` mit konkreten Fix-Befehlen. Vor jedem
 Site-Move oder Server-Wechsel laufen lassen; das Tool braucht einen
 Administrator.
 
-Für ein Monitoring ohne Token gibt es `GET /mcp/healthz`: 200, wenn die
+Für ein Monitoring ohne Token gibt es `GET /mcp/healthz` (bei einem anderen
+`path`: `/<path>/healthz`): 200, wenn die
 Datenbank antwortet, `var/mcp/` schreibbar ist, die OAuth-Schlüssel da sind (im
 Modus `oauth`) und mindestens 50 MB frei sind — sonst 503 mit den Namen der
 fehlgeschlagenen Prüfungen.
@@ -470,7 +472,7 @@ Felder:
 
 | Key | Default | Bedeutung |
 |---|---|---|
-| `path` | `mcp` | Pfad, den die Backend-Anzeige und `oauth-protected-resource` nennen. Der Endpunkt selbst liegt fest unter `/mcp` — ein anderer Wert verschiebt ihn nicht, also auf `mcp` lassen |
+| `path` | `mcp` | URL-Pfad des Endpunkts, ohne Schrägstrich am Anfang: `ki/mcp` ergibt `<backend_url>/ki/mcp`. `/healthz` und die OAuth-Metadaten ziehen mit, und zwar beim Speichern, ohne `cache:clear`; verbundene Clients brauchen danach die neue URL, ihre Tokens bleiben gültig. Erlaubt sind Kleinbuchstaben, Ziffern, `-` und `_`, auch mehrere Segmente — nicht im Backend, nicht in einem Verzeichnis von `public/` und nicht der Alias einer Seite, die der Endpunkt sonst verdecken würde |
 | `pagination_limit` | `500` | Max Tools pro `tools/list` (irrelevant in Lazy-Mode) |
 | `auth_mode` | `oauth` | `oauth` oder `none` (nur für private oder Loopback-Hosts) |
 | `backend_url` | `""` | Public Base-URL des Contao-Backends (Pflicht bei OAuth) |

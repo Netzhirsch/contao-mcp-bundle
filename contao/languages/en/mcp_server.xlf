@@ -51,7 +51,7 @@
 
       <!-- Config field labels -->
       <trans-unit id="mcp_server.config_path_label"><source>Path</source></trans-unit>
-      <trans-unit id="mcp_server.config_path_help"><source>Path that the backend display and the OAuth metadata (oauth-protected-resource) name. The endpoint itself is fixed at /mcp — another value does not move it but announces a path that does not exist. Keep "mcp".</source></trans-unit>
+      <trans-unit id="mcp_server.config_path_help"><source>URL path of the MCP endpoint, "mcp" by default. Lower-case letters, digits, "-" and "_", several segments allowed (e.g. ki/mcp). The endpoint, its /healthz probe and the OAuth metadata move as soon as this is saved; connected clients then need the new URL.</source></trans-unit>
       <trans-unit id="mcp_server.config_pagination_limit_label"><source>Pagination limit</source></trans-unit>
       <trans-unit id="mcp_server.config_pagination_limit_help"><source>Maximum tools returned by `tools/list` per page. Claude Desktop / mcp-remote do NOT paginate; keep this above the total tool count (default 500).</source></trans-unit>
       <trans-unit id="mcp_server.config_auth_mode_label"><source>Authentication mode</source></trans-unit>
@@ -118,6 +118,9 @@
       <trans-unit id="mcp_server.error_pagination_limit_invalid"><source>Pagination limit must be 1-10000.</source></trans-unit>
       <trans-unit id="mcp_server.error_dir_unwritable"><source>Could not create the config directory.</source></trans-unit>
       <trans-unit id="mcp_server.error_file_unwritable"><source>Could not write the config file.</source></trans-unit>
+      <trans-unit id="mcp_server.error_path_invalid"><source>The path may only contain lower-case letters, digits, "-" and "_", in segments separated by "/".</source></trans-unit>
+      <trans-unit id="mcp_server.error_path_reserved"><source>The path belongs to the Contao backend or to a directory in public/.</source></trans-unit>
+      <trans-unit id="mcp_server.error_path_page_alias"><source>A page already uses this alias; the endpoint would hide it.</source></trans-unit>
 
       <!-- MCP activity panel -->
       <trans-unit id="mcp_server.mcp_activity_title"><source>MCP activity</source></trans-unit>

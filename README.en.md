@@ -166,10 +166,11 @@ with **503** and names the backend module. That is where the mode is chosen —
 `none` is still available, but only as a deliberate choice for a private or
 loopback host.
 
-The route `/mcp` is registered right after the migration (`<backend_url>/mcp`)
-— Apache/PHP-FPM serves it like any other Symfony route. No daemon, no port, no
-reverse proxy. It answers once the configuration has been saved and a license
-or trial is active.
+The endpoint is there right after the migration, at `<backend_url>/mcp` (the
+path can be changed, see [Configuration](#configuration)) — Apache/PHP-FPM
+serves it like any other Symfony route. No daemon, no port, no reverse proxy. It
+answers once the configuration has been saved and a license or trial is
+active.
 
 ### 4. Activate the license (30 days free)
 
@@ -305,7 +306,8 @@ the flag is unnecessary.
 
 ## Transport and protocol
 
-Streamable HTTP on a single endpoint, `POST /mcp`. There is **no SSE channel** —
+Streamable HTTP on a single endpoint, `POST /mcp` (or the configured path).
+There is **no SSE channel** —
 no GET stream and no server-initiated messages, just request/response JSON.
 Protocol revision **2025-03-26**; clients speaking **2024-11-05** are accepted as
 well. Any MCP client that speaks Streamable HTTP with OAuth should work; Claude
@@ -417,7 +419,7 @@ only YAML and environment settings.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `path` | `mcp` | Path shown in the backend and advertised in `oauth-protected-resource`. The endpoint itself is fixed at `/mcp` — another value does not move it, so keep `mcp` |
+| `path` | `mcp` | URL path of the endpoint, no leading slash: `ki/mcp` gives `<backend_url>/ki/mcp`. `/healthz` and the OAuth metadata move with it, on save, without `cache:clear`; connected clients then need the new URL, their tokens stay valid. Lower-case letters, digits, `-` and `_`, several segments allowed — not inside the backend, not in a directory of `public/` and not the alias of a page the endpoint would otherwise hide |
 | `pagination_limit` | `500` | Max tools per `tools/list` (irrelevant in lazy mode) |
 | `auth_mode` | `oauth` | `oauth`, or `none` for a private or loopback host only |
 | `backend_url` | `""` | Public base URL of the Contao backend (required for OAuth) |
@@ -575,7 +577,8 @@ OAuth configuration, plus `warnings: [...]` with concrete fix commands. Worth
 running before every site move or server change; the tool needs an
 administrator.
 
-For monitoring without a token there is `GET /mcp/healthz`: 200 when the
+For monitoring without a token there is `GET /mcp/healthz` (with another
+`path`: `/<path>/healthz`): 200 when the
 database answers, `var/mcp/` is writable, the OAuth keys are present (in `oauth`
 mode) and at least 50 MB are free — otherwise 503 naming the checks that failed.
 
