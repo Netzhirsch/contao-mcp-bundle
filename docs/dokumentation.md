@@ -439,16 +439,16 @@ php vendor/bin/contao-console contao:mcp:oauth:cleanup --quiet
 
 ## 6. Lazy-Mode (empfohlen für Claude)
 
-Das Bundle hat ~100 Tools. Claude Desktop / claude.ai laden bei jedem Connect **alle** Tool-Schemas in den System-Prompt — das sind etwa 12 KB pro Turn und führt bei vielen Tools zu schlechterer Tool-Auswahl (Halluzinationen). `tools/list` wird vom Anthropic-Stack nicht paginiert; `nextCursor` ignoriert er.
+Das Bundle hat 196 Tools. Claude Desktop / claude.ai laden bei jedem Connect **alle** Tool-Schemas in den System-Prompt — das sind rund 180 KB pro Turn und führt bei vielen Tools zu schlechterer Tool-Auswahl (Halluzinationen). `tools/list` wird vom Anthropic-Stack nicht paginiert; `nextCursor` ignoriert er.
 
 **Lösung**: Lazy-Mode aktivieren (**MCP-Server → Konfiguration** → Checkbox „Lazy-Mode"). Dann liefert `tools/list` nur noch **sechs** Tools:
 
-- `contao_search_tools(query, group?, limit=20)` — Volltext-Suche durch alle ~100 Tool-Namen + Descriptions. Optional gefiltert nach `group` (`news`, `layout`, `module`, `image_size`, …). Leere Query + Group listet alle Tools dieser Gruppe.
+- `contao_search_tools(query, group?, limit=20)` — Volltext-Suche durch alle Tool-Namen + Descriptions. Optional gefiltert nach `group` (`news`, `layout`, `module`, `image_size`, …). Leere Query + Group listet alle Tools dieser Gruppe.
 - `contao_describe_tool(name)` — vollständiges JSON-Schema + Description für ein einzelnes Tool. Aufruf vor `contao_call` um zu wissen welche Parameter erwartet werden.
 - `contao_call(name, args)` — Proxy-Aufruf für jedes verstecktes Tool. `args` ist ein JSON-Objekt mit den Parametern des Ziel-Tools.
 - `ping`, `contao_version`, `installed_bundles` — Health-Probes, die Claude oft direkt braucht.
 
-Die anderen ~100 Tools sind **nicht weg** — sie bleiben über `contao_call` aufrufbar. Der LLM lernt das Pattern im ersten oder zweiten Aufruf und nutzt es flüssig.
+Die übrigen Tools sind **nicht weg** — sie bleiben über `contao_call` aufrufbar. Der LLM lernt das Pattern im ersten oder zweiten Aufruf und nutzt es flüssig.
 
 **Typische Sequenz** bei „lege eine News an":
 
@@ -488,7 +488,7 @@ Das Backend (Menüpunkt **MCP-Server → Konfiguration**) speichert die Werte in
 - _Code-Änderungen greifen nicht:_ Symfony-Cache leeren: `vendor/bin/contao-console cache:clear --env=prod`.
 - _Backend-User für Write-Operationen:_
   - Bei `auth_mode=oauth` + eingeloggtem Browser-User: Schreib-Operationen werden dem echten `tl_user` als Author zugeordnet. `tl_log.username` erhält das Format `<username> (mcp:<client_name>)`, z.B. `kalus (mcp:Claude Desktop)`. `tl_log.source` ist `mcp_oauth` — filtierbar im Backend-System-Log.
-  - Bei `auth_mode=none`: kein User-Kontext bekannt → Fallback auf `default_author_id` aus `config/packages/netzhirsch_contao_mcp.yaml`, sonst niedrigster Admin-User. `tl_log.username`: `<default_user> (mcp)`, `source`: `mcp`.
+  - Bei `auth_mode=none`: kein User-Kontext bekannt → Fallback auf `contao_mcp.write.default_author_id` aus `config/config.yaml` (die Managed Edition liest `config/packages/` nicht), sonst niedrigster Admin-User. `tl_log.username`: `<default_user> (mcp)`, `source`: `mcp`.
 - _OAuth-Token rejected:_ Wenn Claude / mcp-remote sich nicht mehr verbinden kann und im Log `MCP OAuth auth rejected` erscheint: einmal `~/.mcp-auth/` (im User-Home) löschen, dann Claude Desktop neu starten — das triggert einen frischen OAuth-Flow.
 - _Plesk / Shared-Hosting mit Basic-Auth:_ wenn die Domain hinter `.htpasswd` liegt, müssen `/mcp`, `/.well-known/oauth-*` und `/_mcp_oauth/*` davon ausgenommen werden, sonst scheitern MCP-Clients schon am 401 der Basic-Auth statt am OAuth-401. Beispiel (Apache 2.4, in der `.htaccess` mit der Auth-Konfiguration):
 

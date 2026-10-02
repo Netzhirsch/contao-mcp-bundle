@@ -4,13 +4,13 @@
 
 *🇬🇧 [English version](README.en.md) — diese deutsche Fassung ist die Referenz.*
 
-**Status:** Stable — `v1.25.0`
+**Status:** Stable — aktuelle Version und alle Änderungen im [CHANGELOG](CHANGELOG.md)
 **Lizenz:** proprietär, kommerziell lizenziert — 30 Tage kostenlos testen,
 danach 49 €/Monat je Contao-Instanz (siehe [Lizenz & Testphase](#lizenz--testphase)
 und [LICENSE](LICENSE))
 
 Ein [Model Context Protocol](https://modelcontextprotocol.io/)-Server als
-Contao-5-Bundle. Verbindet Claude Desktop, Claude in der API, Claude Code,
+Bundle für Contao 5.3 LTS, 5.7 LTS und 6.0. Verbindet Claude Desktop, Claude in der API, Claude Code,
 MCP Inspector oder jede andere MCP-fähige KI direkt mit dem Contao-Backend —
 ohne eigene REST-Endpunkte, ohne Middleware, ohne Port.
 
@@ -18,25 +18,27 @@ Statt jeder KI-Aufgabe einen eigenen API-Endpunkt nachzuziehen, bekommt die
 KI-Session strukturierten Zugriff auf den gesamten DCA-Stack: Redakteure können
 per natürlichsprachlichem Auftrag Inhalte anlegen, Pipelines können Seiten
 vollautomatisch aus Drittsystemen befüllen, Entwickler können Strukturmigrationen
-skripten — alles über dieselben 197 Tools, abgesichert mit denselben
+skripten — alles über dieselben 196 Tools, abgesichert mit denselben
 Backend-Benutzerrechten wie beim manuellen Bearbeiten.
 
-**Unterstützte Entitäten:** News, Seiten, Artikel, Kalender, FAQ, Mitglieder,
-Formulare, Newsletter, Kommentare, Themes, Layouts, Module, Bildgrößen,
-Templates, Dateien, URL-Rewrites, Formular-Leads, Wartung +
-System-Einstellungen.
+**Unterstützte Entitäten:** Seiten, Artikel, Inhaltselemente, News, Kalender,
+FAQ, Mitglieder und Mitgliedergruppen, Backend-Benutzer und -Gruppen (lesend),
+Formulare und Formularfelder, Newsletter, Kommentare, Themes, Layouts, Module,
+Bildgrößen, Templates, Dateien, URL-Rewrites, Formular-Leads (lesend),
+OpenGraph-/X-Card-Daten, Suchindex, Wartung + System-Einstellungen.
 
 ## Was drin ist
 
-- **197 Tools** über Contao-Kernentitäten + populäre Extensions.
-- **Lazy-Mode-Discovery**: drei Meta-Tools (`contao_search_tools`,
-  `contao_describe_tool`, `contao_call`) verstecken die übrigen vor
-  `tools/list` — spart bei Claude Desktop ~12 KB System-Prompt-Overhead pro
-  Turn.
+- **196 Tools** über Contao-Kernentitäten + populäre Extensions.
+- **Lazy-Mode-Discovery** (zuschaltbar über `lazy_mode`, Standard: aus):
+  `tools/list` zeigt nur die drei Meta-Tools `contao_search_tools`,
+  `contao_describe_tool` und `contao_call` sowie `ping`, `contao_version` und
+  `installed_bundles`; alle übrigen bleiben über `contao_call` erreichbar. Statt
+  rund 180 KB Tool-Schemas gehen so pro Turn rund 3 KB an den Client.
 - **OAuth 2.1** mit PKCE, Client-ID-Metadatendokumenten (CIMD),
   Dynamic Client Registration (RFC 7591) und Protected-Resource-Metadata
-  (RFC 9728). Mit CIMD verbindet sich Claude **ohne jede Vorbereitung im
-  Backend** — kein Pairing-Fenster, keine geöffnete Registrierung. Wer
+  (RFC 9728). Mit CIMD verbindet sich Claude **ohne Registrierungsschritt** —
+  kein Pairing-Fenster, keine geöffnete Registrierung. Wer
   registrieren will, kann es weiterhin: im Default-Modus `restricted`
   ausschließlich im 15-Minuten-Pairing-Fenster.
 - **Rechte-Parität**: Die Rechte des Backend-Benutzers gelten für die KI 1:1,
@@ -47,11 +49,15 @@ System-Einstellungen.
   nichts ändert (beim Anlegen der Default, beim Ändern der gespeicherte Wert),
   braucht kein Recht, wie im Backend. Ebenso `rsce_data`: RSCE schreibt die
   Spalte über virtuelle Felder, die nie ein Feldrecht verlangen.
+  Nicht-Administratoren brauchen außerdem das Häkchen **„MCP-Server-Zugriff
+  erlauben"** am Benutzer oder an einer seiner Gruppen (Standard: aus); ohne
+  es wird jeder Aufruf mit `mcp_access_denied` abgewiesen.
 - **Volltextsuche über die Website**: `search_query` durchsucht Contaos
   Suchindex (`tl_search`) — findet also auch Text, der aus Modulen, Includes
   oder Erweiterungen stammt und über die CRUD-Tools nicht auffindbar wäre.
-  Geschützte Seiten bleiben außen vor; `search_index_status` zeigt, ob der
-  Index überhaupt befüllt ist.
+  Geschützte Seiten bleiben außen vor, und ein eingeschränkter Benutzer sieht
+  nur Treffer aus seinen eigenen Seiten-Mounts (`out_of_scope_skipped` zählt
+  den Rest); `search_index_status` zeigt, ob der Index überhaupt befüllt ist.
 - **Filesystem-Suche**: `files_search` (rekursive Glob-Suche im Upload-Tree,
   POSIX-Syntax + `**`-Erweiterung, basename-Match bei Patterns ohne Slash)
 - **Site-Building-Helfer**: `entity_move`, `page_cache_invalidate`,
@@ -66,16 +72,35 @@ System-Einstellungen.
   sonst bricht der Aufruf ab, ohne den Datensatz anzufassen — und der
   Schreibvorgang läuft trotzdem über das `*_update`-Tool der Tabelle, mit
   Versions-Snapshot.
+- **External IDs** machen wiederholte Importe idempotent — dieselbe Quellzeile
+  aktualisiert denselben Datensatz, statt Dubletten anzulegen.
 - **`html_filter_info` + `html_filter_preview`**: was der Ausgabefilter von
   eigenem Markup übrig lässt — **bevor** es geschrieben wird. Gespeichert ist
   nicht gerendert: Der Read-back liefert das Markup unverändert zurück, während
   `<input type>` und `<label for>` im Frontend längst entfernt sind.
-- **Optionale Extension-Tools**: erscheinen automatisch, sobald das jeweilige
-  Bundle installiert ist (sonst sauberer `extension_not_available`-Fehler):
-  Newsletter, Kommentare, `url_rewrite_*` (terminal42), **lesend**
-  `leads_list` + `lead_get` für Formular-Einsendungen (`terminal42/contao-leads`),
-  **OpenGraph & X-Cards** (`numero2/contao-opengraph3`, siehe unten)
-  und **Übersetzen mit DeepL** (`numero2/contao-deepl`, siehe unten).
+- **Optionale Bundles**: Die Tools sind immer registriert und arbeiten,
+  sobald das jeweilige Paket installiert ist — News, Kalender, FAQ, Newsletter
+  und Kommentare (Contao-Bundles, in der Managed Edition enthalten),
+  `url_rewrite_*` (terminal42), **lesend** `leads_list` + `lead_get` für
+  Formular-Einsendungen (`terminal42/contao-leads`), **OpenGraph & X-Cards**
+  (`numero2/contao-opengraph3`, siehe unten), **Übersetzen mit DeepL**
+  (`numero2/contao-deepl`, siehe unten) und die Sprachverknüpfung
+  `entity_language_link` (`terminal42/contao-changelanguage`). Ohne ihr Paket
+  antworten Newsletter-, Kommentar- und Erweiterungs-Tools mit
+  `extension_not_available`; die News-, Kalender- und FAQ-Tools setzen ihr
+  Bundle voraus.
+- **Dateien hochladen**, auch große: `file_upload_begin`/`_chunk`/`_finish`
+  übertragen eine Datei in Stücken, ohne dass sie vorher irgendwo öffentlich
+  liegen muss; Größe, `sha256` und Magic Bytes werden geprüft, bevor etwas
+  geschrieben wird (siehe unten).
+- **Fremdtext ist markiert**: Lese-Antworten nennen unter `_untrusted_fields`
+  die Felder, in denen Besucher- oder Redaktionstext steht — damit ein Agent
+  Anweisungen darin nicht für Anweisungen hält.
+- **Leitfaden als MCP-Prompt** `contao_guide`, erzeugt aus dem Zustand dieser
+  Installation: Versionen, Zahl der Tools, Lazy-Mode, installierte und
+  fehlende Erweiterungen.
+- **Erweiterbar**: Andere Bundles können eigene Tools (im Tool-Panel einzeln
+  freizuschalten) und Felder beisteuern — siehe [EXTENDING.md](EXTENDING.md).
 - **RockSolid Custom Elements**: RSCE-Elemente (`rsce_*`) lassen sich als
   Inhaltselement, Frontend-Modul und Formularfeld anlegen **und** konfigurieren.
   `rsce_data` wird gegen die
@@ -113,9 +138,11 @@ System-Einstellungen.
   wird gezeigt, hält aber nichts auf. Ein `.html5`-Template in einen anderen
   Ordner zu verschieben ist folgerichtig gar nicht blockiert: Contao findet es
   über den Basisnamen, der sich dabei nicht ändert.
-- **Backend-Modul** „MCP-Server" mit vier Bereichen: Status (Lizenz + Testphase/
-  Abo starten, OAuth-Clients, IATs), Konfiguration, Aktivitätslog, Tool-Panel
-  (jedes Tool einzeln abschaltbar) — **nur für Contao-Administratoren**.
+- **Backend-Modul** „MCP-Server" mit vier Bereichen: Status (Lizenz +
+  Testphase/Abo, Update-Hinweis, Pairing-Fenster, OAuth-Clients),
+  Konfiguration, Aktivitätslog, Tool-Panel (jedes Tool einzeln abschaltbar —
+  bis auf `contao_search_tools`, `contao_describe_tool`, `contao_call` und
+  `ping`) — **nur für Contao-Administratoren**.
 - **Linux + Windows getestet** (Laragon dev, Debian production).
 
 ## Installation
@@ -126,8 +153,8 @@ System-Einstellungen.
 composer require netzhirsch/contao-mcp-bundle
 ```
 
-Mehr ist nicht nötig — kein `repositories`-Eintrag, kein Patch-Block, kein
-`allow-plugins`. Das Bundle liegt auf
+Mehr ist nicht nötig (unter Contao 6 mit `-W`, siehe [Contao 6](#contao-6)) —
+kein `repositories`-Eintrag, kein Patch-Block, kein `allow-plugins`. Das Bundle liegt auf
 [Packagist](https://packagist.org/packages/netzhirsch/contao-mcp-bundle).
 
 Alternativ im **Contao Manager** nach „Contao MCP Bundle" suchen und
@@ -151,9 +178,11 @@ wurde, antwortet auf `/mcp` mit **503** und nennt das Backend-Modul. Erst dort
 wählt man den Modus — `none` bleibt möglich, aber nur als ausdrückliche
 Entscheidung für einen privaten oder Loopback-Host.
 
-Der MCP-Endpoint ist nach der Migration sofort live unter
-`https://<backend_url>/mcp` — Apache/PHP-FPM serviert ihn wie jede andere
-Symfony-Route. Kein Daemon, kein Port, kein Reverse-Proxy nötig.
+Die Route `/mcp` ist nach der Migration sofort registriert
+(`<backend_url>/mcp`) — Apache/PHP-FPM serviert sie wie jede andere
+Symfony-Route. Kein Daemon, kein Port, kein Reverse-Proxy nötig. Antworten gibt
+sie, sobald die Konfiguration einmal gespeichert und eine Lizenz oder Testphase
+aktiv ist.
 
 ### 4. Lizenz aktivieren (30 Tage kostenlos)
 
@@ -168,8 +197,12 @@ läuft normal weiter. Im Backend unter **MCP-Server → Status** oben auf
 (Client anbinden, online + lokal) und [docs/dokumentation.md](docs/dokumentation.md)
 (vollständige Funktionsreferenz). Im Backend selbst gibt es keinen Doku-Tab mehr.
 
-> **Client verbinden bei `oauth_registration_mode: restricted` (Default):** Der
-> Weg ist **MCP-Server → Status → „Registrierung für 15 Minuten öffnen"**. Das
+> **Client verbinden bei `oauth_registration_mode: restricted` (Default):**
+> Claude-Connectors brauchen dafür nichts zu öffnen, solange CIMD aktiv ist
+> (Standard, siehe [Verbinden ohne Pairing: CIMD](#verbinden-ohne-pairing-cimd)).
+> Für Clients, die sich per Dynamic Client Registration anmelden — etwa
+> `mcp-remote` oder der MCP Inspector —, ist der Weg
+> **MCP-Server → Status → „Registrierung für 15 Minuten öffnen"**. Das
 > Fenster bleibt die vollen 15 Minuten offen, egal wie viele Versuche das kostet
 > (bis 1.4.0 schloss es nach der ersten erfolgreichen Registrierung — daher
 > scheiterten Retrys und ein zweiter Client). Abgewiesene Versuche stehen mit
@@ -178,7 +211,6 @@ läuft normal weiter. Im Backend unter **MCP-Server → Status** oben auf
 Schritt-für-Schritt-Anleitung für die lokale Connector-Einrichtung
 (`mcp-remote`-Bridge, `claude_desktop_config.json`, OAuth, Schema-Cache +
 Stolperfallen): **[docs/mcp-client-lokal-einrichten.md](docs/mcp-client-lokal-einrichten.md)**.
-Kurzfassung der genauen Config-Werte auch im Backend-Doku-Tab des MCP-Server-Moduls.
 
 ## Lizenz & Testphase
 
@@ -210,10 +242,10 @@ vendor/bin/contao-console contao:mcp:license trial <email>   # Testphase starten
 vendor/bin/contao-console contao:mcp:license activate <token> # Token einspielen
 ```
 
-**Was dabei an den Lizenzserver geht.** Die Erneuerung meldet vier Dinge: das
-Produkt, die Domain, ein zufälliges Instanz-Geheimnis als Eigentumsnachweis —
-und seit 1.26.0 drei Versionsangaben: **Bundle-, Contao- und PHP-Version.**
-Mehr nicht. Kein Inhalt, keine Benutzerdaten, keine Seiten- oder
+**Was dabei an den Lizenzserver geht.** Die Erneuerung meldet: das Produkt,
+die Domain, das bisherige Lizenz-Token, ein zufälliges Instanz-Geheimnis als
+Eigentumsnachweis — und seit 1.26.0 drei Versionsangaben: **Bundle-, Contao-
+und PHP-Version.** Mehr nicht. Kein Inhalt, keine Benutzerdaten, keine Seiten- oder
 Nutzungszahlen, keine Liste installierter Erweiterungen. Der Server nimmt
 solche Felder auch gar nicht an. Die Versionsangaben beantworten zwei Fragen,
 die sonst jeden Supportfall begleiten: welche Version bei einem Kunden läuft,
@@ -235,25 +267,43 @@ Ein Ausfall des Lizenzservers sperrt daher niemanden aus — zusätzlich gelten
 
 > Verbindung zum Lizenzserver: `https://license.netzhirsch.de`, fest im Bundle
 > hinterlegt — **nichts zu konfigurieren**. Übertragen werden Domain, Produkt,
-> das Instanz-Geheimnis, die drei Versionsangaben und — nur beim Bestellen —
-> die E-Mail des bestellenden Backend-Users.
+> das Lizenz-Token, das Instanz-Geheimnis, die drei Versionsangaben und — nur
+> beim Start einer Testphase oder eines Abos — die E-Mail des auslösenden
+> Backend-Users bzw. die an `contao:mcp:license trial` übergebene.
 
 ## Anforderungen
 
 - **PHP** `^8.1` mit Extensions: `openssl`, **`sodium`**, `pdo_mysql`, `mbstring`,
   `intl` (`sodium` ist für die Lizenzprüfung zwingend — fehlt es, bleiben alle
-  Tools gesperrt; der Code ist 8.1-sauber, die 8.1-Untergrenze deckt
-  Contao-5.3-Installationen ab)
-- **Contao** 5.3 bis 6.0 (die CI fährt den Smoke-Test gegen 5.3, 5.7 **und** 6.0)
-- **Symfony** ≥ 6.4, 7.x oder 8.x
+  Tools gesperrt; die 8.1-Untergrenze deckt Contao 5.3 LTS ab — 5.7 braucht
+  PHP ≥ 8.3, 6.0 PHP ≥ 8.4)
+- **Contao** 5.3 LTS, 5.7 LTS und 6.0 — genau die Versionen, gegen die die CI
+  testet. 5.4, 5.5 und 5.6 sind bei Contao am Ende ihrer Laufzeit und werden
+  nicht unterstützt; eine Installation darauf bleibt bei Version 1.37.1 des
+  Bundles stehen, bis Contao aktualisiert ist.
+- **Symfony** 6.4 (Contao 5.3), 7.4 (Contao 5.7 und 6.0) oder 8.x (Contao 6.0)
+- **MySQL** ≥ 8.0 oder MariaDB ≥ 10.6 (strict mode unterstützt)
+- **Speicher für `var/mcp/`**: schreibbar, mehr nicht. Seit 1.9.1 schreibt das
+  Bundle seine Zustandsdateien atomar per `rename()` und braucht **kein
+  funktionierendes Datei-Locking** — NFS-Mounts ohne `lockd`/`statd` sind damit
+  unproblematisch. Auf ≤ 1.9.0 konnte `flock()` dort unbegrenzt hängen und einen
+  Gateway Timeout auslösen (siehe CHANGELOG 1.9.1).
+- **HTTPS** in Produktion — für OAuth 2.1 praktisch Pflicht.
+
+Shared Hosting geht: Das Bundle läuft rein über HTTP, braucht keinen Daemon,
+keinen offenen Port und keinen Shell-Zugang (dann über den Contao Manager
+installieren).
 
 ### Contao 6
 
-Läuft ohne Anpassung. Zwei Dinge sind beim Installieren zu beachten:
+Läuft ohne Anpassung — unter Symfony 8 seit 1.37.1; davor antworteten dort
+`/mcp`, `/mcp/healthz` und die `.well-known`-Metadaten mit 404, und die
+Backend-Seiten unter „MCP-Server" brachen mit Fehler 500 ab. Zwei Dinge sind
+beim Installieren zu beachten:
 
 **Contao 6 verlangt PHP ≥ 8.4.** Die PHP-Untergrenze des Bundles bleibt bei 8.1,
-damit Contao-5.3-Instanzen weiterlaufen — auf PHP 8.1 ist schlicht nur die
-5er-Linie installierbar.
+damit Contao-5.3-Instanzen weiterlaufen — auf PHP 8.1 und 8.2 ist nur
+Contao 5.3 installierbar.
 
 **Der Installationsbefehl braucht `-W`:**
 
@@ -262,16 +312,19 @@ composer require netzhirsch/contao-mcp-bundle -W
 ```
 
 Grund ist nicht das Bundle, sondern `php-mcp/server`: es pinnt
-`phpdocumentor/reflection-docblock` auf `^5.6` und `symfony/finder` auf `^7.2`,
+`phpdocumentor/reflection-docblock` auf `^5.6` und `symfony/finder` auf `^6.4 || ^7.2`,
 während eine Contao-6-Installation beide höher auflöst. `-W` erlaubt Composer,
 sie zurückzustufen. Beide Pakete vertragen das; ohne `-W` bricht die Auflösung
 ab. Auf Contao 5 ist das Flag überflüssig.
-- **MySQL** ≥ 8.0 oder MariaDB ≥ 10.6 (strict mode unterstützt)
-- **Speicher für `var/mcp/`**: schreibbar, mehr nicht. Seit 1.9.1 schreibt das
-  Bundle seine Zustandsdateien atomar per `rename()` und braucht **kein
-  funktionierendes Datei-Locking** — NFS-Mounts ohne `lockd`/`statd` sind damit
-  unproblematisch. Auf ≤ 1.9.0 konnte `flock()` dort unbegrenzt hängen und einen
-  Gateway Timeout auslösen (siehe CHANGELOG 1.9.1).
+
+## Transport und Protokoll
+
+Streamable HTTP auf einem einzigen Endpunkt, `POST /mcp`. Einen **SSE-Kanal gibt
+es nicht** — keinen GET-Stream und keine vom Server angestoßenen Nachrichten,
+nur JSON als Anfrage und Antwort. Protokollrevision **2025-03-26**; Clients mit
+**2024-11-05** werden ebenfalls angenommen. Jeder MCP-Client, der Streamable HTTP
+mit OAuth spricht, sollte funktionieren; getestet wird gegen Claude. Ein
+JSON-RPC-Batch nimmt höchstens 50 Aufrufe.
 
 ## Smoke-Test
 
@@ -279,22 +332,39 @@ ab. Auf Contao 5 ist das Flag überflüssig.
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
 
-Geht rund 500 Asserts gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
+Geht rund 500 Prüfungen gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
 Newsletter/Comments/Theme/Layout/Templates/Maintenance + Content-Baum +
 Rechte-Parität + External-ID + Audit-Regressions + Key-Rotation + Rate-Limit +
 MCP-Activity-Log), erstellt eigene Testdaten, räumt am Ende wieder auf. Soll
 grün durchlaufen.
 
+Fehlt eines der optionalen Contao-Bundles (News, Kalender, FAQ, Kommentare,
+Newsletter), überspringt er die Prüfungen, die es braucht, statt abzubrechen —
+jede auf einer eigenen ⊝-Zeile. Die Zusammenfassung zählt sie getrennt von den
+bestandenen (`15 section(s) skipped — not installed: …`): kein Fehlschlag, aber
+ein Hinweis, dass weniger geprüft wurde als auf einer vollen Installation.
+
+Für einzelne Prüfungen stellt der Test `var/mcp/config.json` kurz um — unter
+anderem auf `auth_mode=none` und ein offenes Pairing-Fenster — und stellt die
+Datei am Ende in jedem Fall wieder her, auch wenn ein Abschnitt abbricht. Für diese
+Sekunden gelten die Werte aber wirklich; deshalb gehört er auf eine Staging-
+oder eine nicht öffentlich erreichbare Instanz. Backend-Seiten und
+HTTP-Routing prüft er nicht, er ruft die Tools im Prozess auf — das übernimmt
+die CI.
+
 Auf einer **frischen Installation** (keine Root-Seite, kein Administrator oder
 keine Datei) legt der Test die fehlenden Fixtures für die Dauer des Laufs an:
-einen Seitenbaum mit Artikel, einen Administrator mit zufälligem, nie
+einen Seitenbaum mit Artikel (mit News-Bundle dazu ein Nachrichtenarchiv),
+einen Administrator mit zufälligem, nie
 angezeigtem Passwort und eine Datei. Danach entfernt er sie wieder, auch wenn
 ein Abschnitt abbricht. So laufen in CI dieselben Abschnitte wie auf einer
 gepflegten Installation. `--keep` lässt auch die Fixtures stehen.
 
-Zusätzlich gibt es eine isolierte PHPUnit-Suite (`vendor/bin/phpunit`)
-für OAuth-Crypto-Edge-Cases (dual-key Rotation, IAT single-use,
-HMAC-Pepper) die der Smoke-Test als End-to-End nicht erreicht.
+Zusätzlich gibt es eine PHPUnit-Suite (`composer verify` = PHPStan + PHPUnit,
+im Checkout des Bundles) für alles, was ohne Datenbank prüfbar ist: OAuth und
+CIMD, Rechte- und Feldrechteprüfung, Lizenz, Lösch-Schutz, Upload-Prüfung,
+DeepL, RSCE, die Backend-Templates und die Kompatibilität mit Contao 6 und
+Symfony 8.
 
 ## Lokale Entwicklung & HTTPS
 
@@ -318,21 +388,39 @@ siehe **[docs/lokales-https.md](docs/lokales-https.md)**.
 
 Returnt eine strukturierte Liste über PHP-Setup, `var/mcp/`-Permissions,
 OAuth-Konfig + `warnings: [...]` mit konkreten Fix-Befehlen. Vor jedem
-Site-Move oder Server-Wechsel laufen lassen.
+Site-Move oder Server-Wechsel laufen lassen; das Tool braucht einen
+Administrator.
+
+Für ein Monitoring ohne Token gibt es `GET /mcp/healthz`: 200, wenn die
+Datenbank antwortet, `var/mcp/` schreibbar ist, die OAuth-Schlüssel da sind (im
+Modus `oauth`) und mindestens 50 MB frei sind — sonst 503 mit den Namen der
+fehlgeschlagenen Prüfungen.
+
+## Rate-Limits
+
+- `/mcp`: 600 Anfragen pro Minute je OAuth-Client (gleitendes Fenster). Jede
+  POST-Anfrage zählt, `tools/list` und `initialize` eingeschlossen, und jeder
+  Aufruf in einem Batch zählt einzeln (höchstens 50 pro Batch); darüber kommt
+  429 mit `Retry-After`. Mit `auth_mode: none` gibt es kein Limit.
+- Pro IP: `/_mcp_oauth/register` 10 pro Stunde, `/_mcp_oauth/token` 60 pro
+  Minute, `/_mcp_oauth/authorize` 30 pro Minute.
+- CIMD-Abrufe: 30 pro Stunde je `client_id`-Host, 120 pro Stunde insgesamt.
 
 ## Verbinden ohne Pairing: CIMD
 
 Seit 1.11.0 kann ein Client sich mit einer HTTPS-URL ausweisen, statt sich zu
 registrieren — der Server liest die Client-Daten von dieser URL
 ([Client ID Metadata Document](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00)).
-Für den Kunden heißt das: **kein Pairing-Fenster öffnen, nichts vorbereiten.**
+Für den Kunden heißt das: **kein Pairing-Fenster öffnen.** Eine gespeicherte
+Konfiguration mit `backend_url` und eine aktive Lizenz braucht die Instanz
+trotzdem.
 Claude wählt diesen Weg von selbst, wenn die Instanz ihn ankündigt.
 
 Umschaltbar im Backend unter **MCP-Server → Konfiguration**:
 
 | Modus | Bedeutung |
 |---|---|
-| `trusted` *(Standard)* | nur `claude.ai`, `claude.com` und deren Subdomains |
+| `trusted` *(Standard)* | nur die Hosts aus `cimd_trusted_hosts` (Standard: `claude.ai`, `claude.com`) und deren Subdomains; die Liste steht nur in `var/mcp/config.json` |
 | `open` | jede HTTPS-`client_id`, die offene Haltung der Spezifikation |
 | `off` | nicht angekündigt, Clients registrieren sich wie bisher (DCR) |
 
@@ -353,7 +441,8 @@ der Rahmen:
   NAT64 und IPv4-in-IPv6
 - keine Weiterleitungen, 5 Sekunden Zeitlimit, 5 KB Größengrenze beim Streamen,
   `Content-Type` muss JSON sein
-- Rate-Limit pro `client_id`-Host, nur bei Cache-Miss
+- Rate-Limit pro `client_id`-Host (30 pro Stunde) und insgesamt (120 pro
+  Stunde), nur bei Cache-Miss
 - das `client_id`-Feld im Dokument muss exakt der abgerufenen URL entsprechen
 - `logo_uri` wird ignoriert
 
@@ -369,8 +458,9 @@ echten Clients für sich beansprucht.
 
 ## Konfiguration
 
-Datei: `var/mcp/config.json` (wird beim ersten Backend-Aufruf des Moduls
-angelegt).
+Datei: `var/mcp/config.json` (Rechte `0600`). Sie entsteht beim **ersten
+Speichern** im Backend — Konfiguration, Tool-Panel oder Pairing-Button; bis
+dahin antwortet `/mcp` mit 503.
 
 > Die vier **MCP-Server-Backendmodule sind Administratoren vorbehalten** — sie
 > schalten `auth_mode` (und damit die komplette Rechteprüfung), vergeben
@@ -381,19 +471,28 @@ Felder:
 
 | Key | Default | Bedeutung |
 |---|---|---|
-| `path` | `mcp` | URL-Pfad (ohne führenden Slash) |
+| `path` | `mcp` | Pfad, den die Backend-Anzeige und `oauth-protected-resource` nennen. Der Endpunkt selbst liegt fest unter `/mcp` — ein anderer Wert verschiebt ihn nicht, also auf `mcp` lassen |
 | `pagination_limit` | `500` | Max Tools pro `tools/list` (irrelevant in Lazy-Mode) |
-| `auth_mode` | `none` | `none` oder `oauth` |
+| `auth_mode` | `oauth` | `oauth` oder `none` (nur für private oder Loopback-Hosts) |
 | `backend_url` | `""` | Public Base-URL des Contao-Backends (Pflicht bei OAuth) |
 | `oauth_registration_mode` | `restricted` | `restricted` (Registrierung nur im Pairing-Fenster) oder `open` |
-| `lazy_mode` | `false` | Wenn `true`: nur 6 Discovery-Tools in `tools/list` |
+| `cimd_mode` | `trusted` | `trusted`, `open` oder `off` (siehe [CIMD](#verbinden-ohne-pairing-cimd)) |
+| `cimd_trusted_hosts` | `["claude.ai", "claude.com"]` | Hosts samt Subdomains für `trusted`; kein Formularfeld, nur in der Datei |
+| `lazy_mode` | `false` | Wenn `true`: `tools/list` zeigt nur die drei Meta-Tools plus `ping`, `contao_version`, `installed_bundles` |
+| `disabled_tools` | `[]` | abgeschaltete Tools, gepflegt im Tool-Panel |
+| `extension_tools_enabled` | `[]` | freigeschaltete Tools anderer Bundles, ebenfalls im Tool-Panel ([EXTENDING.md](EXTENDING.md)) |
+| `registration_open_until` | `0` | Ende des Pairing-Fensters (Unix-Zeit), gesetzt vom Button auf der Status-Seite |
+| `license_server_url` | `""` | nur für die Entwicklung: ersetzt den eingebauten Lizenzserver |
 
-Bundle-eigene Konfig in `config/packages/netzhirsch_contao_mcp.yaml`:
+Bundle-eigene Konfig in `config/config.yaml` — die Contao Managed Edition liest
+`config/packages/` nicht:
 
 ```yaml
-netzhirsch_contao_mcp:
+contao_mcp:
     write:
-        default_author_id: 1   # Fallback wenn auth_mode=none
+        # Autor der Schreib-Tools, wenn kein angemeldeter Benutzer bekannt ist
+        # (auth_mode=none); leer = der Administrator mit der niedrigsten ID
+        default_author_id: 1
     preview:
         # Nur nötig, wenn die Instanz hinter HTTP-Basic-Auth liegt.
         # Default ist die Env-Variable; ohne sie bleibt alles wie bisher.
@@ -442,7 +541,7 @@ Was wann geprüft wird:
 
 | Zeitpunkt | Prüfung |
 |---|---|
-| `begin` | Zielordner, Dateiname, Endung gegen `tl_settings.uploadTypes`, angekündigte Größe gegen `maxFileSize`, `meta` |
+| `begin` | Zielordner, Dateiname, Endung gegen `tl_settings.uploadTypes`, angekündigte Größe gegen `maxFileSize`, `meta`, bestehende Datei (ohne `overwrite`) |
 | jeder `chunk` | Reihenfolge (lückenlos, genau einmal), laufende Summe ≤ angekündigte Größe |
 | `finish` | Summe stimmt, `sha256` stimmt, **Magic Bytes gegen die Endung**, aktives Markup, Überschreiben |
 
@@ -456,15 +555,17 @@ Dateien `0600`, außerhalb des Web-Roots. Eine Sitzung gehört dem Backend-Benut
 der sie geöffnet hat, und verfällt nach einer Stunde; beim nächsten `begin`
 werden abgelaufene Reste entfernt. Ein eigener Cron ist dafür nicht nötig.
 
-Schlägt `finish` fehl, weil etwas am Ziel nicht stimmt — Datei existiert bereits,
-Ordner verschwunden —, **bleibt die Sitzung bestehen**, damit nicht alles noch
-einmal übertragen werden muss.
+Lehnt `finish` das Ablegen ab — die Datei existiert inzwischen, der Inhalt passt
+nicht zur Endung —, **bleibt die Sitzung bestehen**, damit nicht alles noch
+einmal übertragen werden muss. Ist der Zielordner verschwunden oder stimmen
+Summe oder `sha256` nicht, wird sie verworfen; dann neu mit
+`file_upload_begin`.
 
 ## OpenGraph & X-Cards
 
 Braucht [`numero2/contao-opengraph3`](https://github.com/numero2/contao-opengraph3)
-(ab v5, Contao 5.7+). Ohne die Erweiterung melden die Tools sauber
-`extension_not_available`.
+(ab v5, nur unter Contao 5.7 und 6.0 — für 5.3 gibt es keine passende Fassung).
+Ohne die Erweiterung melden die Tools sauber `extension_not_available`.
 
 ```bash
 composer require numero2/contao-opengraph3
@@ -515,9 +616,10 @@ Tabellen können den Typ einschränken: `tl_news` akzeptiert nur `article`,
 `tl_calendar_events` nur `website`. `og_image` und `twitter_image` nehmen eine
 Hex-UUID, eine UUID mit Bindestrichen **oder** einen Dateipfad.
 
-Die Felder sind außerdem über die generischen Wege erreichbar: `page_get`
-liefert sie jetzt mit, und `page_update(extras: {...})` schreibt sie — mit
-derselben Typprüfung, weil beide denselben Field-Provider durchlaufen.
+Die Felder sind außerdem über die generischen Wege erreichbar: `page_get`,
+`news_get`, `calendar_event_get` und `faq_get` liefern sie mit, die zugehörigen
+`*_create`/`*_update` schreiben sie über `extras: {...}` — mit derselben
+Typprüfung, weil alle denselben Field-Provider durchlaufen.
 
 ## Übersetzen mit DeepL
 
@@ -533,9 +635,11 @@ composer require numero2/contao-deepl
 DEEPL_API_KEY="…"
 ```
 
-> Der Schlüssel ist Pflicht, sobald das Bundle installiert ist: `numero2` setzt
-> `%env(DEEPL_API_KEY)%` ohne Fallback, ein fehlender Wert lässt schon
-> `cache:clear` mit *„Environment variable not found"* abbrechen.
+> In `numero2/contao-deepl` 1.2.0 hat `DEEPL_API_KEY` einen leeren Default: Ohne
+> Schlüssel läuft die Installation weiter, und die `deepl_*`-Tools antworten
+> mit `deepl_not_configured`. Ältere Fassungen setzten die Variable ohne
+> Fallback — dort lässt ein fehlender Wert schon `cache:clear` mit
+> *„Environment variable not found"* abbrechen.
 
 Danach erscheinen vier Tools. Fehlt eines von beidem, antworten sie mit
 `extension_not_available` bzw. `deepl_not_configured` und sagen, was fehlt —
@@ -563,10 +667,13 @@ contao:
             de-en: "a1b2c3d4-…"   # Glossar-ID aus der DeepL-Weboberfläche
 ```
 
-Die Regeln sind dieselben wie im Backend, bewusst bis ins Detail: Regionale
-Varianten fallen weg (`en-US` und `en-GB` nutzen beide das `de-en`-Glossar), das
-Paar wird ohne Rücksicht auf Groß-/Kleinschreibung verglichen, und ein Paar aus
-derselben Sprache bekommt kein Glossar.
+Die Regeln für das Paar sind dieselben wie im Backend, bewusst bis ins Detail:
+Regionale Varianten fallen weg (`en-US` und `en-GB` nutzen beide das
+`de-en`-Glossar), das Paar wird ohne Rücksicht auf Groß-/Kleinschreibung
+verglichen, und ein Paar aus derselben Sprache bekommt kein Glossar. Ein
+Unterschied bleibt: Der Backend-Knopf leitet die Quellsprache aus der
+Fallback-Sprache der Website ab, MCP nimmt sie nur aus dem Aufruf
+(`source_lang`) oder der Konfiguration.
 
 **Ohne Quellsprache kein Glossar.** DeepL braucht das Paar; fehlt
 `source_lang` und gibt der Aufruf auch keine mit, wird ohne Glossar übersetzt.
@@ -601,8 +708,9 @@ Entscheidungen sind:
   schreiben: Versions-Snapshot, `tl_log`-Eintrag, `changed_fields` und die
   Rechteprüfung pro Datensatz, genau wie bei einem direkten Update.
 
-Zusätzlich bremst `max_characters` (Default 100 000) **vor** dem ersten
-API-Aufruf, wenn der Plan teurer wäre als erlaubt.
+Zusätzlich bremst `max_characters` (Default 250 000, `0` schaltet ab) **vor**
+dem ersten API-Aufruf, wenn der Plan teurer wäre als erlaubt. Mehr als 1000
+Datensätze nimmt ein Aufruf nicht an.
 
 ### Was ein Aufruf kostet
 
@@ -614,7 +722,7 @@ Jede Antwort führt mit, was sie verbraucht hat:
 
 `characters_submitted` ist die Zahl, auf die DeepL abrechnet — tatsächlich
 gesendete Quellzeichen. Übersetzungen werden 30 Tage zwischengespeichert
-(eigener Cache, nach Zielsprache, Quellsprache **und** Tag-Handling
+(eigener Cache, nach Zielsprache, Quellsprache, Tag-Handling **und** Glossar
 geschlüsselt), deshalb kostet die empfohlene Reihenfolge *planen → ansehen →
 speichern* nur einmal. Der Kontozähler aus `deepl_status` ist eine
 Abrechnungsperioden-Summe und läuft der Realität hinterher — er ist **nicht** der
@@ -756,7 +864,7 @@ selbst, Theme-Ordner und Twig-Templates werden also aufgelöst wie im Backend.
 
 Ein Tool, das nicht tun kann, was es soll, gibt ein strukturiertes Ergebnis
 zurück statt einer Ausnahme — mit `error`, einer `message` im Klartext und,
-wo es hilft, der Liste des Erlaubten. Drei Fälle, die man kennen sollte:
+wo es hilft, der Liste des Erlaubten. Vier Fälle, die man kennen sollte:
 
 **Ein Feld, das der Datensatztyp nicht hat**, wird abgelehnt und nennt den Typ:
 
@@ -783,12 +891,16 @@ Tool "page_update" has no parameter "pageTitel" (did you mean "pageTitle"?).
 Nothing was changed. Allowed parameters: id, pid, title, type, sorting, …
 ```
 
-Beides gilt für direkte `tools/call` **und** für den `contao_call`-Proxy im
+**Ein Fehler, den das Tool nicht erklären kann** — meist aus der Datenbank —,
+kommt ohne Rohmeldung (seit 1.32.0): derselbe `error`-Code (etwa `save_failed`),
+eine `message` mit `reference <hex>` und, wo vorhanden, der `sqlstate` (`23000`
+Constraint, `22007` Wert passt nicht zur Spalte). Die Details stehen unter
+dieser Referenz im Contao-Log.
+
+Das alles gilt für direkte `tools/call` **und** für den `contao_call`-Proxy im
 Lazy-Mode.
 
 ## Bekannte Einschränkungen
-
-Stand `v1.32.0`:
 
 - **Ein MCP-Zugang mit dem Recht `tpl_editor` ist ein Zugang zur
   Codeausführung.** Ein `.html5`-Template ist reines PHP, das Contao beim
@@ -799,10 +911,18 @@ Stand `v1.32.0`:
   Text, den er irgendwo gelesen hat, dazu gebracht werden. **Gebt `tpl_editor`
   nur Benutzern, deren Token ihr auch für einen Deploy hergeben würdet.**
   Dasselbe gilt für die Layout-Felder `head`, `script` und `onload`: Sie landen
-  wörtlich auf jeder Seite des Layouts.
-- **PHPUnit-Coverage** deckt OAuth-Crypto, die Permission-Map und den
-  Usage-Scanner ab. Der Tool-Layer wird stattdessen end-to-end vom Smoke-Test
-  exerziert.
+  wörtlich auf jeder Seite des Layouts. Auch unter Contao 6, das keine
+  `.html5`-Templates mehr rendert, bleibt `tpl_editor` ein Zugang zur
+  Codeausführung: Twig-Templates laufen dort ohne Sandbox und können
+  PHP-Funktionen aufrufen.
+- **Testabdeckung:** PHPUnit deckt ab, was ohne Datenbank prüfbar ist; den
+  Tool-Layer prüft der Smoke-Test end-to-end, in der CI gegen Contao 5.3, 5.7
+  und 6.0 (auch ohne die optionalen Bundles). Backend-Seiten, das Speichern der
+  Konfiguration und den Endpunkt prüft ein eigener CI-Schritt über HTTP.
+- **Replay-Erkennung für Refresh-Tokens** (seit 1.30.0) wirkt nur, solange die
+  rotierte Zeile existiert. `contao:mcp:oauth:cleanup` löscht widerrufene
+  Refresh-Tokens sofort; ein danach vorgelegtes Token wird abgewiesen, beendet
+  aber nicht mehr die ganze Sitzung.
 - **Encryption-Key-Rotation** ist NICHT implementiert. Der
   `var/mcp/oauth/encryption.key` schützt Refresh-Token-Payloads at
   rest — Rotation würde alle Refresh-Tokens invalidieren. (Die
@@ -817,19 +937,20 @@ Voller Audit-Stand: [CHANGELOG.md](CHANGELOG.md).
 
 ## Backup-Strategie
 
-Das Bundle persistiert vier separate Daten-Surfaces. Ein vollständiger
-Restore braucht alle vier — sonst bleiben entweder OAuth-Tokens
-ungültig (Keys weg) oder Tool-Calls können keine externen Referenzen
-zuordnen (External-IDs weg).
+Das Bundle persistiert fünf separate Daten-Surfaces. Ein vollständiger
+Restore braucht alle fünf — sonst bleiben OAuth-Tokens ungültig (Keys weg),
+die Lizenz lässt sich nicht erneuern (Lizenzdatei weg) oder Tool-Calls können
+keine externen Referenzen zuordnen (External-IDs weg).
 
 | Surface | Pfad | Restore-Verhalten |
 |---|---|---|
-| OAuth-RSA-Keys + Encryption-Key | `var/mcp/oauth/*.pem`, `var/mcp/oauth/encryption.key` | Pflicht. Fehlt → alle Refresh-Tokens ungültig, alle Access-Tokens müssen neu ausgestellt werden. Mode 0600 zwingend. |
-| Bundle-Config | `var/mcp/config.json` | Optional. Fehlt → Defaults greifen, Operator muss `auth_mode=oauth` manuell aktivieren. |
-| OAuth-Tabellen | `tl_mcp_oauth_client`, `tl_mcp_oauth_access_token`, `tl_mcp_oauth_refresh_token`, `tl_mcp_oauth_auth_code`, `tl_mcp_oauth_iat` | Pflicht für nahtlose Migration. Fehlt → Clients müssen sich neu registrieren (DCR). |
+| OAuth-RSA-Keys + Encryption-Key | `var/mcp/oauth/*.pem`, `var/mcp/oauth/encryption.key` | Pflicht. Fehlt → alle Refresh-Tokens ungültig, alle Access-Tokens müssen neu ausgestellt werden. Private Schlüssel und `encryption.key` gehören auf `0600` (`public.pem` darf `0644`); `system_health_check` meldet Abweichungen. |
+| Lizenz | `var/mcp/license.json` | Pflicht. Token und Instanz-Geheimnis, Rechte `0600`. Fehlt → Tools gesperrt, und eine erneute Aktivierung derselben Domain scheitert an `instance_mismatch`, bis Netzhirsch die Bindung löst. |
+| Bundle-Config | `var/mcp/config.json` | Pflicht. Fehlt → `/mcp` antwortet 503, bis die Konfiguration wieder gespeichert ist; `backend_url`, Tool-Auswahl, CIMD und Lazy-Mode sind neu zu setzen. |
+| OAuth-Tabellen | `tl_mcp_oauth_client`, `tl_mcp_oauth_access_token`, `tl_mcp_oauth_refresh_token`, `tl_mcp_oauth_authcode`, `tl_mcp_oauth_iat` | Pflicht für nahtlose Migration. Fehlt → Clients müssen sich neu registrieren (DCR); CIMD-Clients wie Claude melden sich nur neu an. |
 | External-ID-Spalten | `external_id_namespace` + `external_id_key` auf 24 Entity-Tabellen | Pflicht für Skill-2-Integrationen. Fehlt → Updates müssen via Contao-PK statt externer Referenz erfolgen, schmerzhafte Doppel-Pflege. |
 
-Empfehlung: `tar` über `var/mcp/` + mysqldump auf die fünf
+Empfehlung: `tar -p` über `var/mcp/` (ohne `uploads/`) + mysqldump auf die fünf
 `tl_mcp_oauth_*`-Tabellen + ein DB-Dump des kompletten Contao-Schemas
 (External-ID-Spalten leben auf Entity-Tabellen, kein eigener Backup-
 Container möglich).
@@ -840,12 +961,18 @@ Container möglich).
 composer verify
 ```
 
-Bündelt PHPStan + PHPUnit — genau das, was die CI fährt. Einmal pro Klon
-`composer setup-hooks` ausführen: Danach lehnt ein `pre-push`-Hook einen Push ab,
-der die CI rot machen würde (`git push --no-verify` umgeht ihn im Notfall).
+Bündelt PHPStan + PHPUnit — den schnellen Teil der CI. Die CI prüft
+zusätzlich `composer.json` und die PHP-Syntax, fährt `composer audit`, den
+Smoke-Test gegen Contao 5.3, 5.7 und 6.0 (auch ohne die optionalen Bundles)
+samt HTTP-Prüfung der Backend-Module und des Endpunkts, ein Update vom letzten
+Release und eine Installation mit dem alten Patch-Block. Einmal pro Klon
+`composer setup-hooks` ausführen: Danach lehnt ein `pre-push`-Hook einen Push
+ab, an dem PHPStan oder PHPUnit scheitert (`git push --no-verify` umgeht ihn im
+Notfall).
 
 Der **Smoke-Test** braucht ein laufendes Contao samt Datenbank und ist deshalb
-nicht Teil davon — er gehört vor jeden Release-Tag:
+nicht Teil von `composer verify`. Die CI fährt ihn bei jedem Lauf; lokal gehört
+er trotzdem vor jeden Release-Tag:
 
 ```bash
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
@@ -872,14 +999,17 @@ Issues / Findings bitte ins Repo, plus Anhang:
 
 - Output von `system_health_check`
 - Backend-User-Rolle + Contao-Version
-- Relevante Einträge aus `var/log/prod.log` (Symfony-Standard-Log)
+- Relevante Einträge aus dem Contao-Log — `var/logs/prod-<Datum>.log` unter
+  Contao 5, `var/log/prod-<Datum>.log` unter Contao 6; bei einer Meldung mit
+  `reference …` die Zeile mit dieser Referenz
 
 ## Update von einer Version ≤ 1.4.0
 
 **Nichts zu tun** — `composer update netzhirsch/contao-mcp-bundle` läuft durch,
 auch wenn in der Root-`composer.json` noch der frühere Patch-Block steht. Die
-`patches/`-Dateien liegen dafür bis 2.0.0 weiter im Paket; angewendet werden sie
-von nichts mehr.
+`patches/`-Dateien liegen dafür bis 2.0.0 weiter im Paket. Wo der alte Block
+noch steht, wendet `cweagans/composer-patches` sie weiter an — wirkungslos, weil
+`ContaoDispatcher` die gepatchten Methoden überschreibt.
 
 Wer aufräumen will (empfohlen, aber nicht dringend): `extra.patches`,
 `cweagans/composer-patches` aus `require` und den `allow-plugins`-Eintrag aus der
@@ -898,8 +1028,15 @@ Composer-Updates des Bundles:
 composer update netzhirsch/contao-mcp-bundle
 ```
 
-Es werden **keine Vendor-Patches** mehr angewendet: was das Bundle am
-Dispatcher braucht (Lazy-Mode-Filter, Post-Call-Cleanup), liegt in
+Contao Manager und `composer update` leeren dabei den Cache. Wer ohne die
+Composer-Skripte deployt, führt danach `vendor/bin/contao-console cache:clear`
+aus — Contao merkt sich die Template-Hierarchie, und nach dem Update auf 1.37.1
+antworteten die Backend-Seiten unter „MCP-Server" sonst mit Fehler 500. Eigene
+Overrides der früheren `be_mcp_*.html5`-Templates greifen unter Contao 6 nicht
+mehr; die Anpassung gehört in `be_mcp_*.html.twig`.
+
+Das Bundle braucht **keine Vendor-Patches** mehr: was es am Dispatcher
+braucht (Lazy-Mode-Filter, Post-Call-Cleanup), liegt in
 `Server\ContaoDispatcher` als Subklasse. Bei einem `php-mcp/server`-Major-Bump
 dort prüfen, ob `handleToolList()`/`handleToolCall()` noch passen.
 
@@ -1028,13 +1165,14 @@ Er muss mit auf die Kommandozeile, sonst bleibt `-W` wirkungslos.
 | Kommando | Zweck | Empfohlener Rhythmus |
 |---|---|---|
 | `contao:mcp:license status\|trial\|activate\|renew` | Lizenz/Testphase verwalten | bei Bedarf (Verlängerung läuft per Cron automatisch) |
-| `contao:mcp:oauth:cleanup` | abgelaufene Auth-Codes, Tokens, IATs purgen | täglich als Cron |
-| `contao:mcp:oauth:rotate-keys` | OAuth-RSA-Signing-Keys rotieren (Dual-Key, ohne Ausloggen) | monatlich |
+| `contao:mcp:oauth:cleanup` | löscht abgelaufene (älter als 24 h) und alle widerrufenen Auth-Codes und Refresh-Tokens sowie abgelaufene Access-Tokens und IATs | täglich, als eigener System-Cron |
+| `contao:mcp:oauth:rotate-keys` | rotiert die RSA-Signing-Keys, sobald sie älter als 90 Tage sind (`--max-age`; `--force` sofort), den Vorgänger nach 30 Tagen weg (`--prune-old`) — Dual-Key, ohne Ausloggen | monatlich, als eigener System-Cron |
 | `contao:mcp:permission-debug` | nachvollziehen, warum ein Backend-User ein Tool (nicht) darf | zur Fehlersuche |
-| `contao:mcp:smoke-test` | End-to-End-Selbsttest des Tool-Layers | nach Updates/Serverumzug |
+| `contao:mcp:smoke-test` | End-to-End-Selbsttest des Tool-Layers; überspringt, was fehlende optionale Bundles braucht, und stellt `config.json` für einzelne Prüfungen kurz um (siehe [Smoke-Test](#smoke-test)) | nach Updates/Serverumzug, auf Staging |
 
-Der Contao-Cron muss laufen (`contao:cron` bzw. der Web-Cron) — daran hängt
-auch die automatische Lizenzverlängerung.
+Der Contao-Cron muss laufen (`contao:cron` bzw. der Web-Cron) — an ihm hängt
+die automatische Lizenzverlängerung (stündlich). Cleanup und Key-Rotation laufen
+**nicht** darüber, sie brauchen einen eigenen Cron-Eintrag.
 
 ---
 *Maintainer: Jan-Philipp Kalus &lt;kalus@netzhirsch.de&gt; — Netzhirsch*
