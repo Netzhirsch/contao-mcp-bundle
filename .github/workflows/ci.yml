@@ -356,12 +356,15 @@ jobs:
         working-directory: app
         run: vendor/bin/contao-console contao:mcp:smoke-test --env=prod
 
-      # The smoke test drives the MCP tools and never opens the backend, so it
-      # stayed green while every MCP-Server backend page answered 500 on
-      # Contao 6: the modules shipped .html5 templates, which Contao 6 no
-      # longer renders (issue #3). This logs in as an administrator and opens
-      # each module, on every leg of the matrix.
-      - name: Open the MCP-Server backend modules
+      # The smoke test drives the MCP tools in-process: it never opens the
+      # backend and never goes through the router. So it stayed green while,
+      # on Contao 6, every MCP-Server backend page answered 500 (the modules
+      # shipped .html5 templates, which Contao 6 no longer renders — issue #3)
+      # and /mcp itself answered 404 (Symfony 8 ignores routes declared with
+      # the removed Routing\Annotation\Route). This logs in as an
+      # administrator, opens each module and reaches the endpoint, on every
+      # leg of the matrix.
+      - name: Open the backend modules and the MCP endpoint over HTTP
         working-directory: app
         run: |
           set -euo pipefail
@@ -402,6 +405,26 @@ jobs:
                   echo "::error::Backend module $MODULE answered $CODE: $(grep -oP '(?<=<title>)[^<]*' "var/backend-check/$MODULE.html" | head -1)"
                   FAILED=1
               fi
+          done
+
+          # The endpoint answers without a session: a probe, and a JSON-RPC
+          # call that is either served (auth_mode none) or asks for a token.
+          CODE=$(curl -sS -o var/backend-check/healthz.json -w '%{http_code}' http://127.0.0.1:8000/mcp/healthz)
+          echo "/mcp/healthz: $CODE"
+          [[ "$CODE" == 200 ]] || { echo "::error::/mcp/healthz answered $CODE"; FAILED=1; }
+          CODE=$(curl -sS -o var/backend-check/mcp.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' http://127.0.0.1:8000/mcp)
+          echo "POST /mcp: $CODE"
+          [[ "$CODE" == 200 || "$CODE" == 401 ]] || { echo "::error::POST /mcp answered $CODE"; FAILED=1; }
+
+          # The .well-known metadata is asked of the router, not the server:
+          # PHP's built-in server answers paths with a dot segment with its
+          # own 404 on some PHP versions, before Contao is even reached.
+          for ROUTE in /.well-known/oauth-authorization-server /mcp/.well-known/oauth-authorization-server \
+                  /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/mcp; do
+              vendor/bin/contao-console router:match --env=prod "$ROUTE" > /dev/null \
+                  && echo "$ROUTE: routed" \
+                  || { echo "::error::No route matches $ROUTE"; FAILED=1; }
           done
           exit $FAILED
 
