@@ -356,8 +356,58 @@ jobs:
         working-directory: app
         run: vendor/bin/contao-console contao:mcp:smoke-test --env=prod
 
+      # The smoke test drives the MCP tools and never opens the backend, so it
+      # stayed green while every MCP-Server backend page answered 500 on
+      # Contao 6: the modules shipped .html5 templates, which Contao 6 no
+      # longer renders (issue #3). This logs in as an administrator and opens
+      # each module, on every leg of the matrix.
+      - name: Open the MCP-Server backend modules
+        working-directory: app
+        run: |
+          set -euo pipefail
+
+          vendor/bin/contao-console contao:user:create --env=prod --no-interaction \
+              --username=ci-admin --name='CI Admin' --email=ci-admin@example.com \
+              --password=ci-Backend-check-1 --admin --language=en
+
+          mkdir -p var/backend-check
+          php -S 127.0.0.1:8000 -t public > var/backend-check/server.log 2>&1 &
+          for i in {1..30}; do
+              curl -fs -o /dev/null http://127.0.0.1:8000/contao/login && break
+              sleep 1
+          done
+
+          # The login form wants its hidden fields back, _target_path included
+          # ("Missing form field _target_path" otherwise).
+          JAR=$(mktemp)
+          LOGIN=$(curl -fsS -c "$JAR" -b "$JAR" http://127.0.0.1:8000/contao/login)
+          field() { grep -oP "name=\"$1\" value=\"\\K[^\"]+" <<< "$LOGIN"; }
+          curl -fsS -c "$JAR" -b "$JAR" -o /dev/null \
+              --data-urlencode FORM_SUBMIT=tl_login \
+              --data-urlencode "REQUEST_TOKEN=$(field REQUEST_TOKEN)" \
+              --data-urlencode "_target_path=$(field _target_path)" \
+              --data-urlencode _always_use_target_path=1 \
+              --data-urlencode username=ci-admin \
+              --data-urlencode password=ci-Backend-check-1 \
+              http://127.0.0.1:8000/contao/login
+
+          # A failed login answers every module with a redirect to the login
+          # page, so it shows up here as well rather than passing silently.
+          FAILED=0
+          for MODULE in netzhirsch_mcp_status netzhirsch_mcp_config netzhirsch_mcp_activity netzhirsch_mcp_tools; do
+              CODE=$(curl -sS -b "$JAR" -o "var/backend-check/$MODULE.html" -w '%{http_code}' "http://127.0.0.1:8000/contao?do=$MODULE")
+              if [[ "$CODE" == 200 ]] && grep -q 'id="tl_buttons"' "var/backend-check/$MODULE.html"; then
+                  echo "$MODULE: $CODE"
+              else
+                  echo "::error::Backend module $MODULE answered $CODE: $(grep -oP '(?<=<title>)[^<]*' "var/backend-check/$MODULE.html" | head -1)"
+                  FAILED=1
+              fi
+          done
+          exit $FAILED
+
       # Upload Contao + Symfony logs on failure so we can post-mortem
-      # without re-running the whole pipeline.
+      # without re-running the whole pipeline. Contao 6 logs to var/log/,
+      # 5.x to var/logs/.
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
@@ -365,6 +415,8 @@ jobs:
           name: logs-php${{ matrix.php }}
           path: |
             app/var/logs/
+            app/var/log/
+            app/var/backend-check/
             app/var/mcp/
           if-no-files-found: ignore
           retention-days: 7

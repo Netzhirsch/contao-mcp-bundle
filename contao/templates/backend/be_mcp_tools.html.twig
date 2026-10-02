@@ -1,0 +1,78 @@
+{% trans_default_domain 'contao_mcp_server' %}
+{#
+    MCP-Server → Tools (ModuleMcpTools): per-tool enable/disable. The catalogue
+    is built live from the (unpruned) registry + extension candidates; null
+    when the registry could not be loaded — a warning replaces the toggles then.
+    Every value arrives raw and is escaped here.
+#}
+<div id="tl_buttons">
+    <a href="{{ referer }}" class="header_back" title="{{ 'MSC.backBTTitle'|trans({}, 'contao_default') }}" accesskey="b" data-action="contao--scroll-offset#discard">{{ 'MSC.backBT'|trans({}, 'contao_default') }}</a>
+</div>
+
+{{ messages|raw }}
+
+{% if toolCatalogue is null %}
+    <div class="tl_message">
+        <p class="tl_error">⚠ {{ 'mcp_server.tools_panel_unavailable'|trans }}</p>
+    </div>
+{% else %}
+    <div class="tl_message">
+        <p class="tl_info">{{ 'mcp_server.tools_panel_help'|trans }}</p>
+    </div>
+
+    <form class="tl_form tl_edit_form" method="post" action="{{ actionUrl }}" enctype="application/x-www-form-urlencoded">
+    <div class="tl_formbody_edit">
+
+        <input type="hidden" name="FORM_SUBMIT" value="mcp_server_action">
+        <input type="hidden" name="REQUEST_TOKEN" value="{{ requestToken }}">
+        <input type="hidden" name="action" value="save_tools">
+        <input type="hidden" name="tools_rendered_core" value="{{ toolsRenderedCore }}">
+        <input type="hidden" name="tools_rendered_ext" value="{{ toolsRenderedExt }}">
+
+        {#
+            Collapsible palette fieldsets — same Stimulus wiring as the page
+            editor; all but the first start collapsed. Contao's collapse CSS
+            hides only DIV children, so the payload lives in a
+            <div class="widget-group">.
+        #}
+        {% for groupData in toolCatalogue %}
+            {% set containerId = 'ctrl_tools_' ~ groupData.group %}
+            <fieldset class="{{ loop.first ? 'tl_tbox' : 'tl_box collapsed' }}" data-controller="contao--toggle-fieldset" data-contao--toggle-fieldset-collapsed-class="collapsed">
+                <legend><button type="button" data-action="contao--toggle-fieldset#toggle">{{ groupData.label }}</button></legend>
+                <div class="widget-group">
+                    <div class="widget widget-checkbox clr">
+                        <fieldset id="{{ containerId }}" class="tl_checkbox_container">
+                            {# "Select all" only in groups without protected tools —
+                               Backend.toggleCheckboxGroup would flip the disabled
+                               system checkboxes visually as well. #}
+                            {% if not groupData.has_protected %}
+                                <input type="checkbox" id="check_all_{{ groupData.group }}" class="tl_checkbox" onclick="Backend.toggleCheckboxGroup(this,'{{ containerId|e('js') }}')"> <label for="check_all_{{ groupData.group }}" class="check-all"><em>{{ 'MSC.selectAll'|trans({}, 'contao_default') }}</em></label><br>
+                            {% endif %}
+                            {% for tool in groupData.tools %}
+                                {% set optId = 'opt_tool_' ~ tool.name %}
+                                {% if tool.protected %}
+                                    <input type="checkbox" id="{{ optId }}" class="tl_checkbox" checked disabled>
+                                {% else %}
+                                    <input type="checkbox" name="tools[]" id="{{ optId }}" class="tl_checkbox" value="{{ tool.name }}"{% if tool.enabled %} checked{% endif %} data-action="focus->contao--scroll-offset#store">
+                                {% endif %}
+                                <label for="{{ optId }}" title="{{ tool.description }}">{{ tool.name }}
+                                    {%- if tool.source == 'extension' %} <span class="tl_gray" title="{{ 'mcp_server.tools_badge_ext_title'|trans }}">({{ 'mcp_server.tools_suffix_ext'|trans }})</span>
+                                    {%- elseif tool.protected %} <span class="tl_gray" title="{{ 'mcp_server.tools_badge_sys_title'|trans }}">({{ 'mcp_server.tools_suffix_sys'|trans }})</span>
+                                    {%- endif %}</label><br>
+                            {% endfor %}
+                        </fieldset>
+                        <p class="tl_help tl_tip">{{ 'mcp_server.tools_group_help'|trans }}</p>
+                    </div>
+                </div>
+            </fieldset>
+        {% endfor %}
+
+    </div>
+
+    <div class="tl_formbody_submit">
+        <div class="tl_submit_container">
+            <button type="submit" class="tl_submit">{{ 'mcp_server.button_save_tools'|trans }}</button>
+        </div>
+    </div>
+    </form>
+{% endif %}

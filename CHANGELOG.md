@@ -6,6 +6,43 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Fixed
+- **Unter Contao 6 brachen alle Backend-Seiten unter „MCP-Server" mit einem
+  Fehler 500 ab**
+  ([#3](https://github.com/Netzhirsch/contao-mcp-bundle/issues/3)):
+  `Template "@Contao/be_mcp_status.html.twig" is not defined.` — ebenso für
+  Konfiguration, Aktivität und Tools. Contao 6 rendert ein `BackendTemplate`
+  nur noch als `@Contao/<name>.html.twig` und kennt `.html5`-Templates nicht
+  mehr; die vier Module lieferten aber genau solche aus. Der MCP-Endpunkt war
+  nicht betroffen, nur die Verwaltung im Backend.
+
+  Die Templates sind jetzt Twig (`contao/templates/backend/be_mcp_*.html.twig`),
+  ein Satz für alle unterstützten Versionen — Contao 5.x zieht ein
+  Twig-Template gleichen Namens ohnehin vor. Markup und Verhalten bleiben
+  gleich, verglichen gegen die gerenderten `.html5`-Seiten unter 5.3 und 5.7.
+  Zwei Dinge mussten dabei mit:
+
+  - **Werte gehen roh ins Template, Twig escaped.** Contao 6 escaped mit Twigs
+    eigener `html`-Strategie, die doppelt kodiert; 5.x hatte dafür
+    `contao_html`, das es nicht tat. Der vorkodierte Zurück-Link
+    (`getReferer(true)`, also `&amp;`) wäre dort zu `&amp;amp;` geworden — ein
+    Link auf eine andere Adresse.
+  - **`Backend.getScrollOffset()` gibt es in Contao 6 nicht mehr.** Zurück-Link
+    und Tool-Checkboxen nutzen die Stimulus-Aktionen
+    `contao--scroll-offset#discard` bzw. `#store`, wie der Core seit 5.3.
+
+  Nebenbei übersetzt: Der Lazy-Mode-Status stand im deutschen Backend als
+  „on"/„off" da.
+
+  **Wer eines der `be_mcp_*.html5`-Templates im Projekt überschrieben hat:**
+  Unter Contao 6 greift so ein Override ohnehin nicht mehr; unter 5.x rendert
+  er weiter, bekommt aber `backTitle` und `backLabel` nicht mehr geliefert. Die
+  Anpassung gehört ins Twig-Template.
+
+  Der Smoke-Test treibt nur die Werkzeuge und hat das Backend nie geöffnet —
+  deshalb blieb er grün. Die CI meldet sich jetzt in jeder Zeile der Matrix
+  (Contao 5.3, 5.7, 6.0) als Administrator an und öffnet die vier Module.
+
 ## [1.37.0] – 2026-10-01
 
 > Wer `numero2/contao-deepl` 1.2.0 fährt und Glossare konfiguriert hat, bekommt

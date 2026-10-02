@@ -58,7 +58,49 @@ class ModuleMcpTools extends AbstractMcpModule
         } catch (\Throwable $e) {
             $container->get('monolog.logger.contao.error')->error('MCP tool panel could not load the registry: '.$e->getMessage());
         }
-        $this->Template->toolCatalogue = $toolCatalogue;
+        $this->Template->toolCatalogue = null === $toolCatalogue ? null : self::presentCatalogue($toolCatalogue);
+
+        // Which names the panel renders, per source — posted back with the
+        // form so mergeSelection() can keep the state of tools it did not show.
+        $renderedCore = [];
+        $renderedExt = [];
+        foreach ($toolCatalogue ?? [] as $groupData) {
+            foreach ($groupData['tools'] as $tool) {
+                if ('extension' === $tool['source']) {
+                    $renderedExt[] = $tool['name'];
+                } else {
+                    $renderedCore[] = $tool['name'];
+                }
+            }
+        }
+        $this->Template->toolsRenderedCore = implode(',', $renderedCore);
+        $this->Template->toolsRenderedExt = implode(',', $renderedExt);
+    }
+
+    /**
+     * Adds what the template needs per group: the label — translated when an
+     * XLF key `tool_group_<group>` exists, otherwise derived from the key
+     * ("image_size_item" → "Image size item") — and whether the group holds a
+     * protected tool. Groups that do get no "select all": the toggle would
+     * flip the disabled system checkboxes visually as well.
+     *
+     * @param list<array{group: string, tools: list<array{name: string, description: string, enabled: bool, source: string, protected: bool}>}> $catalogue
+     *
+     * @return list<array{group: string, label: string, has_protected: bool, tools: list<array{name: string, description: string, enabled: bool, source: string, protected: bool}>}>
+     */
+    private static function presentCatalogue(array $catalogue): array
+    {
+        $lang = $GLOBALS['TL_LANG']['mcp_server'] ?? [];
+
+        return array_map(
+            static fn (array $groupData): array => [
+                'group' => $groupData['group'],
+                'label' => (string) ($lang['tool_group_'.$groupData['group']] ?? ucfirst(str_replace('_', ' ', $groupData['group']))),
+                'has_protected' => \in_array(true, array_column($groupData['tools'], 'protected'), true),
+                'tools' => $groupData['tools'],
+            ],
+            $catalogue,
+        );
     }
 
     /**

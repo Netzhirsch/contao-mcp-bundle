@@ -1,0 +1,238 @@
+{% trans_default_domain 'contao_mcp_server' %}
+{#
+    MCP-Server → Status (ModuleMcpStatus). Every value arrives raw and is
+    escaped here — Contao 6 escapes with Twig's own html strategy, so nothing
+    may come in pre-encoded.
+
+    Global actions are #tl_buttons top-bar links (GET + rt, validated by the
+    base module). Explanations live in the title tooltips — no prose boxes.
+#}
+{% set isOauth = (config.auth_mode ?? 'none') == 'oauth' %}
+{% set regRestricted = (config.oauth_registration_mode ?? 'restricted') == 'restricted' %}
+{% set actionLink = actionUrl ~ '&action=' %}
+{% set licState = (license ?? null) is iterable ? license : {} %}
+{% set licType = licState.type ?? '' %}
+{% set licActive = licState.active ?? false %}
+{# An internal licence (issued by Netzhirsch) has no Stripe customer, so
+   there is nothing to "manage" — the portal would only error out. #}
+{% set licInternal = (licensePlan ?? '') == 'internal' %}
+
+<div id="tl_buttons">
+    <a href="{{ referer }}" class="header_back" title="{{ 'MSC.backBTTitle'|trans({}, 'contao_default') }}" accesskey="b" data-action="contao--scroll-offset#discard">{{ 'MSC.backBT'|trans({}, 'contao_default') }}</a>
+    <a href="{{ actionUrl }}" class="header_sync">{{ 'mcp_server.button_refresh'|trans }}</a>
+    {% if isOauth and regRestricted and not pairingActive %}
+        <a href="{{ actionLink ~ 'open_pairing' }}" class="header_new" title="{{ 'mcp_server.pairing_help'|trans }}">{{ 'mcp_server.button_open_pairing'|trans }}</a>
+    {% elseif isOauth and regRestricted %}
+        <a href="{{ actionLink ~ 'close_pairing' }}" class="header_toggle">{{ 'mcp_server.button_close_pairing'|trans }}</a>
+    {% endif %}
+    {#
+        License / subscription actions. The license server URL is baked into the
+        bundle (RenewalClient::DEFAULT_LICENSE_SERVER_URL), so a server is always
+        reachable — the buttons show regardless of the optional config override.
+        Payment happens on Stripe-hosted pages; these links just start the flow.
+    #}
+    {% if licActive and licInternal %}
+        {# Internal licence: renews by itself, no billing account. No buttons — the status row explains the state. #}
+    {% elseif licActive and licType == 'full' %}
+        <a href="{{ actionLink ~ 'manage_billing' }}" class="header_edit_all" title="{{ 'mcp_server.license_manage_help'|trans }}">{{ 'mcp_server.button_manage_billing'|trans }}</a>
+    {% elseif licActive %}
+        {# Active trial: offer to convert to a paid plan. There is no Stripe billing account to "manage" yet, so no portal button here. #}
+        <a href="{{ actionLink ~ 'subscribe' }}" class="header_new" title="{{ 'mcp_server.license_subscribe_help'|trans }}">{{ 'mcp_server.button_subscribe'|trans }}</a>
+    {% elseif licInternal %}
+        {# Internal licence that stopped working (revoked/expired): buying is the way out, but there is still no billing account to manage. #}
+        <a href="{{ actionLink ~ 'subscribe' }}" class="header_new" title="{{ 'mcp_server.license_subscribe_help'|trans }}">{{ 'mcp_server.button_subscribe'|trans }}</a>
+    {% elseif licType == 'full' %}
+        {# Paid licence that lapsed past the grace window: the customer needs the Stripe portal (fix the card, restart the subscription) — a second trial would only 409. #}
+        <a href="{{ actionLink ~ 'subscribe' }}" class="header_new" title="{{ 'mcp_server.license_subscribe_help'|trans }}">{{ 'mcp_server.button_subscribe'|trans }}</a>
+        <a href="{{ actionLink ~ 'manage_billing' }}" class="header_edit_all" title="{{ 'mcp_server.license_manage_help'|trans }}">{{ 'mcp_server.button_manage_billing'|trans }}</a>
+    {% else %}
+        <a href="{{ actionLink ~ 'start_trial' }}" class="header_new" title="{{ 'mcp_server.license_trial_help'|trans }}">{{ 'mcp_server.button_start_trial'|trans }}</a>
+        <a href="{{ actionLink ~ 'subscribe' }}" class="header_new" title="{{ 'mcp_server.license_subscribe_help'|trans }}">{{ 'mcp_server.button_subscribe'|trans }}</a>
+    {% endif %}
+</div>
+
+{{ messages|raw }}
+
+{% if oauthIsHttp ?? false %}
+<div class="tl_message">
+    <p class="tl_error">⚠ {{ 'mcp_server.http_warning'|trans }}</p>
+</div>
+{% endif %}
+{#
+    "A newer version is available", announced by the license server on the last
+    renewal. Shown ONCE, here — not on every backend page and never by mail. It
+    informs and nothing else: no update is triggered from here, and nothing is
+    blocked. Null (nothing announced, or this install is already current) is the
+    normal state, and a development installation never gets a notice at all.
+#}
+{% set update = updateNotice ?? null %}
+{% if update is not null %}
+<div class="tl_message">
+    <p class="{{ update.securityRelease ? 'tl_error' : 'tl_info' }}">
+        {% if update.securityRelease %}
+            ⚠ {{ 'mcp_server.update_security_available'|trans([update.latestVersion, bundleVersion]) }}
+        {% else %}
+            {{ 'mcp_server.update_available'|trans([update.latestVersion, bundleVersion]) }}
+        {% endif %}
+        {{ 'mcp_server.update_how'|trans }}
+        {% if update.releaseNotesUrl != '' %}
+            <a href="{{ update.releaseNotesUrl }}" target="_blank" rel="noreferrer noopener">{{ 'mcp_server.update_release_notes'|trans }}</a>
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+{% if isOauth and not regRestricted %}
+<div class="tl_message">
+    <p class="tl_error">⚠ {{ 'mcp_server.open_reg_warning'|trans }}</p>
+</div>
+{% endif %}
+
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <tbody>
+            <tr class="hover-row">
+                <td class="tl_file_list" style="width:22%;">{{ 'mcp_server.status_endpoint_active'|trans }}</td>
+                <td class="tl_file_list">
+                    {# The endpoint runs as a Symfony controller — every POST /mcp
+                       boots PHP-FPM, so it is available as long as Apache is up.
+                       No process to manage, no port to probe. #}
+                    <strong class="tl_green">●</strong> <code>{{ endpointUrl }}</code>
+                </td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.status_path'|trans }}</td>
+                <td class="tl_file_list">/{{ config.path|trim('/', 'left') }}</td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.status_auth_mode'|trans }}</td>
+                <td class="tl_file_list">
+                    {% if isOauth %}
+                        <strong class="tl_green">●</strong> {{ 'mcp_server.config_auth_mode_oauth'|trans }}
+                    {% else %}
+                        <strong class="tl_orange">●</strong> {{ 'mcp_server.config_auth_mode_none'|trans }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% if isOauth %}
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.status_registration'|trans }}</td>
+                <td class="tl_file_list">
+                    {% if not regRestricted %}
+                        <strong class="tl_orange">●</strong> {{ 'mcp_server.config_reg_mode_open'|trans }}
+                    {% elseif pairingActive %}
+                        <strong class="tl_green">●</strong> {{ 'mcp_server.pairing_active_until'|trans([pairingUntil, pairingMinutesLeft]) }}
+                    {% else %}
+                        <strong class="tl_green">●</strong> {{ 'mcp_server.config_reg_mode_restricted'|trans }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.config_lazy_mode_label'|trans }}</td>
+                <td class="tl_file_list">{% if config.lazy_mode ?? false %}<strong class="tl_green">●</strong> {{ 'mcp_server.status_on'|trans }}{% else %}<span class="tl_gray">●</span> {{ 'mcp_server.status_off'|trans }}{% endif %}</td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.status_bundle_version'|trans }}</td>
+                <td class="tl_file_list">{{ bundleVersion }}</td>
+            </tr>
+            {% set lic = (license ?? null) is iterable ? license : {active: true, type: '', reason: '', days_left: 0, in_grace: false} %}
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.license_label'|trans }}</td>
+                <td class="tl_file_list">
+                    {% if lic.active ?? false %}
+                        <strong class="tl_green">●</strong>
+                        {{ licInternal ? 'mcp_server.license_plan_internal'|trans : ((lic.type ?? '') != '' ? lic.type : 'license') }}
+                        {% if licInternal %}
+                            — {{ 'mcp_server.license_unlimited'|trans }}
+                        {% else %}
+                            — {{ 'mcp_server.license_days_left'|trans([lic.days_left ?? 0]) }}
+                        {% endif %}
+                        {% if lic.in_grace ?? false %} <span class="tl_orange">({{ 'mcp_server.license_grace'|trans }})</span>{% endif %}
+                    {% else %}
+                        <strong class="tl_error">●</strong> {{ 'mcp_server.license_inactive'|trans }} ({{ lic.reason ?? '' }})
+                    {% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+{% if isOauth %}
+
+{% if oauthIats is not empty %}
+<h2 class="sub_headline" style="margin-top:1.5em;">{{ 'mcp_server.oauth_iat_title'|trans }}</h2>
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_iat_col_id'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_iat_col_created'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_iat_col_expires'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_iat_col_state'|trans }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for iat in oauthIats %}
+                <tr class="hover-row">
+                    <td class="tl_file_list">#{{ iat.id }}</td>
+                    <td class="tl_file_list">{{ iat.created }}</td>
+                    <td class="tl_file_list">{{ iat.expires }}</td>
+                    <td class="tl_file_list">
+                        {% if iat.state == 'used' %}
+                            <span class="tl_gray">● {{ 'mcp_server.oauth_iat_used'|trans }} (<code>{{ iat.redeemed_by_client_id }}</code>)</span>
+                        {% elseif iat.state == 'expired' %}
+                            <span class="tl_red">● {{ 'mcp_server.oauth_iat_expired'|trans }}</span>
+                        {% else %}
+                            <strong class="tl_green">● {{ 'mcp_server.oauth_iat_active'|trans }}</strong>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<h2 class="sub_headline" style="margin-top:1.5em;">{{ 'mcp_server.oauth_clients_title'|trans }}</h2>
+{% if oauthClients is empty %}
+    <p class="tl_gray" style="margin:0 18px;"><em>{{ 'mcp_server.oauth_clients_empty'|trans }}</em></p>
+{% else %}
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_clients_col_name'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_clients_col_user'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_clients_col_id'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_clients_col_redirect'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.oauth_clients_col_created'|trans }}</th>
+                <th class="tl_folder_tlist tl_right_nowrap"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in oauthClients %}
+                <tr class="hover-row">
+                    <td class="tl_file_list">{{ c.name }}{% if c.is_confidential %} <span class="tl_blue">[confidential]</span>{% endif %}</td>
+                    <td class="tl_file_list">
+                        {% if (c.authorized_by ?? '') != '' %}
+                            <span{% if c.authorized != '' %} title="{{ 'mcp_server.oauth_clients_user_consent_at'|trans ~ c.authorized }}"{% endif %}>{{ c.authorized_by }}</span>
+                        {% else %}
+                            <span class="tl_gray" title="{{ 'mcp_server.oauth_clients_user_pending'|trans }}">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="tl_file_list"><code>{{ c.client_id }}</code></td>
+                    <td class="tl_file_list"><code style="font-size:.85em;">{{ c.redirect_uris }}</code></td>
+                    <td class="tl_file_list">{{ c.created }}</td>
+                    <td class="tl_file_list tl_right_nowrap">
+                        <a href="{{ actionLink ~ 'revoke_client&client_id=' ~ c.client_id|url_encode }}"
+                           title="{{ 'mcp_server.oauth_clients_help'|trans }}"
+                           onclick="return confirm('{{ 'mcp_server.oauth_client_confirm_revoke'|trans|e('js') }}')">{{ 'mcp_server.button_revoke_client'|trans }}</a>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endif %}
