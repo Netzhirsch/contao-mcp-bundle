@@ -911,9 +911,10 @@ Lazy-Mode.
   Text, den er irgendwo gelesen hat, dazu gebracht werden. **Gebt `tpl_editor`
   nur Benutzern, deren Token ihr auch für einen Deploy hergeben würdet.**
   Dasselbe gilt für die Layout-Felder `head`, `script` und `onload`: Sie landen
-  wörtlich auf jeder Seite des Layouts. Unter Contao 6 rendert Contao keine
-  `.html5`-Templates mehr; die Codeausführung auf dem Server fällt dort weg, ein
-  Twig-Override kann aber weiterhin Skript in jede Seite schreiben.
+  wörtlich auf jeder Seite des Layouts. Auch unter Contao 6, das keine
+  `.html5`-Templates mehr rendert, bleibt `tpl_editor` ein Zugang zur
+  Codeausführung: Twig-Templates laufen dort ohne Sandbox und können
+  PHP-Funktionen aufrufen.
 - **Testabdeckung:** PHPUnit deckt ab, was ohne Datenbank prüfbar ist; den
   Tool-Layer prüft der Smoke-Test end-to-end, in der CI gegen Contao 5.3, 5.7
   und 6.0 (auch ohne die optionalen Bundles). Backend-Seiten, das Speichern der

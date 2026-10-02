@@ -81,6 +81,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Vorschau-Basic-Auth), die deutsche die beiden, die nur die englische hatte
   (Transport, Rate-Limits). Ein Test hält Tool-Zahl und Konfigurationsschlüssel
   in den Dokumenten künftig am Code.
+- **`template_create` und `template_update` warnen auch bei Twig-Templates vor
+  Codeausführung.** Die Beschreibung von `template_create` nannte nur
+  `.html5`-Templates als Code, der auf dem Server läuft, die von
+  `template_update` gar nichts. Ein `.html.twig`-Template läuft aber ebenfalls
+  ohne Sandbox und kann PHP-Funktionen aufrufen — auch unter Contao 6, das keine
+  `.html5`-Templates mehr rendert. Die Rechteprüfung war nie betroffen: Alle
+  Template-Tools verlangen `tpl_editor`.
 
 ### Fixed
 - **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**

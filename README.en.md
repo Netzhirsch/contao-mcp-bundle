@@ -1057,9 +1057,9 @@ All of this applies to direct `tools/call` **and** to the lazy-mode
   text it read somewhere. **Grant `tpl_editor` only to users whose token you
   would also hand out for a deployment.** The same goes for the layout fields
   `head`, `script` and `onload`, which are rendered verbatim into every page of
-  that layout. Contao 6 no longer renders `.html5` templates; running code on
-  the server is off the table there, but a Twig override can still write script
-  into every page.
+  that layout. On Contao 6, which no longer renders `.html5` templates,
+  `tpl_editor` is still a right to run code: Twig templates run without a
+  sandbox there and can call PHP functions.
 - **Test coverage:** PHPUnit covers what can be tested without a database; the
   smoke test exercises the tool layer end-to-end, in CI against Contao 5.3, 5.7
   and 6.0 (also without the optional bundles). A separate CI step checks the
