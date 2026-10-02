@@ -205,8 +205,6 @@ services:
         public: true
         tags: ['controller.service_arguments']
 
-    # CORS handler for the OAuth endpoints — Inspector / Claude.ai
-    # connect via cross-origin fetch.
     # Matches the endpoint, /healthz and the path-suffixed .well-known
     # documents under the `path` from var/mcp/config.json — just above
     # Symfony's RouterListener (32), so a saved path applies at once.
@@ -214,6 +212,8 @@ services:
         tags:
             - { name: 'kernel.event_listener', event: 'kernel.request', method: 'onKernelRequest', priority: 33 }
 
+    # CORS handler for the OAuth endpoints — Inspector / Claude.ai
+    # connect via cross-origin fetch.
     Netzhirsch\ContaoMcpBundle\EventListener\OAuthCorsListener:
         tags:
             - { name: 'kernel.event_listener', event: 'kernel.request', method: 'onKernelRequest', priority: 250 }
