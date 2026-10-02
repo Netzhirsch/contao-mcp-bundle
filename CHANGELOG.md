@@ -6,6 +6,17 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.38.0] – 2026-10-02
+
+> Unterstützt Contao 5.3 LTS, 5.7 LTS und 6.0. Contao 5.4 bis 5.6 sind am Ende
+> ihrer Laufzeit und fallen weg; Installationen dort bleiben bei 1.37.1. Neu:
+> Der Pfad des Endpunkts ist einstellbar, und die News-, Kalender- und
+> FAQ-Tools melden ohne ihr Bundle `extension_not_available`. Dazu ein
+> Sicherheitsfix im Smoke-Test, der nach einem Abbruch `auth_mode=none` stehen
+> lassen konnte. Keine Schemaänderung, keine Migration. Wer `path` schon
+> einmal geändert hatte: Der Endpunkt liegt nach dem Update dort (siehe
+> „Changed").
+
 ### Security
 - **Ein abgebrochener Smoke-Test konnte `/mcp` ohne Anmeldung zurücklassen.**
   `contao:mcp:smoke-test` stellt für einzelne Prüfungen die echte
