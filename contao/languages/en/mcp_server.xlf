@@ -51,7 +51,7 @@
 
       <!-- Config field labels -->
       <trans-unit id="mcp_server.config_path_label"><source>Path</source></trans-unit>
-      <trans-unit id="mcp_server.config_path_help"><source>URL path of the MCP endpoint, without leading slash. Default "mcp" → https://backend_url/mcp.</source></trans-unit>
+      <trans-unit id="mcp_server.config_path_help"><source>Path that the backend display and the OAuth metadata (oauth-protected-resource) name. The endpoint itself is fixed at /mcp — another value does not move it but announces a path that does not exist. Keep "mcp".</source></trans-unit>
       <trans-unit id="mcp_server.config_pagination_limit_label"><source>Pagination limit</source></trans-unit>
       <trans-unit id="mcp_server.config_pagination_limit_help"><source>Maximum tools returned by `tools/list` per page. Claude Desktop / mcp-remote do NOT paginate; keep this above the total tool count (default 500).</source></trans-unit>
       <trans-unit id="mcp_server.config_auth_mode_label"><source>Authentication mode</source></trans-unit>
