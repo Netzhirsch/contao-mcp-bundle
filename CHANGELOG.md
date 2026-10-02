@@ -22,6 +22,16 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   bei 1.37.1 stehen. Neuere Versionen des Bundles bekommt sie nach dem Update
   auf Contao 5.7 LTS.
 
+### Fixed
+- **Die Meldung zum Pairing-Fenster behauptete, es schließe sich nach der
+  ersten Registrierung.** Nach dem Klick auf „Registrierung für 15 Minuten
+  öffnen" stand das in beiden Sprachen da, ebenso in der Anleitung
+  `docs/mcp-client-lokal-einrichten.md`. Seit 1.5.0 stimmt das nicht mehr:
+  Das Fenster bleibt die vollen 15 Minuten offen, auch für weitere Versuche
+  und weitere Clients, und schließt sich danach von selbst. Meldung und
+  Anleitung sagen das jetzt; ein Test hält die alte Aussage aus allen Texten
+  heraus, die Betreiber lesen.
+
 ## [1.37.1] – 2026-10-02
 
 > Zwei Bugfixes für Contao 6. Unter Symfony 8 war der MCP-Server nicht

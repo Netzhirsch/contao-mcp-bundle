@@ -356,7 +356,7 @@ class ModuleMcpStatus extends AbstractMcpModule
             Message::addError($this->translate('config_save_failed'));
         } elseif ($open) {
             Message::addConfirmation(\sprintf(
-                $this->translate('pairing_opened', 'Client registration is open until %s — connect your MCP client now. This is the button Claude and other standard clients need; an Initial Access Token only works for scripts that can send an Authorization header.'),
+                $this->translate('pairing_opened', 'Client registration is open until %s — connect your MCP client now. It stays open until then, for retries and further clients too, and closes by itself afterwards.'),
                 date('H:i', $until),
             ));
         } else {

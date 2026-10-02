@@ -22,8 +22,8 @@ use Symfony\Component\Routing\Attribute\Route;
  *   - mode `restricted` + `Authorization: Bearer iat_…`: classic RFC-7591
  *     Initial Access Token (for scripts that can send headers).
  *   - mode `restricted` + active pairing window: the Backend button opens
- *     registration for 10 minutes / one successful registration — the only
- *     path standard MCP clients (mcp-remote, Claude Desktop) can use, since
+ *     registration for 15 minutes, for any number of registrations — the
+ *     path standard MCP clients (mcp-remote, Claude Desktop) take, since
  *     they cannot attach headers to the registration call.
  *
  * In every path a registered client still needs a logged-in Backend user to
@@ -64,10 +64,10 @@ final class RegisterController
         // Pairing window: IATs are useless for the clients we actually pair
         // (mcp-remote, Claude Desktop, …) — none of them can send a header
         // during RFC-7591 registration. The Backend button therefore opens a
-        // short window (registration_open_until, max 10 min) during which
-        // restricted mode admits ONE anonymous registration; the first
-        // success closes the window again (see below). The IAT path stays
-        // for scripts/automation that CAN send the header.
+        // short window (registration_open_until, 15 minutes) during which
+        // restricted mode admits anonymous registrations; it stays open for
+        // its full duration (see below). The IAT path stays for
+        // scripts/automation that CAN send the header.
         $config = $this->configStorage->load();
         $mode = $config['oauth_registration_mode'];
         $providedIat = null;
