@@ -1003,6 +1003,12 @@ Issues / Findings bitte ins Repo, plus Anhang:
   Contao 5, `var/log/prod-<Datum>.log` unter Contao 6; bei einer Meldung mit
   `reference …` die Zeile mit dieser Referenz
 
+## Support
+
+<netzhirsch@netzhirsch.de>, Antwort innerhalb von 24 Stunden, im Abo
+enthalten. Eine kostenpflichtige Einrichtungshilfe ist als eigene, buchbare
+Leistung geplant.
+
 ## Update von einer Version ≤ 1.4.0
 
 **Nichts zu tun** — `composer update netzhirsch/contao-mcp-bundle` läuft durch,

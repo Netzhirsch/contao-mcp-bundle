@@ -70,6 +70,8 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
     fest unter `/mcp`. Die übrigen Schlüssel stehen jetzt in der Tabelle.
   - **Was an den Lizenzserver geht:** Die Erneuerung schickt auch das bisherige
     Token mit, die Testphase auch die E-Mail-Adresse.
+  - **Support:** `composer.json` (und damit Packagist) und die deutsche README
+    nennen jetzt dieselbe Adresse wie die englische: netzhirsch@netzhirsch.de.
   - Außerdem: 196 statt 197 Tools, Lazy-Mode-Größe gemessen (rund 3 statt
     180 KB), Upload-Sitzungen, DeepL-Grenze 250 000 Zeichen (auch in den
     Tool-Beschreibungen), Log-Pfade unter Contao 5 und 6, unterstützte Versionen
