@@ -6,6 +6,21 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Security
+- **Ein abgebrochener Smoke-Test konnte `/mcp` ohne Anmeldung zurücklassen.**
+  `contao:mcp:smoke-test` stellt für einzelne Prüfungen die echte
+  `var/mcp/config.json` um — `backend_url`, CIMD, ein offenes
+  Pairing-Fenster und für die Batch-Grenze `auth_mode=none` — und setzte sie
+  erst zurück, wenn diese Prüfungen durchgelaufen waren. Warf eine davon eine
+  Ausnahme, blieb die Datei so stehen: auf einer Live-Installation ein
+  MCP-Endpunkt ohne Authentifizierung. Nachgestellt mit einem erzwungenen
+  Abbruch an dieser Stelle: danach stand `auth_mode=none` in der Datei. Der
+  Test merkt sich die Datei jetzt beim Start und stellt sie am Ende in jedem
+  Fall byte-genau wieder her (gab es keine, bleibt keine zurück) — auch mit
+  `--keep`, das nur die Testdaten betrifft. Wer den Smoke-Test auf einer
+  erreichbaren Installation abgebrochen hat, sollte unter
+  *MCP-Server → Konfiguration* den Authentifizierungsmodus prüfen.
+
 ### Removed
 - **Contao 5.4, 5.5 und 5.6 werden nicht mehr unterstützt.** Alle drei sind
   bei Contao am Ende ihrer Laufzeit (5.4 seit 14.02.2025, 5.5 seit
@@ -22,7 +37,31 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   bei 1.37.1 stehen. Neuere Versionen des Bundles bekommt sie nach dem Update
   auf Contao 5.7 LTS.
 
+### Changed
+- **Der Smoke-Test läuft auch ohne die optionalen Contao-Bundles durch.** Fehlte
+  `contao/news-bundle`, brach `contao:mcp:smoke-test` nach der Hälfte mit
+  „Table tl_news_archive doesn't exist" ab: News dient an vielen Stellen als
+  Beispieltabelle, weit über den News-Abschnitt hinaus. Prüfungen, die News,
+  Kalender, FAQ, Kommentare oder Newsletter brauchen, werden jetzt
+  übersprungen, wenn das Bundle fehlt — jede auf einer eigenen ⊝-Zeile. Die
+  Zusammenfassung zählt sie getrennt von den bestandenen („15 section(s)
+  skipped — not installed: …"), damit eine schlanke Installation nicht
+  besser dasteht, als sie geprüft wurde. Wo es gar nicht um News geht
+  (External-ID-Labels, Sprachverknüpfung, Modulrechte), springt eine
+  Core-Tabelle ein und die Prüfung läuft weiter.
+
+  Die CI testet dafür zusätzlich Contao 6.0 ohne die optionalen Bundles. Eine
+  volle Installation, die etwas überspringt, lässt die CI scheitern — ihr
+  fehlt dann ein Bundle, und sie prüft weniger, als sie vorgibt.
+
 ### Fixed
+- **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**
+  `page_delete` und `page_delete_tree` suchen vor dem Löschen nach Einträgen,
+  die die Seite als Weiterleitungsziel (`jumpTo`) nutzen, und fragten dafür
+  `tl_news_archive`, `tl_calendar` und `tl_faq_category` ohne Prüfung ab.
+  Fehlt eines dieser optionalen Bundles, gibt es die Tabelle nicht — und jedes
+  bestätigte Löschen brach mit „Table tl_news_archive doesn't exist" ab. Jetzt
+  fragt die Prüfung nur die Tabellen, die die Installation hat.
 - **Die Meldung zum Pairing-Fenster behauptete, es schließe sich nach der
   ersten Registrierung.** Nach dem Klick auf „Registrierung für 15 Minuten
   öffnen" stand das in beiden Sprachen da, ebenso in der Anleitung

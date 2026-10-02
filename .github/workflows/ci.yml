@@ -135,7 +135,7 @@ jobs:
   # green checks (Contao 5.7 + some dependencies still catching up to 8.4).
   # ─────────────────────────────────────────────────────────────────────
   smoke-test:
-    name: Smoke test (Contao ${{ matrix.contao }}, PHP ${{ matrix.php }})
+    name: Smoke test (Contao ${{ matrix.contao }}, PHP ${{ matrix.php }}${{ matrix.minimal && ', without optional bundles' || '' }})
     runs-on: ubuntu-22.04
     needs: [lint, phpstan, phpunit]
     strategy:
@@ -164,6 +164,13 @@ jobs:
           #     bundle actually runs there rather than merely resolving.
           - php: '8.4'
             contao: '^6.0'
+          #   - Contao 6.0 without the optional bundles (news, calendar, faq,
+          #     comments, newsletter). A slim site is a real installation: the
+          #     smoke test died on one with "Table tl_news_archive doesn't
+          #     exist", and page_delete failed outright there.
+          - php: '8.4'
+            contao: '^6.0'
+            minimal: true
 
     # MariaDB as a docker sidecar. The MCP bundle's schema-migrations
     # exercise plenty of MySQL-specific behaviour (strict mode, reserved
@@ -255,12 +262,14 @@ jobs:
               }
           }
           JSON
-              composer require --no-update \
-                  "contao/calendar-bundle:${{ matrix.contao }}" \
-                  "contao/comments-bundle:${{ matrix.contao }}" \
-                  "contao/faq-bundle:${{ matrix.contao }}" \
-                  "contao/news-bundle:${{ matrix.contao }}" \
-                  "contao/newsletter-bundle:${{ matrix.contao }}"
+              if [[ "${{ matrix.minimal }}" != "true" ]]; then
+                  composer require --no-update \
+                      "contao/calendar-bundle:${{ matrix.contao }}" \
+                      "contao/comments-bundle:${{ matrix.contao }}" \
+                      "contao/faq-bundle:${{ matrix.contao }}" \
+                      "contao/news-bundle:${{ matrix.contao }}" \
+                      "contao/newsletter-bundle:${{ matrix.contao }}"
+              fi
           else
               composer create-project --no-install --no-scripts --remove-vcs \
                   "contao/managed-edition:${{ matrix.contao }}" app
@@ -351,12 +360,26 @@ jobs:
         working-directory: app
         run: vendor/bin/contao-console contao:migrate --env=prod --no-interaction
 
-      # The actual smoke test — ~181 asserts on tools + OAuth + DBAFS +
+      # The actual smoke test — about 500 checks on tools + OAuth + DBAFS +
       # external-id + cascade behaviour. The single source of truth that
       # the bundle is operational on this PHP version.
+      #
+      # Checks that need a bundle the app does not have are skipped and listed
+      # in the summary. A full leg that skips has lost a bundle on the way and
+      # covers less than it claims; the minimal leg has to skip, or it tests
+      # nothing the full legs do not.
       - name: Run MCP smoke test
         working-directory: app
-        run: vendor/bin/contao-console contao:mcp:smoke-test --env=prod
+        run: |
+          set -o pipefail
+          vendor/bin/contao-console contao:mcp:smoke-test --env=prod | tee var/smoke-test.log
+          if [[ "${{ matrix.minimal }}" == "true" ]]; then
+              grep -q 'section(s) skipped' var/smoke-test.log \
+                  || { echo "::error::The leg without optional bundles skipped nothing."; exit 1; }
+          elif grep -q 'section(s) skipped' var/smoke-test.log; then
+              echo "::error::$(grep 'section(s) skipped' var/smoke-test.log | sed 's/^ *//')"
+              exit 1
+          fi
 
       # The smoke test drives the MCP tools in-process: it never opens the
       # backend and never goes through the router. So it stayed green while,
@@ -409,6 +432,35 @@ jobs:
               fi
           done
 
+          # The smoke test leaves var/mcp/config.json as it found it: on this
+          # fresh app, absent, and /mcp answers 503 until a configuration has
+          # been saved. Save one the way an operator does, through the form on
+          # MCP-Server → Konfiguration, which this also proves works.
+          # Fetched again, writing the jar this time: the form's request token
+          # belongs to the CSRF cookie that comes with the page.
+          CONFIG_PAGE=var/backend-check/config-form.html
+          curl -fsS -b "$JAR" -c "$JAR" -o "$CONFIG_PAGE" "http://127.0.0.1:8000/contao?do=netzhirsch_mcp_config"
+          ACTION=$(grep -oP '<form class="tl_form tl_edit_form"[^>]*action="\K[^"]+' "$CONFIG_PAGE" | head -1 | sed 's/&amp;/\&/g')
+          TOKEN=$(grep -oP 'name="REQUEST_TOKEN" value="\K[^"]+' "$CONFIG_PAGE" | head -1)
+          curl -fsS -b "$JAR" -c "$JAR" -o /dev/null \
+              --data-urlencode FORM_SUBMIT=mcp_server_action \
+              --data-urlencode "REQUEST_TOKEN=$TOKEN" \
+              --data-urlencode action=save_config \
+              --data-urlencode path=mcp \
+              --data-urlencode pagination_limit=500 \
+              --data-urlencode auth_mode=oauth \
+              --data-urlencode backend_url=http://127.0.0.1:8000 \
+              --data-urlencode oauth_registration_mode=restricted \
+              --data-urlencode cimd_mode=trusted \
+              --data-urlencode lazy_mode=0 \
+              "http://127.0.0.1:8000/contao$ACTION"
+          if grep -q '"backend_url": "http://127.0.0.1:8000"' var/mcp/config.json 2>/dev/null; then
+              echo "configuration saved through MCP-Server → Konfiguration"
+          else
+              echo "::error::Saving MCP-Server → Konfiguration did not write var/mcp/config.json"
+              FAILED=1
+          fi
+
           # The endpoint answers without a session: a probe, and a JSON-RPC
           # call that is either served (auth_mode none) or asks for a token.
           CODE=$(curl -sS -o var/backend-check/healthz.json -w '%{http_code}' http://127.0.0.1:8000/mcp/healthz)
@@ -437,11 +489,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: logs-php${{ matrix.php }}
+          name: logs-php${{ matrix.php }}-${{ strategy.job-index }}
           path: |
             app/var/logs/
             app/var/log/
             app/var/backend-check/
+            app/var/smoke-test.log
             app/var/mcp/
           if-no-files-found: ignore
           retention-days: 7

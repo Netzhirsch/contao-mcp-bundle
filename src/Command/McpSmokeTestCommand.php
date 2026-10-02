@@ -64,6 +64,7 @@ use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver;
 use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\RedirectUriMatcher;
 use Netzhirsch\ContaoMcpBundle\Controller\OAuth\RegisterController;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
+use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 
 /**
@@ -145,15 +146,56 @@ final class McpSmokeTestCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $keep = (bool) $input->getOption('keep');
+        $config = $this->snapshotConfig();
         $fixtures = $this->seedFreshInstall($output);
 
         try {
             return $this->runChecks($input, $output);
         } finally {
+            $this->restoreConfig($config, $output);
             // Also when a section throws: a fixture page left behind on a real
             // install would be a page nobody created.
             $this->removeFixtures($fixtures, $output, $keep);
         }
+    }
+
+    /**
+     * Several sections rewrite var/mcp/config.json on the installation under
+     * test — backend_url, cimd_mode, an open pairing window and auth_mode=none
+     * for the batch ceiling — and put it back once their checks are done. A
+     * section that threw in between left it as it was: on a live site, /mcp
+     * without authentication, or registration open to anyone. The run now
+     * ends with the file it found, byte for byte, and without one if there
+     * was none. --keep does not change that; it is about test rows.
+     */
+    private function snapshotConfig(): ?string
+    {
+        $path = $this->configFile();
+
+        return is_file($path) ? (string) file_get_contents($path) : null;
+    }
+
+    private function restoreConfig(?string $config, OutputInterface $output): void
+    {
+        $path = $this->configFile();
+
+        if ($config === null) {
+            if (is_file($path) && !@unlink($path)) {
+                $output->writeln("<error>Could not remove {$path}, which the smoke test created. Delete it by hand.</error>");
+            }
+
+            return;
+        }
+
+        if ((is_file($path) ? file_get_contents($path) : null) !== $config
+            && !AtomicFile::write($path, $config, 0o600)) {
+            $output->writeln("<error>Could not restore {$path}. Check auth_mode and the pairing window in MCP-Server → Konfiguration.</error>");
+        }
+    }
+
+    private function configFile(): string
+    {
+        return $this->projectDir.'/var/mcp/config.json';
     }
 
     /**
@@ -354,6 +396,37 @@ final class McpSmokeTestCommand extends Command
         ];
         $passed = 0;
         $failed = 0;
+
+        // Optional Contao bundles. Their tools are registered either way, but
+        // without the bundle there are no tables (and no models) behind them,
+        // and a check that queries one took the whole run down: on a site
+        // without contao/news-bundle the smoke test died with "Table
+        // tl_news_archive doesn't exist" before it reached half its sections.
+        // Such checks are skipped instead, each on its own ⊝ line, and counted
+        // apart from the passes, so a site with fewer bundles does not look
+        // as if it had passed more. Comments and newsletter tools gate
+        // themselves (extension_not_available); their sections check that.
+        $installed = [
+            'contao/news-bundle' => class_exists(\Contao\NewsBundle\ContaoNewsBundle::class),
+            'contao/calendar-bundle' => class_exists(\Contao\CalendarBundle\ContaoCalendarBundle::class),
+            'contao/faq-bundle' => class_exists(\Contao\FaqBundle\ContaoFaqBundle::class),
+            'contao/comments-bundle' => class_exists(\Contao\CommentsBundle\ContaoCommentsBundle::class),
+            'contao/newsletter-bundle' => class_exists(\Contao\NewsletterBundle\ContaoNewsletterBundle::class),
+        ];
+        /** @var array<string, int> $skipped */
+        $skipped = [];
+        $skip = function (string $bundle, string $what) use (&$skipped, $output): void {
+            $output->writeln("  ⊝ {$what} — skipped, {$bundle} is not installed");
+            $skipped[$bundle] = ($skipped[$bundle] ?? 0) + 1;
+        };
+        $requires = function (string $bundle, string $what) use ($installed, $skip): bool {
+            if ($installed[$bundle]) {
+                return true;
+            }
+            $skip($bundle, $what);
+
+            return false;
+        };
 
         $expect = function (string $label, mixed $result, callable $check) use (&$passed, &$failed, $output): void {
             try {
@@ -672,10 +745,13 @@ final class McpSmokeTestCommand extends Command
             fn ($r) => !isset($r['error']) && \array_key_exists('extends', $r) && \array_key_exists('includes', $r));
 
         // Level 3: lookup news_full and confirm at least one entry, one active.
-        $lookup = $this->templateTool->templateLookup('news_full');
-        $expect('template_lookup news_full returns ≥1 entry with an active one',
-            $lookup,
-            fn ($r) => !isset($r['error']) && ($r['count'] ?? 0) >= 1 && \count(array_filter($r['entries'] ?? [], fn ($e) => ($e['active'] ?? false) === true)) === 1);
+        // news_full ships with the news bundle.
+        if ($requires('contao/news-bundle', 'template_lookup news_full')) {
+            $lookup = $this->templateTool->templateLookup('news_full');
+            $expect('template_lookup news_full returns ≥1 entry with an active one',
+                $lookup,
+                fn ($r) => !isset($r['error']) && ($r['count'] ?? 0) >= 1 && \count(array_filter($r['entries'] ?? [], fn ($e) => ($e['active'] ?? false) === true)) === 1);
+        }
 
         // confirm_destructive gate must reject missing flag before cleanup.
         $expect('template_delete rejects missing confirm_destructive',
@@ -1062,10 +1138,12 @@ final class McpSmokeTestCommand extends Command
         // We create a temporary page-tree-less situation; instead, we exercise
         // the SAFE path: passing a page id that has at least one news archive
         // pointing at it (find a real one or skip).
-        $somePageWithReferrer = (int) $this->connection->fetchOne(
+        $somePageWithReferrer = $installed['contao/news-bundle'] ? (int) $this->connection->fetchOne(
             'SELECT jumpTo FROM tl_news_archive WHERE jumpTo > 0 LIMIT 1',
-        );
-        if ($somePageWithReferrer > 0) {
+        ) : 0;
+        if (!$installed['contao/news-bundle']) {
+            $skip('contao/news-bundle', 'page_delete jumpTo guard (needs a news archive pointing at a page)');
+        } elseif ($somePageWithReferrer > 0) {
             $expect('page_delete refuses page that has jumpTo referrers',
                 $this->pageTool->delete($somePageWithReferrer, confirm_destructive: true, cascade: false),
                 fn ($r) => \in_array($r['error'] ?? null, ['has_referrers', 'has_children', 'has_articles'], true));
@@ -1387,12 +1465,14 @@ final class McpSmokeTestCommand extends Command
         $output->writeln("\n<comment>Entity search/filters (Phase A)</comment>");
 
         // Discovery — entity_query_options
-        $newsOpts = $this->systemTool->entityQueryOptions('tl_news');
-        $expect('entity_query_options(tl_news) returns searchable + filterable',
-            $newsOpts,
-            fn ($r) => isset($r['searchable_fields'], $r['filterable_fields'])
-                && ($r['supports_q'] ?? false) === true
-                && \is_array($r['searchable_fields']) && \count($r['searchable_fields']) >= 1);
+        if ($requires('contao/news-bundle', 'entity_query_options(tl_news)')) {
+            $newsOpts = $this->systemTool->entityQueryOptions('tl_news');
+            $expect('entity_query_options(tl_news) returns searchable + filterable',
+                $newsOpts,
+                fn ($r) => isset($r['searchable_fields'], $r['filterable_fields'])
+                    && ($r['supports_q'] ?? false) === true
+                    && \is_array($r['searchable_fields']) && \count($r['searchable_fields']) >= 1);
+        }
 
         $pageOpts = $this->systemTool->entityQueryOptions('tl_page');
         $expect('entity_query_options(tl_page) returns searchable + filterable',
@@ -1407,35 +1487,37 @@ final class McpSmokeTestCommand extends Command
         // news_list with q — we don't know what news exist on this test site,
         // but we know they're indexable. A q="zzz_no_such_word_exists" should
         // return zero. And empty q should behave like before.
-        $expect('news_list with empty q behaves like no-filter',
-            $this->newsTool->list(q: ''),
-            fn ($r) => isset($r['items']) && \is_array($r['items']));
+        if ($requires('contao/news-bundle', 'news_list q/filters/updated_after')) {
+            $expect('news_list with empty q behaves like no-filter',
+                $this->newsTool->list(q: ''),
+                fn ($r) => isset($r['items']) && \is_array($r['items']));
 
-        $expect('news_list with q="zzzz_definitely_not_present" returns 0',
-            $this->newsTool->list(q: 'zzzz_definitely_not_present_'.$stamp, include_unpublished: true),
-            fn ($r) => ($r['count'] ?? -1) === 0);
+            $expect('news_list with q="zzzz_definitely_not_present" returns 0',
+                $this->newsTool->list(q: 'zzzz_definitely_not_present_'.$stamp, include_unpublished: true),
+                fn ($r) => ($r['count'] ?? -1) === 0);
 
-        // news_list rejects unknown filter key.
-        $expect('news_list rejects unknown filter key',
-            $this->newsTool->list(filters: (object) ['totally_made_up_column' => 'x']),
-            fn ($r) => ($r['error'] ?? null) === 'invalid_filter'
-                && str_contains((string) ($r['message'] ?? ''), 'totally_made_up_column'));
+            // news_list rejects unknown filter key.
+            $expect('news_list rejects unknown filter key',
+                $this->newsTool->list(filters: (object) ['totally_made_up_column' => 'x']),
+                fn ($r) => ($r['error'] ?? null) === 'invalid_filter'
+                    && str_contains((string) ($r['message'] ?? ''), 'totally_made_up_column'));
 
-        // news_list rejects filters passed as JSON list.
-        $expect('news_list rejects filters passed as JSON list',
-            $this->newsTool->list(filters: ['list', 'instead', 'of', 'object']),
-            fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
+            // news_list rejects filters passed as JSON list.
+            $expect('news_list rejects filters passed as JSON list',
+                $this->newsTool->list(filters: ['list', 'instead', 'of', 'object']),
+                fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
 
-        // updated_after with garbage string.
-        $expect('news_list rejects unparseable updated_after',
-            $this->newsTool->list(updated_after: 'not-a-date'),
-            fn ($r) => ($r['error'] ?? null) === 'invalid_input'
-                && str_contains((string) ($r['message'] ?? ''), 'updated_after'));
+            // updated_after with garbage string.
+            $expect('news_list rejects unparseable updated_after',
+                $this->newsTool->list(updated_after: 'not-a-date'),
+                fn ($r) => ($r['error'] ?? null) === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'updated_after'));
 
-        // updated_after with future date → no published news from the future.
-        $expect('news_list with future updated_after returns 0',
-            $this->newsTool->list(updated_after: '2099-01-01', include_unpublished: true),
-            fn ($r) => ($r['count'] ?? -1) === 0);
+            // updated_after with future date → no published news from the future.
+            $expect('news_list with future updated_after returns 0',
+                $this->newsTool->list(updated_after: '2099-01-01', include_unpublished: true),
+                fn ($r) => ($r['count'] ?? -1) === 0);
+        }
 
         // pages_list — same DCA-validated rejection.
         $expect('pages_list rejects unknown filter key',
@@ -1468,6 +1550,25 @@ final class McpSmokeTestCommand extends Command
             'tl_theme', 'tl_layout', 'tl_module', 'tl_image_size',
             'tl_user', 'tl_news_archive', 'tl_calendar', 'tl_faq_category',
         ];
+        $tableBundles = [
+            'tl_news_archive' => 'contao/news-bundle',
+            'tl_calendar' => 'contao/calendar-bundle',
+            'tl_calendar_events' => 'contao/calendar-bundle',
+            'tl_faq' => 'contao/faq-bundle',
+            'tl_faq_category' => 'contao/faq-bundle',
+            'tl_comments' => 'contao/comments-bundle',
+        ];
+        $missingTables = [];
+        foreach ($remainingTables as $tbl) {
+            $bundle = $tableBundles[$tbl] ?? null;
+            if ($bundle !== null && !$installed[$bundle]) {
+                $missingTables[$bundle][] = $tbl;
+            }
+        }
+        foreach ($missingTables as $bundle => $tables) {
+            $skip($bundle, 'entity_query_options('.implode(', ', $tables).')');
+        }
+        $remainingTables = array_values(array_diff($remainingTables, array_merge([], ...array_values($missingTables))));
         foreach ($remainingTables as $tbl) {
             $expect("entity_query_options($tbl) returns a shape",
                 $this->systemTool->entityQueryOptions($tbl),
@@ -1480,9 +1581,11 @@ final class McpSmokeTestCommand extends Command
         $expect('articles_list rejects unknown filter key',
             $this->articleTool->list(filters: (object) ['nope' => 1]),
             fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
-        $expect('faqs_list rejects unknown filter key',
-            $this->faqTool->list(filters: (object) ['nope' => 1]),
-            fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
+        if ($requires('contao/faq-bundle', 'faqs_list rejects unknown filter key')) {
+            $expect('faqs_list rejects unknown filter key',
+                $this->faqTool->list(filters: (object) ['nope' => 1]),
+                fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
+        }
         $expect('members_list rejects unknown filter key',
             $this->memberTool->list(filters: (object) ['nope' => 1]),
             fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
@@ -1504,9 +1607,11 @@ final class McpSmokeTestCommand extends Command
         $expect('layouts_list rejects unknown filter key',
             $this->layoutTool->list(filters: (object) ['nope' => 1]),
             fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
-        $expect('news_archives_list rejects unknown filter key',
-            $this->newsArchiveTool->list(filters: (object) ['nope' => 1]),
-            fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
+        if ($requires('contao/news-bundle', 'news_archives_list rejects unknown filter key')) {
+            $expect('news_archives_list rejects unknown filter key',
+                $this->newsArchiveTool->list(filters: (object) ['nope' => 1]),
+                fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
+        }
         $expect('users_list rejects unknown filter key',
             $this->userTool->usersList(filters: (object) ['nope' => 1]),
             fn ($r) => ($r['error'] ?? null) === 'invalid_filter');
@@ -1645,12 +1750,15 @@ final class McpSmokeTestCommand extends Command
         // because Contao's DC_Table resolves legend titles from
         // $GLOBALS['TL_LANG'][$table][<legend>] with NO MSC fallback (else the
         // fieldset header renders the raw key "external_id_legend").
-        \Contao\Controller::loadDataContainer('tl_news');
-        $expect('external_id field label resolves to a [label, description] array',
-            $GLOBALS['TL_DCA']['tl_news']['fields']['external_id_namespace']['label'] ?? null,
+        // tl_news where the news bundle is there; the injector treats every
+        // supported table alike, so tl_article stands in where it is not.
+        $externalIdTable = $installed['contao/news-bundle'] ? 'tl_news' : 'tl_article';
+        \Contao\Controller::loadDataContainer($externalIdTable);
+        $expect("external_id field label resolves to a [label, description] array ({$externalIdTable})",
+            $GLOBALS['TL_DCA'][$externalIdTable]['fields']['external_id_namespace']['label'] ?? null,
             fn ($v) => \is_array($v) && (string) ($v[0] ?? '') !== '' && (string) ($v[1] ?? '') !== '');
-        $expect('external_id_legend is mirrored per-table (not the raw key)',
-            $GLOBALS['TL_LANG']['tl_news']['external_id_legend'] ?? null,
+        $expect("external_id_legend is mirrored per-table (not the raw key) ({$externalIdTable})",
+            $GLOBALS['TL_LANG'][$externalIdTable]['external_id_legend'] ?? null,
             fn ($v) => \is_string($v) && $v !== '' && $v !== 'external_id_legend');
 
         // ═══════════════════════ Multilingual link ══════════════════
@@ -1676,18 +1784,21 @@ final class McpSmokeTestCommand extends Command
                 && \in_array('tl_page', $r['supported_tables'] ?? [], true)
                 && \in_array('tl_news', $r['supported_tables'] ?? [], true));
 
-        $expect('entity_language_link rejects empty translations object',
-            $this->multilingualTool->entityLanguageLink('tl_news', 1, (object) []),
+        // The validation path is the same for every record table; tl_article
+        // stands in where there is no news bundle (and no NewsModel).
+        $linkTable = $installed['contao/news-bundle'] ? 'tl_news' : 'tl_article';
+        $expect("entity_language_link rejects empty translations object ({$linkTable})",
+            $this->multilingualTool->entityLanguageLink($linkTable, 1, (object) []),
             fn ($r) => ($r['error'] ?? null) === 'invalid_input');
 
-        $expect('entity_language_link rejects translations passed as JSON list',
-            $this->multilingualTool->entityLanguageLink('tl_news', 1, ['a', 'b']),
+        $expect("entity_language_link rejects translations passed as JSON list ({$linkTable})",
+            $this->multilingualTool->entityLanguageLink($linkTable, 1, ['a', 'b']),
             fn ($r) => ($r['error'] ?? null) === 'invalid_input');
 
-        $expect('entity_language_link rejects nonexistent default row',
-            $this->multilingualTool->entityLanguageLink('tl_news', 99999999, (object) ['de' => 99999998]),
+        $expect("entity_language_link rejects nonexistent default row ({$linkTable})",
+            $this->multilingualTool->entityLanguageLink($linkTable, 99999999, (object) ['de' => 99999998]),
             fn ($r) => ($r['error'] ?? null) === 'not_found'
-                && str_contains((string) ($r['message'] ?? ''), 'tl_news'));
+                && str_contains((string) ($r['message'] ?? ''), $linkTable));
 
         // ── The collection half of a changelanguage link ──────────────────
         //
@@ -1704,12 +1815,14 @@ final class McpSmokeTestCommand extends Command
                 && \in_array('tl_calendar', $r['supported_tables'] ?? [], true)
                 && \in_array('tl_faq_category', $r['supported_tables'] ?? [], true));
 
-        $hasMaster = \in_array('master', array_map(
+        $hasMaster = $installed['contao/news-bundle'] && \in_array('master', array_map(
             static fn ($c) => strtolower($c->getName()),
             $this->connection->createSchemaManager()->listTableColumns('tl_news_archive'),
         ), true);
 
-        if (!$hasMaster) {
+        if (!$installed['contao/news-bundle']) {
+            $skip('contao/news-bundle', 'collection half of entity_language_link (news archives)');
+        } elseif (!$hasMaster) {
             // No changelanguage here. The point is that this says so instead of
             // writing a column that does not exist and reporting success — and
             // that it says so only once the call itself checks out, so a
@@ -1974,16 +2087,14 @@ final class McpSmokeTestCommand extends Command
         // Extension-gated tools: skip cleanly when the extension isn't loaded.
         $commentGate = $this->commentsTool->delete(0);
         if (($commentGate['error'] ?? null) === 'extension_not_available') {
-            $output->writeln('  ⊝ comments-bundle not installed — gate test skipped');
-            ++$passed;
+            $skip('contao/comments-bundle', 'comment_delete confirm_destructive gate');
         } else {
             $expect('comment_delete rejects missing confirm_destructive', $commentGate, $gateOk);
         }
 
         $newsletterGate = $this->newsletterTool->newsletterDelete(0);
         if (($newsletterGate['error'] ?? null) === 'extension_not_available') {
-            $output->writeln('  ⊝ newsletter-bundle not installed — gate tests skipped');
-            $passed += 3;
+            $skip('contao/newsletter-bundle', 'newsletter/recipient/channel delete confirm_destructive gates');
         } else {
             $expect('newsletter_delete rejects missing confirm_destructive', $newsletterGate, $gateOk);
             $expect('newsletter_recipient_delete rejects missing confirm_destructive',
@@ -2097,11 +2208,18 @@ final class McpSmokeTestCommand extends Command
                 $this->connection->insert('tl_user', $quoted);
                 $tempUserId = (int) $this->connection->lastInsertId();
 
+                // A table its backend module gates: tl_news, or tl_form where
+                // there is no news bundle — without its module in BE_MOD,
+                // tl_news is gated by nothing and proves nothing.
+                [$gatedTable, $gatedTool, $gatedRow] = $installed['contao/news-bundle']
+                    ? ['tl_news', 'news_create', ['headline' => 'x']]
+                    : ['tl_form', 'form_create', ['title' => 'x']];
+
                 // (a) Admin bypasses everything.
                 $this->mcpCallContext->setIdentity($adminId, 'smoke', null, null);
                 $expect('admin bypasses MCP-access gate', $this->permissionGuard->ensureMcpAccess(), fn ($r) => $r === null);
                 $expect('admin may create pages (bypass voter)', $this->permissionGuard->ensureCan('tl_page', 'create', null, ['title' => 'x']), fn ($r) => $r === null);
-                $expect('admin sees news_create in catalogue', $this->permissionEnforcer->isToolVisible('news_create'), fn ($r) => $r === true);
+                $expect("admin sees {$gatedTool} in catalogue", $this->permissionEnforcer->isToolVisible($gatedTool), fn ($r) => $r === true);
 
                 // (b) Coarse gate denies a user without the flag (unknown id → no row).
                 $this->mcpCallContext->setIdentity(999999000, 'smoke', null, null);
@@ -2113,16 +2231,16 @@ final class McpSmokeTestCommand extends Command
 
                 // (d) … but is denied operations outside their backend rights.
                 // No module access at all → any module-gated table is denied.
-                $expect('non-admin without news rights is denied news create',
-                    $this->permissionGuard->ensureCan('tl_news', 'create', null, ['headline' => 'x']),
+                $expect("non-admin without module rights is denied {$gatedTable} create",
+                    $this->permissionGuard->ensureCan($gatedTable, 'create', null, $gatedRow),
                     fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
                 $expect('non-admin without files module is denied file access',
                     $this->permissionGuard->ensureModule('files'),
                     fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
 
                 // (d2) Visibility: the catalogue hides what the user can't use.
-                $expect('non-admin does NOT see news_create in catalogue',
-                    $this->permissionEnforcer->isToolVisible('news_create'), fn ($r) => $r === false);
+                $expect("non-admin does NOT see {$gatedTool} in catalogue",
+                    $this->permissionEnforcer->isToolVisible($gatedTool), fn ($r) => $r === false);
                 $expect('non-admin does NOT see system_settings_update (admin-only)',
                     $this->permissionEnforcer->isToolVisible('system_settings_update'), fn ($r) => $r === false);
                 $expect('non-admin still sees discovery/meta tools (ping)',
@@ -2382,77 +2500,81 @@ final class McpSmokeTestCommand extends Command
         // UPDATE and the row is gone).
         $output->writeln("\n<comment>Undo snapshot</comment>");
 
-        // NB: no `groups` column here — it is a MySQL reserved word and DBAL's
-        // insert() does not quote column keys. The DB default covers it.
-        $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => 'MCP smoke undo archive', 'jumpTo' => 0]);
-        $undoArchiveId = (int) $this->connection->lastInsertId();
-        $this->connection->insert('tl_news', ['pid' => $undoArchiveId, 'tstamp' => time(), 'headline' => 'MCP smoke undo news', 'alias' => 'mcp-smoke-undo-'.time(), 'date' => time(), 'time' => time(), 'published' => 1, 'author' => 1]);
-        $undoNewsId = (int) $this->connection->lastInsertId();
-        $this->connection->insert('tl_content', ['pid' => $undoNewsId, 'ptable' => 'tl_news', 'tstamp' => time(), 'type' => 'text', 'text' => '<p>MCP smoke undo body</p>', 'sorting' => 128]);
-        $undoContentId = (int) $this->connection->lastInsertId();
+        // The snapshot is exercised on a news entry with a content element:
+        // a delete that cascades, which is what the undo has to carry.
+        if ($requires('contao/news-bundle', 'undo snapshot (news entry with a content element)')) {
+            // NB: no `groups` column here — it is a MySQL reserved word and DBAL's
+            // insert() does not quote column keys. The DB default covers it.
+            $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => 'MCP smoke undo archive', 'jumpTo' => 0]);
+            $undoArchiveId = (int) $this->connection->lastInsertId();
+            $this->connection->insert('tl_news', ['pid' => $undoArchiveId, 'tstamp' => time(), 'headline' => 'MCP smoke undo news', 'alias' => 'mcp-smoke-undo-'.time(), 'date' => time(), 'time' => time(), 'published' => 1, 'author' => 1]);
+            $undoNewsId = (int) $this->connection->lastInsertId();
+            $this->connection->insert('tl_content', ['pid' => $undoNewsId, 'ptable' => 'tl_news', 'tstamp' => time(), 'type' => 'text', 'text' => '<p>MCP smoke undo body</p>', 'sorting' => 128]);
+            $undoContentId = (int) $this->connection->lastInsertId();
 
-        $expect('undo snapshot is skipped without confirm_destructive',
-            ['id' => $this->undoRecorder->beforeToolCall('news_delete', ['id' => $undoNewsId, 'confirm_destructive' => false])],
-            fn ($r) => 0 === $r['id']);
+            $expect('undo snapshot is skipped without confirm_destructive',
+                ['id' => $this->undoRecorder->beforeToolCall('news_delete', ['id' => $undoNewsId, 'confirm_destructive' => false])],
+                fn ($r) => 0 === $r['id']);
 
-        $expect('undo snapshot is skipped for non-deleting tools',
-            ['id' => $this->undoRecorder->beforeToolCall('news_list', [])],
-            fn ($r) => 0 === $r['id']);
+            $expect('undo snapshot is skipped for non-deleting tools',
+                ['id' => $this->undoRecorder->beforeToolCall('news_list', [])],
+                fn ($r) => 0 === $r['id']);
 
-        $undoId = $this->undoRecorder->beforeToolCall('news_delete', ['id' => $undoNewsId, 'confirm_destructive' => true]);
-        $undoRow = $undoId > 0 ? $this->connection->fetchAssociative('SELECT * FROM tl_undo WHERE id = ?', [$undoId]) : false;
-        $undoData = \is_array($undoRow) ? StringUtil::deserialize((string) $undoRow['data']) : [];
+            $undoId = $this->undoRecorder->beforeToolCall('news_delete', ['id' => $undoNewsId, 'confirm_destructive' => true]);
+            $undoRow = $undoId > 0 ? $this->connection->fetchAssociative('SELECT * FROM tl_undo WHERE id = ?', [$undoId]) : false;
+            $undoData = \is_array($undoRow) ? StringUtil::deserialize((string) $undoRow['data']) : [];
 
-        $expect('delete is snapshotted into tl_undo, cascade included',
-            ['undo_id' => $undoId, 'row' => $undoRow, 'data' => $undoData],
-            fn ($r) => $r['undo_id'] > 0
-                && \is_array($r['row'])
-                && 'tl_news' === $r['row']['fromTable']
-                && 2 === (int) $r['row']['affectedRows']
-                && 1 === \count($r['data']['tl_news'] ?? [])
-                && 1 === \count($r['data']['tl_content'] ?? []));
+            $expect('delete is snapshotted into tl_undo, cascade included',
+                ['undo_id' => $undoId, 'row' => $undoRow, 'data' => $undoData],
+                fn ($r) => $r['undo_id'] > 0
+                    && \is_array($r['row'])
+                    && 'tl_news' === $r['row']['fromTable']
+                    && 2 === (int) $r['row']['affectedRows']
+                    && 1 === \count($r['data']['tl_news'] ?? [])
+                    && 1 === \count($r['data']['tl_content'] ?? []));
 
-        $this->newsTool->delete($undoNewsId, true);
+            $this->newsTool->delete($undoNewsId, true);
 
-        $expect('record and its content element are really gone',
-            [
-                'news' => $this->connection->fetchOne('SELECT id FROM tl_news WHERE id = ?', [$undoNewsId]),
-                'content' => $this->connection->fetchOne('SELECT id FROM tl_content WHERE id = ?', [$undoContentId]),
-            ],
-            fn ($r) => false === $r['news'] && false === $r['content']);
+            $expect('record and its content element are really gone',
+                [
+                    'news' => $this->connection->fetchOne('SELECT id FROM tl_news WHERE id = ?', [$undoNewsId]),
+                    'content' => $this->connection->fetchOne('SELECT id FROM tl_content WHERE id = ?', [$undoContentId]),
+                ],
+                fn ($r) => false === $r['news'] && false === $r['content']);
 
-        // Replay what the backend's undo does: re-insert every snapshotted row.
-        // Column names MUST be quoted — Contao's own undo goes through
-        // Database\Statement::set(), which quotes; a raw DBAL insert() would
-        // choke on reserved words like `groups`.
-        foreach ($undoData as $undoTable => $undoRows) {
-            foreach ($undoRows as $undoRowData) {
-                $columns = array_map(fn (string $col): string => $this->connection->quoteIdentifier($col), array_keys($undoRowData));
-                $this->connection->executeStatement(
-                    'INSERT INTO '.$this->connection->quoteIdentifier((string) $undoTable)
-                    .' ('.implode(', ', $columns).') VALUES ('.implode(', ', array_fill(0, \count($columns), '?')).')',
-                    array_values($undoRowData),
-                );
+            // Replay what the backend's undo does: re-insert every snapshotted row.
+            // Column names MUST be quoted — Contao's own undo goes through
+            // Database\Statement::set(), which quotes; a raw DBAL insert() would
+            // choke on reserved words like `groups`.
+            foreach ($undoData as $undoTable => $undoRows) {
+                foreach ($undoRows as $undoRowData) {
+                    $columns = array_map(fn (string $col): string => $this->connection->quoteIdentifier($col), array_keys($undoRowData));
+                    $this->connection->executeStatement(
+                        'INSERT INTO '.$this->connection->quoteIdentifier((string) $undoTable)
+                        .' ('.implode(', ', $columns).') VALUES ('.implode(', ', array_fill(0, \count($columns), '?')).')',
+                        array_values($undoRowData),
+                    );
+                }
             }
+
+            $expect('backend undo restores the record with its original id and body',
+                [
+                    'news' => $this->connection->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [$undoNewsId]),
+                    'content' => $this->connection->fetchAssociative('SELECT * FROM tl_content WHERE id = ?', [$undoContentId]),
+                ],
+                fn ($r) => \is_array($r['news']) && 'MCP smoke undo news' === $r['news']['headline']
+                    && \is_array($r['content']) && str_contains((string) $r['content']['text'], 'MCP smoke undo body'));
+
+            $this->undoRecorder->discard($undoId);
+
+            $expect('discard() removes a snapshot again',
+                ['left' => $this->connection->fetchOne('SELECT id FROM tl_undo WHERE id = ?', [$undoId])],
+                fn ($r) => false === $r['left']);
+
+            $this->connection->delete('tl_content', ['id' => $undoContentId]);
+            $this->connection->delete('tl_news', ['id' => $undoNewsId]);
+            $this->connection->delete('tl_news_archive', ['id' => $undoArchiveId]);
         }
-
-        $expect('backend undo restores the record with its original id and body',
-            [
-                'news' => $this->connection->fetchAssociative('SELECT * FROM tl_news WHERE id = ?', [$undoNewsId]),
-                'content' => $this->connection->fetchAssociative('SELECT * FROM tl_content WHERE id = ?', [$undoContentId]),
-            ],
-            fn ($r) => \is_array($r['news']) && 'MCP smoke undo news' === $r['news']['headline']
-                && \is_array($r['content']) && str_contains((string) $r['content']['text'], 'MCP smoke undo body'));
-
-        $this->undoRecorder->discard($undoId);
-
-        $expect('discard() removes a snapshot again',
-            ['left' => $this->connection->fetchOne('SELECT id FROM tl_undo WHERE id = ?', [$undoId])],
-            fn ($r) => false === $r['left']);
-
-        $this->connection->delete('tl_content', ['id' => $undoContentId]);
-        $this->connection->delete('tl_news', ['id' => $undoNewsId]);
-        $this->connection->delete('tl_news_archive', ['id' => $undoArchiveId]);
 
         // ═══════════════════ Usage / delete guard ═══════════════════
         // Deleting something that is still referenced breaks the site
@@ -3893,43 +4015,47 @@ final class McpSmokeTestCommand extends Command
             $output->writeln('  <comment>~ Modul-Kopie übersprungen — kein Theme vorhanden</comment>');
         }
 
-        // News carries the two things a wider table list would otherwise have
-        // got wrong: its alias comes from `headline`, not `title` (guessing
-        // `title` left the copy with an EMPTY alias and no working URL), and
-        // `date` is doNotCopy AND mandatory with `'default' => time()`, so
-        // falling back to the column default dated every copy to 1970.
-        $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.'_dup_archiv', 'jumpTo' => 0]);
-        $dupArchiveId = (int) $this->connection->lastInsertId();
-        $srcNews = $this->newsTool->create(archive_id: $dupArchiveId, headline: 'Kopierbare Meldung '.$stamp);
-        $srcNewsId = (int) ($srcNews['id'] ?? 0);
+        if ($requires('contao/news-bundle', 'news copy (alias from headline, date from the DCA default)')) {
+            // News carries the two things a wider table list would otherwise have
+            // got wrong: its alias comes from `headline`, not `title` (guessing
+            // `title` left the copy with an EMPTY alias and no working URL), and
+            // `date` is doNotCopy AND mandatory with `'default' => time()`, so
+            // falling back to the column default dated every copy to 1970.
+            $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.'_dup_archiv', 'jumpTo' => 0]);
+            $dupArchiveId = (int) $this->connection->lastInsertId();
+            $srcNews = $this->newsTool->create(archive_id: $dupArchiveId, headline: 'Kopierbare Meldung '.$stamp);
+            $srcNewsId = (int) ($srcNews['id'] ?? 0);
 
-        if ($srcNewsId > 0) {
-            $this->connection->update('tl_news', ['date' => strtotime('2019-03-04') ?: 0], ['id' => $srcNewsId]);
+            if ($srcNewsId > 0) {
+                $this->connection->update('tl_news', ['date' => strtotime('2019-03-04') ?: 0], ['id' => $srcNewsId]);
 
-            $newsCopy = $this->duplicateTool->duplicate('tl_news', $srcNewsId,
-                overrides: (object) ['headline' => 'Kopie '.$stamp, 'published' => false]);
-            $newsCopyId = (int) ($newsCopy['new_id'] ?? 0);
+                $newsCopy = $this->duplicateTool->duplicate('tl_news', $srcNewsId,
+                    overrides: (object) ['headline' => 'Kopie '.$stamp, 'published' => false]);
+                $newsCopyId = (int) ($newsCopy['new_id'] ?? 0);
 
-            $expect('a news entry can be copied', $newsCopy,
-                static fn ($r) => ($r['duplicated'] ?? false) === true);
+                $expect('a news entry can be copied', $newsCopy,
+                    static fn ($r) => ($r['duplicated'] ?? false) === true);
 
-            $copied = $newsCopyId > 0
-                ? $this->connection->fetchAssociative('SELECT alias, date, author, published FROM tl_news WHERE id = ?', [$newsCopyId])
-                : null;
+                $copied = $newsCopyId > 0
+                    ? $this->connection->fetchAssociative('SELECT alias, date, author, published FROM tl_news WHERE id = ?', [$newsCopyId])
+                    : null;
 
-            $expect('its alias is regenerated from the headline, not left empty', $copied,
-                static fn ($r) => \is_array($r) && str_starts_with((string) $r['alias'], 'kopie-'));
-            $expect('its date comes from the DCA default, not from the column default',
-                $copied,
-                static fn ($r) => \is_array($r) && (int) $r['date'] > strtotime('2020-01-01'));
-            $expect('and it is unpublished because the override said so', $copied,
-                static fn ($r) => \is_array($r) && (int) $r['published'] === 0);
-            $srcNewsAuthor = (int) $this->connection->fetchOne('SELECT author FROM tl_news WHERE id = ?', [$srcNewsId]);
-            $expect('the copy has an author', $copied,
-                static fn ($r) => \is_array($r) && ($srcNewsAuthor === 0 || (int) $r['author'] > 0));
+                $expect('its alias is regenerated from the headline, not left empty', $copied,
+                    static fn ($r) => \is_array($r) && str_starts_with((string) $r['alias'], 'kopie-'));
+                $expect('its date comes from the DCA default, not from the column default',
+                    $copied,
+                    static fn ($r) => \is_array($r) && (int) $r['date'] > strtotime('2020-01-01'));
+                $expect('and it is unpublished because the override said so', $copied,
+                    static fn ($r) => \is_array($r) && (int) $r['published'] === 0);
+                $srcNewsAuthor = (int) $this->connection->fetchOne('SELECT author FROM tl_news WHERE id = ?', [$srcNewsId]);
+                $expect('the copy has an author', $copied,
+                    static fn ($r) => \is_array($r) && ($srcNewsAuthor === 0 || (int) $r['author'] > 0));
 
-            $this->connection->executeStatement(
-                'DELETE FROM tl_news WHERE id IN ('.implode(',', array_filter([$srcNewsId, $newsCopyId])).')');
+                $this->connection->executeStatement(
+                    'DELETE FROM tl_news WHERE id IN ('.implode(',', array_filter([$srcNewsId, $newsCopyId])).')');
+            }
+
+            $this->connection->executeStatement('DELETE FROM tl_news_archive WHERE id = ?', [$dupArchiveId]);
         }
 
         $expect('an unsupported table still names what is supported',
@@ -3937,8 +4063,6 @@ final class McpSmokeTestCommand extends Command
             static fn ($r) => ($r['error'] ?? '') === 'unsupported_table'
                 && \in_array('tl_module', $r['supported'] ?? [], true)
                 && !\in_array('tl_user', $r['supported'] ?? [], true));
-
-        $this->connection->executeStatement('DELETE FROM tl_news_archive WHERE id = ?', [$dupArchiveId]);
 
         // ═══════════════════ Twig-Override wirksam? ═══════════════════
         //
@@ -4838,6 +4962,14 @@ final class McpSmokeTestCommand extends Command
             $failed,
             $failed > 0 ? 'error' : 'info',
         ));
+        if ($skipped !== []) {
+            // Not a failure: what is not installed cannot break. But the count
+            // above covers less of the bundle than on a full installation.
+            $output->writeln(sprintf('  <comment>%d section(s) skipped</comment> — not installed: %s',
+                array_sum($skipped),
+                implode(', ', array_keys($skipped)),
+            ));
+        }
 
         return $failed === 0 ? Command::SUCCESS : Command::FAILURE;
     }

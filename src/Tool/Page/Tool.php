@@ -66,12 +66,30 @@ final class Tool
     ];
 
     /**
+     * The referrer tables this installation has. tl_news_archive, tl_calendar
+     * and tl_faq_category come with optional bundles; asking one that is not
+     * there made page_delete and page_delete_tree fail outright on every site
+     * without news, events or FAQs.
+     *
+     * @var list<string>|null
+     */
+    private ?array $presentReferrerTables = null;
+
+    /**
      * @return array<string, int>  table → reference count
      */
     private function findJumpToReferrers(int $pageId): array
     {
+        if ($this->presentReferrerTables === null) {
+            $schemaManager = $this->connection->createSchemaManager();
+            $this->presentReferrerTables = array_values(array_filter(
+                self::JUMPTO_REFERRER_TABLES,
+                static fn (string $table): bool => $schemaManager->tablesExist([$table]),
+            ));
+        }
+
         $result = [];
-        foreach (self::JUMPTO_REFERRER_TABLES as $table) {
+        foreach ($this->presentReferrerTables as $table) {
             $count = (int) $this->connection->fetchOne(
                 sprintf('SELECT COUNT(*) FROM %s WHERE jumpTo = ?', $this->connection->quoteIdentifier($table)),
                 [$pageId],
