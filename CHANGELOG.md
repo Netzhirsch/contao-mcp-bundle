@@ -6,6 +6,32 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Fixed
+- **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**
+  `page_delete` und `page_delete_tree` suchen vor dem Löschen nach Einträgen,
+  die die Seite als Weiterleitungsziel (`jumpTo`) nutzen, und fragten dafür
+  `tl_news_archive`, `tl_calendar` und `tl_faq_category` ohne Prüfung ab.
+  Fehlt eines dieser optionalen Bundles, gibt es die Tabelle nicht — und jedes
+  bestätigte Löschen brach mit „Table tl_news_archive doesn't exist" ab. Jetzt
+  fragt die Prüfung nur die Tabellen, die die Installation hat.
+
+### Changed
+- **Der Smoke-Test läuft auch ohne die optionalen Contao-Bundles durch.** Fehlte
+  `contao/news-bundle`, brach `contao:mcp:smoke-test` nach der Hälfte mit
+  „Table tl_news_archive doesn't exist" ab: News dient an vielen Stellen als
+  Beispieltabelle, weit über den News-Abschnitt hinaus. Prüfungen, die News,
+  Kalender, FAQ, Kommentare oder Newsletter brauchen, werden jetzt
+  übersprungen, wenn das Bundle fehlt — jede auf einer eigenen ⊝-Zeile. Die
+  Zusammenfassung zählt sie getrennt von den bestandenen („15 section(s)
+  skipped — not installed: …"), damit eine schlanke Installation nicht
+  besser dasteht, als sie geprüft wurde. Wo es gar nicht um News geht
+  (External-ID-Labels, Sprachverknüpfung, Modulrechte), springt eine
+  Core-Tabelle ein und die Prüfung läuft weiter.
+
+  Die CI testet dafür zusätzlich Contao 6.0 ohne die optionalen Bundles. Eine
+  volle Installation, die etwas überspringt, lässt die CI scheitern — ihr
+  fehlt dann ein Bundle, und sie prüft weniger, als sie vorgibt.
+
 ## [1.37.1] – 2026-10-02
 
 > Zwei Bugfixes für Contao 6. Unter Symfony 8 war der MCP-Server nicht
