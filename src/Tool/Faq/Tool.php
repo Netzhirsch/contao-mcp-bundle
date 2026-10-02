@@ -16,6 +16,7 @@ use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
+use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Service\TranslationMaster;
@@ -44,6 +45,7 @@ final class Tool
         private readonly Connection $connection,
         private readonly McpPermissionGuard $guard,
         private readonly TranslationMaster $translationMaster,
+        private readonly OptionalBundles $optionalBundles,
     ) {
     }
 
@@ -81,6 +83,9 @@ final class Tool
         ?string $updated_after = null,
         ?string $updated_before = null,
     ): array {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::FAQ)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
         $limit = max(1, min($limit, 200));
         $offset = max(0, $offset);
@@ -142,6 +147,9 @@ final class Tool
     )]
     public function get(int $id, bool $include_unpublished = true): array
     {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::FAQ)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
         $f = FaqModel::findById($id);
         if ($f === null) {
@@ -186,6 +194,9 @@ final class Tool
         ?int $languageMain = null,
         #[Schema(type: 'object')] mixed $extras = null,
     ): array {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::FAQ)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
 
         if (FaqCategoryModel::findById($category_id) === null) {
@@ -277,6 +288,9 @@ final class Tool
         ?int $languageMain = null,
         #[Schema(type: 'object')] mixed $extras = null,
     ): array {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::FAQ)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
         $f = FaqModel::findById($id);
         if ($f === null) {
@@ -346,6 +360,9 @@ final class Tool
     )]
     public function delete(int $id, bool $confirm_destructive = false): array
     {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::FAQ)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
 
         if (!$confirm_destructive) {

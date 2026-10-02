@@ -9,6 +9,7 @@ use Contao\Model;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Service\AuditedUpdater;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use numero2\Opengraph3Bundle\Opengraph3Bundle;
 use PhpMcp\Server\Attributes\McpTool;
@@ -57,6 +58,7 @@ final class Tool
         private readonly Schema $schema,
         private readonly FieldProviderRegistry $providers,
         private readonly LoggerInterface $logger,
+        private readonly OptionalBundles $optionalBundles,
     ) {
     }
 
@@ -378,6 +380,13 @@ final class Tool
                     .'", which is not installed in this project. Use installed_bundles to inspect availability.',
                 'required_extension' => self::REQUIRED_EXTENSION,
             ];
+        }
+
+        // tl_news, tl_calendar_events and tl_faq carry the fields only while
+        // their own bundle is installed — without it the answer below would
+        // be "this table has no OpenGraph fields", which is not the problem.
+        if (($unavailable = $this->optionalBundles->unavailableForTable($table)) !== null) {
+            return $unavailable;
         }
 
         $this->framework->initialize();

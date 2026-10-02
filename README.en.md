@@ -84,8 +84,8 @@ the search index, maintenance and system settings.
   (`numero2/contao-opengraph3`, see below), **DeepL translation**
   (`numero2/contao-deepl`, see below) and the language link
   `entity_language_link` (`terminal42/contao-changelanguage`). Without their
-  package, the newsletter, comment and extension tools answer
-  `extension_not_available`; the news, calendar and FAQ tools need their bundle.
+  package they answer `extension_not_available`, naming the missing package —
+  the generic tools too, when handed a table such as `tl_news`.
 - **File uploads**, large ones included: `file_upload_begin`/`_chunk`/`_finish`
   move a file in pieces without it having to sit anywhere public first; size,
   `sha256` and magic bytes are checked before anything is written (see below).
@@ -326,7 +326,7 @@ end. It should pass.
 If one of the optional Contao bundles is missing (news, calendar, FAQ,
 comments, newsletter), it skips the checks that need it instead of aborting —
 each on its own ⊝ line. The summary counts them apart from the passes
-(`15 section(s) skipped — not installed: …`): not a failure, but a sign that
+(`17 section(s) skipped — not installed: …`): not a failure, but a sign that
 less was checked than on a full installation.
 
 For a few checks the test switches `var/mcp/config.json` over briefly —

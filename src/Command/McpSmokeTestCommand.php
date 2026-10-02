@@ -2061,14 +2061,20 @@ final class McpSmokeTestCommand extends Command
         $output->writeln("\n<comment>confirm_destructive gate</comment>");
         $gateOk = fn ($r) => ($r['error'] ?? null) === 'destructive_confirmation_required';
 
-        $expect('news_delete rejects missing confirm_destructive',
-            $this->newsTool->delete(0), $gateOk);
-        $expect('news_archive_delete rejects missing confirm_destructive',
-            $this->newsArchiveTool->delete(0), $gateOk);
+        // Without its bundle a news or FAQ tool refuses before it reads its
+        // arguments; the optional-bundle section checks that answer.
+        if ($requires('contao/news-bundle', 'news_delete and news_archive_delete confirm_destructive gates')) {
+            $expect('news_delete rejects missing confirm_destructive',
+                $this->newsTool->delete(0), $gateOk);
+            $expect('news_archive_delete rejects missing confirm_destructive',
+                $this->newsArchiveTool->delete(0), $gateOk);
+        }
         $expect('article_delete rejects missing confirm_destructive',
             $this->articleTool->delete(0), $gateOk);
-        $expect('faq_delete rejects missing confirm_destructive',
-            $this->faqTool->delete(0), $gateOk);
+        if ($requires('contao/faq-bundle', 'faq_delete confirm_destructive gate')) {
+            $expect('faq_delete rejects missing confirm_destructive',
+                $this->faqTool->delete(0), $gateOk);
+        }
         $expect('content_delete rejects missing confirm_destructive',
             $this->contentTool->delete(0), $gateOk);
         $expect('layout_delete rejects missing confirm_destructive',
@@ -3656,6 +3662,49 @@ final class McpSmokeTestCommand extends Command
         $expect('and a call that simply omits it is just as clear',
             $this->discoveryTool->call('template_get', []),
             static fn ($r) => \is_array($r) && ($r['missing_parameters'] ?? []) === ['path']);
+
+        // ═══════════════ Optional bundles: missing means not available ═══════════════
+        //
+        // The news, calendar and FAQ tools are registered on every install.
+        // Without their bundle a call ended in "Class Contao\NewsArchiveModel
+        // not found" or a query against a missing table — an internal error
+        // that names nothing. They answer extension_not_available now, on every
+        // path a call can take: the dispatcher, the permission check in front
+        // of it, the lazy-mode proxy and the generic tools that take a table.
+        $output->writeln("\n<comment>Optional bundles</comment>");
+
+        $families = [
+            'contao/news-bundle' => ['tl_news', 'news_archives_list', 'news_get'],
+            'contao/calendar-bundle' => ['tl_calendar_events', 'calendars_list', 'calendar_event_get'],
+            'contao/faq-bundle' => ['tl_faq', 'faq_categories_list', 'faq_get'],
+        ];
+
+        foreach ($families as $bundle => [$familyTable, $familyList, $familyGet]) {
+            if ($installed[$bundle]) {
+                $expect("{$familyList} answers normally with {$bundle} installed",
+                    $decodeResult($dispatcher->handleToolCall(new CallToolRequest(60, $familyList, ['limit' => 1]))),
+                    static fn (array $r) => isset($r['items']) && !isset($r['error']));
+
+                continue;
+            }
+
+            $notAvailable = static fn ($r) => \is_array($r)
+                && ($r['error'] ?? null) === 'extension_not_available'
+                && ($r['required_extension'] ?? null) === $bundle;
+
+            $expect("{$familyList} answers extension_not_available through the dispatcher",
+                $decodeResult($dispatcher->handleToolCall(new CallToolRequest(61, $familyList, []))),
+                $notAvailable);
+            $expect("the permission check says the same for {$familyGet}, before any voter",
+                $this->permissionEnforcer->check($familyGet, ['id' => 1]),
+                $notAvailable);
+            $expect("so does contao_call({$familyGet})",
+                $this->discoveryTool->call($familyGet, ['id' => 1]),
+                $notAvailable);
+            $expect("and entity_query_options({$familyTable})",
+                $this->systemTool->entityQueryOptions($familyTable),
+                $notAvailable);
+        }
 
 
 

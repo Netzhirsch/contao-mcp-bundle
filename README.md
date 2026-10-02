@@ -86,9 +86,8 @@ OpenGraph-/X-Card-Daten, Suchindex, Wartung + System-Einstellungen.
   (`numero2/contao-opengraph3`, siehe unten), **Übersetzen mit DeepL**
   (`numero2/contao-deepl`, siehe unten) und die Sprachverknüpfung
   `entity_language_link` (`terminal42/contao-changelanguage`). Ohne ihr Paket
-  antworten Newsletter-, Kommentar- und Erweiterungs-Tools mit
-  `extension_not_available`; die News-, Kalender- und FAQ-Tools setzen ihr
-  Bundle voraus.
+  antworten sie mit `extension_not_available` und nennen das fehlende Paket —
+  auch die generischen Tools, wenn man ihnen eine Tabelle wie `tl_news` gibt.
 - **Dateien hochladen**, auch große: `file_upload_begin`/`_chunk`/`_finish`
   übertragen eine Datei in Stücken, ohne dass sie vorher irgendwo öffentlich
   liegen muss; Größe, `sha256` und Magic Bytes werden geprüft, bevor etwas
@@ -341,7 +340,7 @@ grün durchlaufen.
 Fehlt eines der optionalen Contao-Bundles (News, Kalender, FAQ, Kommentare,
 Newsletter), überspringt er die Prüfungen, die es braucht, statt abzubrechen —
 jede auf einer eigenen ⊝-Zeile. Die Zusammenfassung zählt sie getrennt von den
-bestandenen (`15 section(s) skipped — not installed: …`): kein Fehlschlag, aber
+bestandenen (`17 section(s) skipped — not installed: …`): kein Fehlschlag, aber
 ein Hinweis, dass weniger geprüft wurde als auf einer vollen Installation.
 
 Für einzelne Prüfungen stellt der Test `var/mcp/config.json` kurz um — unter

@@ -44,7 +44,7 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Beispieltabelle, weit über den News-Abschnitt hinaus. Prüfungen, die News,
   Kalender, FAQ, Kommentare oder Newsletter brauchen, werden jetzt
   übersprungen, wenn das Bundle fehlt — jede auf einer eigenen ⊝-Zeile. Die
-  Zusammenfassung zählt sie getrennt von den bestandenen („15 section(s)
+  Zusammenfassung zählt sie getrennt von den bestandenen („17 section(s)
   skipped — not installed: …"), damit eine schlanke Installation nicht
   besser dasteht, als sie geprüft wurde. Wo es gar nicht um News geht
   (External-ID-Labels, Sprachverknüpfung, Modulrechte), springt eine
@@ -92,6 +92,20 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Template-Tools verlangen `tpl_editor`.
 
 ### Fixed
+- **Ohne ihr Bundle melden die News-, Kalender- und FAQ-Tools jetzt
+  `extension_not_available`.** Die 30 Tools sind auf jeder Installation
+  registriert. Fehlte `contao/news-bundle`, `contao/calendar-bundle` oder
+  `contao/faq-bundle`, endete ein Aufruf in „Class Contao\NewsArchiveModel not
+  found" oder einer Abfrage gegen eine Tabelle, die es nicht gibt — ein interner
+  Fehler, der nichts erklärte. Jetzt antworten sie wie die Kommentar- und
+  Newsletter-Tools mit `extension_not_available` und nennen das fehlende Paket,
+  und zwar auf jedem Weg: direkter Aufruf, `contao_call` im Lazy-Mode und die
+  Rechteprüfung davor, die einen Nicht-Administrator sonst an einer Tabelle
+  ohne DCA hätte scheitern lassen. Dieselbe Antwort geben die generischen Tools,
+  wenn man ihnen eine solche Tabelle übergibt (`entity_move`,
+  `entity_duplicate`, `entity_field_patch`, `entity_query_options`,
+  `opengraph_*`, `external_id_set` …). Der Leitfaden `contao_guide` führt die
+  drei Bundles jetzt unter den optionalen Erweiterungen.
 - **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**
   `page_delete` und `page_delete_tree` suchen vor dem Löschen nach Einträgen,
   die die Seite als Weiterleitungsziel (`jumpTo`) nutzen, und fragten dafür

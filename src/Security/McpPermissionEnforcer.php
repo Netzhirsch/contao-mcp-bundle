@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Security;
 
+use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
+
 /**
  * Single entry point that turns a tool call (name + arguments) into a
  * permission decision, by resolving the requirement via {@see ToolPermissionMap}
@@ -23,6 +25,7 @@ final class McpPermissionEnforcer
     public function __construct(
         private readonly ToolPermissionMap $map,
         private readonly McpPermissionGuard $guard,
+        private readonly OptionalBundles $optionalBundles,
     ) {
     }
 
@@ -40,6 +43,13 @@ final class McpPermissionEnforcer
             return $this->guard->ensureAdmin(
                 \sprintf('The tool "%s" is not permission-mapped and is restricted to administrators.', $tool),
             );
+        }
+
+        // A table whose bundle is not installed has no DCA and no database
+        // table, yet the check below would look a record up in it or ask a
+        // voter about it. Say what is missing first, for every caller.
+        if ($req['kind'] === 'dc' && ($unavailable = $this->optionalBundles->unavailableForTable((string) $req['table'])) !== null) {
+            return $unavailable;
         }
 
         return match ($req['kind']) {

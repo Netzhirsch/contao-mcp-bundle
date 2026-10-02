@@ -14,6 +14,7 @@ use Netzhirsch\ContaoMcpBundle\Extension\ExtensionToolInventory;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 use Netzhirsch\ContaoMcpBundle\Service\FilePermissions;
+use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use PhpMcp\Server\Attributes\McpTool;
 use Psr\Log\LoggerInterface;
@@ -40,6 +41,7 @@ final class Tool
         private readonly McpServerConfigStorage $configStorage,
         private readonly QueryFilterResolver $queryFilterResolver,
         private readonly ExtensionToolInventory $extensionTools,
+        private readonly OptionalBundles $optionalBundles,
         private readonly string $projectDir,
     ) {
     }
@@ -73,7 +75,7 @@ final class Tool
     ];
 
     /**
-     * @return array{table: string, searchable_fields: list<string>, filterable_fields: array<string, mixed>, has_tstamp: bool, supports_q: bool, supports_filters: bool, supports_updated_range: bool}|array{error: string, message: string, supported_tables?: list<string>}
+     * @return array{table: string, searchable_fields: list<string>, filterable_fields: array<string, mixed>, has_tstamp: bool, supports_q: bool, supports_filters: bool, supports_updated_range: bool}|array{error: string, message: string, supported_tables?: list<string>, required_extension?: string}
      */
     #[McpTool(
         name: 'entity_query_options',
@@ -112,6 +114,12 @@ final class Tool
                 ),
                 'supported_tables' => self::QUERYABLE_TABLES,
             ];
+        }
+
+        // tl_news & co. are listed whether or not their bundle is installed;
+        // without it there is no DCA to read the options from.
+        if (($unavailable = $this->optionalBundles->unavailableForTable($table)) !== null) {
+            return $unavailable;
         }
 
         try {
