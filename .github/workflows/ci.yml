@@ -300,6 +300,15 @@ jobs:
           # Contao Manager did.
           composer require --no-update netzhirsch/contao-mcp-bundle:@dev
 
+          # Temporary: 5.4, 5.5 and 5.6 are end of life. Composer >= 2.9 refuses
+          # them (open security advisories), and league/flysystem-bundle 3.7
+          # removed a class their core still uses. An existing installation on
+          # these lines has neither problem in its lock file; emulate that.
+          if [[ "${{ matrix.contao }}" == 5.[456].* ]]; then
+              composer config policy.advisories.block false
+              composer require --no-update 'league/flysystem-bundle:<3.7'
+          fi
+
           # Single install pass — builds autoloader +
           # runs Contao's manager-plugin auto-discovery. -v lifts the
           # log level just enough to surface real solver / patch errors
