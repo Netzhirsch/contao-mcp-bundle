@@ -118,10 +118,11 @@ Bundle aktualisiert und ändert sich ein Schema, läuft der Client sonst weiter 
 
 ## `lazy_mode` — Direkt-Tools vs. Discovery
 
-- `lazy_mode: false` → alle ~156 Tools direkt sichtbar (`news_list`, `image_size_create`…).
+- `lazy_mode: false` → alle Tools direkt sichtbar (`news_list`, `image_size_create`…).
   Nötig für Automatisierungen/Builds (z. B. Skill-2).
-- `lazy_mode: true` → `tools/list` zeigt nur 3 Discovery-Tools (`contao_search_tools`,
-  `contao_describe_tool`, `contao_call`); alles andere läuft über `contao_call`.
+- `lazy_mode: true` → `tools/list` zeigt nur die 3 Discovery-Tools (`contao_search_tools`,
+  `contao_describe_tool`, `contao_call`) plus `ping`, `contao_version` und
+  `installed_bundles`; alles andere läuft über `contao_call`.
   Spart Token-Overhead, aber Tools sind nicht direkt adressierbar.
 
 Umschalten in `var/mcp/config.json` (oder Backend-Modul) → danach App neu starten.

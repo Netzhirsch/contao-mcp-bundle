@@ -53,6 +53,34 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Die CI testet dafür zusätzlich Contao 6.0 ohne die optionalen Bundles. Eine
   volle Installation, die etwas überspringt, lässt die CI scheitern — ihr
   fehlt dann ein Bundle, und sie prüft weniger, als sie vorgibt.
+- **README und Doku stimmen wieder mit dem Code überein.** Die READMEs waren an
+  vielen Stellen veraltet, einige davon mit Folgen für den Betrieb:
+  - **Bundle-Konfiguration:** Der Schlüssel heißt `contao_mcp:`, nicht
+    `netzhirsch_contao_mcp:`, und gehört in `config/config.yaml` — die Contao
+    Managed Edition liest `config/packages/` nicht. Mit der alten Angabe brach
+    `cache:clear` ab (in `config/config.yaml`) oder sie wurde stillschweigend
+    ignoriert (in `config/packages/`). Betrifft nur `default_author_id`; die
+    Basic-Auth für `page_preview` über `.env.local` ging schon immer.
+  - **Backup:** Die Tabelle heißt `tl_mcp_oauth_authcode` — ein `mysqldump` mit
+    dem alten Namen schlug fehl —, und `var/mcp/license.json` fehlte in der
+    Liste. Ohne die Datei lässt sich die Lizenz nicht erneuern.
+  - **Konfiguration:** `auth_mode` steht standardmäßig auf `oauth`, nicht auf
+    `none`; `config.json` entsteht erst beim ersten Speichern, bis dahin
+    antwortet `/mcp` mit 503; `path` verschiebt den Endpunkt nicht, der liegt
+    fest unter `/mcp`. Die übrigen Schlüssel stehen jetzt in der Tabelle.
+  - **Was an den Lizenzserver geht:** Die Erneuerung schickt auch das bisherige
+    Token mit, die Testphase auch die E-Mail-Adresse.
+  - Außerdem: 196 statt 197 Tools, Lazy-Mode-Größe gemessen (rund 3 statt
+    180 KB), Upload-Sitzungen, DeepL-Grenze 250 000 Zeichen (auch in den
+    Tool-Beschreibungen), Log-Pfade unter Contao 5 und 6, unterstützte Versionen
+    und PHP-Untergrenzen, `/mcp/healthz`, Rate-Limits, Cron-Bedarf von Cleanup
+    und Key-Rotation.
+
+  Die englische README hat die Abschnitte nachgeholt, die nur die deutsche
+  hatte (Smoke-Test, lokales HTTPS, Uploads, OpenGraph, Glossare,
+  Vorschau-Basic-Auth), die deutsche die beiden, die nur die englische hatte
+  (Transport, Rate-Limits). Ein Test hält Tool-Zahl und Konfigurationsschlüssel
+  in den Dokumenten künftig am Code.
 
 ### Fixed
 - **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**
