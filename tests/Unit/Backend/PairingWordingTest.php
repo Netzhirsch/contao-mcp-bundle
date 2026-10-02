@@ -126,6 +126,50 @@ final class PairingWordingTest extends TestCase
     }
 
     /**
+     * The window stays open for its full 15 minutes. Up to 1.4.0 it closed on
+     * the first successful registration, and that sentence outlived the
+     * behaviour by almost forty releases: it was the very message an operator got
+     * after clicking the button, in both catalogues, in the client guide and
+     * in the code comments beside the logic that contradicts it. Historical
+     * notes ("bis 1.4.0 schloss es …") stay allowed; they say "closed".
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function filesDescribingThePairingWindow(): iterable
+    {
+        yield from self::filesWithOperatorProse();
+        yield 'status module' => ['src/Backend/Module/ModuleMcpStatus.php'];
+        yield 'config storage' => ['src/Backend/McpServerConfigStorage.php'];
+        yield 'client guide' => ['docs/mcp-client-lokal-einrichten.md'];
+        yield 'installation guide' => ['docs/installation.md'];
+        yield 'documentation' => ['docs/dokumentation.md'];
+    }
+
+    #[DataProvider('filesDescribingThePairingWindow')]
+    public function testNothingClaimsTheWindowClosesAfterTheFirstRegistration(string $relativePath): void
+    {
+        $contents = (string) file_get_contents(self::ROOT.'/'.$relativePath);
+
+        foreach ([
+            'closes automatically after the first',
+            'auto-closes after the first',
+            'one successful registration',
+            'ONE anonymous registration',
+            'first success closes',
+            'schließt sich nach der ersten',
+            'genau EINE erfolgreiche Registrierung',
+            'registration for 10 minutes',
+            'Registrierung für 10 Minuten',
+        ] as $claim) {
+            self::assertStringNotContainsString(
+                $claim,
+                $contents,
+                "$relativePath says the pairing window closes early. It stays open for its full 15 minutes, retries and further clients included.",
+            );
+        }
+    }
+
+    /**
      * Saying what is NOT true is only half the job — the operator still has
      * to be told where to click.
      */

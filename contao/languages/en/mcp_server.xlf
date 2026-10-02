@@ -85,7 +85,7 @@
       <trans-unit id="mcp_server.pairing_active_until"><source>Registration open until %s (%d min left)</source></trans-unit>
       <trans-unit id="mcp_server.button_open_pairing"><source>Open registration for 15 minutes</source></trans-unit>
       <trans-unit id="mcp_server.button_close_pairing"><source>Close window now</source></trans-unit>
-      <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. The window closes automatically after the first successful registration.</source></trans-unit>
+      <trans-unit id="mcp_server.pairing_opened"><source>Client registration is open until %s — connect your MCP client now. It stays open until then, for retries and further clients too, and closes by itself afterwards.</source></trans-unit>
       <trans-unit id="mcp_server.pairing_closed"><source>Pairing window closed.</source></trans-unit>
       <trans-unit id="mcp_server.status_registration"><source>Client registration</source></trans-unit>
       <trans-unit id="mcp_server.oauth_iat_title"><source>Initial Access Tokens (legacy, no longer issued)</source></trans-unit>

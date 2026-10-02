@@ -99,7 +99,7 @@ final class McpServerConfigStorage
             // Pairing window: unix timestamp until which dynamic client
             // registration is allowed WITHOUT an Initial Access Token even in
             // restricted mode. 0 = closed. Opened via the Backend button for
-            // 10 minutes; auto-closes after the first successful registration.
+            // 15 minutes and open for its full duration, retries included.
             'registration_open_until' => 0,
             // Base URL of the vendor license server (trial/renew endpoints).
             // Empty = offline only (activate a signed token by hand). The
