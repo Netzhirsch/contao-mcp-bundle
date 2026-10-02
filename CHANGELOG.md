@@ -16,7 +16,7 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   mehr; die vier Module lieferten aber genau solche aus. Der MCP-Endpunkt war
   nicht betroffen, nur die Verwaltung im Backend.
 
-  Die Templates sind jetzt Twig (`contao/templates/backend/be_mcp_*.html.twig`),
+  Die Templates sind jetzt Twig (`contao/templates/be_mcp_*.html.twig`),
   ein Satz für alle unterstützten Versionen — Contao 5.x zieht ein
   Twig-Template gleichen Namens ohnehin vor. Markup und Verhalten bleiben
   gleich, verglichen gegen die gerenderten `.html5`-Seiten unter 5.3 und 5.7.

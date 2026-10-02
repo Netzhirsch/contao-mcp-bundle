@@ -33,7 +33,7 @@ final class BackendTemplatesTest extends TestCase
 {
     private const ROOT = __DIR__.'/../../..';
 
-    private const TEMPLATES = self::ROOT.'/contao/templates/backend';
+    private const TEMPLATES = self::ROOT.'/contao/templates';
 
     /**
      * @return iterable<string, array{class-string}>
@@ -47,6 +47,12 @@ final class BackendTemplatesTest extends TestCase
     }
 
     /**
+     * At the root of contao/templates/, not in a subfolder: there the name is
+     * the file name whether or not the directory is a Twig namespace root. A
+     * .twig-root marker added later — for a content element template, say —
+     * would otherwise turn `backend/be_mcp_status` into the name, and the
+     * module would be back to "is not defined".
+     *
      * @param class-string $module
      */
     #[DataProvider('modules')]

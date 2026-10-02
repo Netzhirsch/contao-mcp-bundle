@@ -36,8 +36,8 @@ final class PairingWordingTest extends TestCase
     public static function operatorFacingFiles(): iterable
     {
         yield from self::filesWithOperatorProse();
-        yield 'status template' => ['contao/templates/backend/be_mcp_status.html.twig'];
-        yield 'config template' => ['contao/templates/backend/be_mcp_config.html.twig'];
+        yield 'status template' => ['contao/templates/be_mcp_status.html.twig'];
+        yield 'config template' => ['contao/templates/be_mcp_config.html.twig'];
     }
 
     /**
@@ -116,7 +116,7 @@ final class PairingWordingTest extends TestCase
      */
     public function testTheBackendOffersNoWayToGenerateAnAccessToken(): void
     {
-        foreach (['contao/templates/backend/be_mcp_status.html.twig', 'src/Backend/Module/ModuleMcpStatus.php'] as $path) {
+        foreach (['contao/templates/be_mcp_status.html.twig', 'src/Backend/Module/ModuleMcpStatus.php'] as $path) {
             self::assertStringNotContainsString(
                 'generate_iat',
                 (string) file_get_contents(self::ROOT.'/'.$path),

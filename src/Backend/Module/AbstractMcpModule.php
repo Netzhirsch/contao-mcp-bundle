@@ -36,10 +36,14 @@ use Symfony\Component\Security\Csrf\CsrfToken;
  * Collaborators come from the container because Contao instantiates
  * BackendModule subclasses itself (no constructor injection).
  *
- * The templates are Twig (contao/templates/backend/be_mcp_*.html.twig).
+ * The templates are Twig (contao/templates/be_mcp_*.html.twig).
  * Contao 6 renders a BackendTemplate only as `@Contao/<name>.html.twig` — it
  * dropped .html5 templates — and 5.x prefers a Twig template of the same name
- * over an .html5 one, so a single set serves every supported version.
+ * over an .html5 one, so a single set serves every supported version. They
+ * sit at the root of contao/templates/ on purpose, as Contao's own be_*
+ * templates do: should that directory ever get a .twig-root marker, a
+ * subfolder would become part of the name and `be_mcp_status` would no
+ * longer be found.
  * Anything that depends on the clock or on a PHP function is decided here
  * and handed over as a plain value; the templates only print.
  */
