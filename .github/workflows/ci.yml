@@ -430,6 +430,35 @@ jobs:
               fi
           done
 
+          # The smoke test leaves var/mcp/config.json as it found it: on this
+          # fresh app, absent, and /mcp answers 503 until a configuration has
+          # been saved. Save one the way an operator does, through the form on
+          # MCP-Server → Konfiguration, which this also proves works.
+          # Fetched again, writing the jar this time: the form's request token
+          # belongs to the CSRF cookie that comes with the page.
+          CONFIG_PAGE=var/backend-check/config-form.html
+          curl -fsS -b "$JAR" -c "$JAR" -o "$CONFIG_PAGE" "http://127.0.0.1:8000/contao?do=netzhirsch_mcp_config"
+          ACTION=$(grep -oP '<form class="tl_form tl_edit_form"[^>]*action="\K[^"]+' "$CONFIG_PAGE" | head -1 | sed 's/&amp;/\&/g')
+          TOKEN=$(grep -oP 'name="REQUEST_TOKEN" value="\K[^"]+' "$CONFIG_PAGE" | head -1)
+          curl -fsS -b "$JAR" -c "$JAR" -o /dev/null \
+              --data-urlencode FORM_SUBMIT=mcp_server_action \
+              --data-urlencode "REQUEST_TOKEN=$TOKEN" \
+              --data-urlencode action=save_config \
+              --data-urlencode path=mcp \
+              --data-urlencode pagination_limit=500 \
+              --data-urlencode auth_mode=oauth \
+              --data-urlencode backend_url=http://127.0.0.1:8000 \
+              --data-urlencode oauth_registration_mode=restricted \
+              --data-urlencode cimd_mode=trusted \
+              --data-urlencode lazy_mode=0 \
+              "http://127.0.0.1:8000/contao$ACTION"
+          if grep -q '"backend_url": "http://127.0.0.1:8000"' var/mcp/config.json 2>/dev/null; then
+              echo "configuration saved through MCP-Server → Konfiguration"
+          else
+              echo "::error::Saving MCP-Server → Konfiguration did not write var/mcp/config.json"
+              FAILED=1
+          fi
+
           # The endpoint answers without a session: a probe, and a JSON-RPC
           # call that is either served (auth_mode none) or asks for a token.
           CODE=$(curl -sS -o var/backend-check/healthz.json -w '%{http_code}' http://127.0.0.1:8000/mcp/healthz)
