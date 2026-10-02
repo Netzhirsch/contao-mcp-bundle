@@ -152,6 +152,14 @@ jobs:
         include:
           - php: '8.1'
             contao: '5.3.*'
+          # Temporary: every Contao line composer.json accepts, each on its
+          # lowest PHP, to prove 1.37.1 before tagging it.
+          - php: '8.1'
+            contao: '5.4.*'
+          - php: '8.2'
+            contao: '5.5.*'
+          - php: '8.2'
+            contao: '5.6.*'
           - php: '8.3'
             contao: '^5.7'
           - php: '8.4'
@@ -412,7 +420,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: logs-php${{ matrix.php }}
+          name: logs-php${{ matrix.php }}-${{ strategy.job-index }}
           path: |
             app/var/logs/
             app/var/log/
