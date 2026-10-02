@@ -23,18 +23,32 @@ final class PairingWordingTest extends TestCase
     private const ROOT = __DIR__.'/../../..';
 
     /**
-     * Both the XLF catalogues and the templates — the templates carry
-     * hardcoded fallbacks that render whenever a translation is missing, so
-     * checking only the XLF would miss half of it.
+     * Everything an operator reads, plus the templates that put it on screen.
+     *
+     * The templates used to carry hardcoded fallbacks that rendered whenever
+     * a translation was missing, so checking only the XLF missed half of it.
+     * Since the move to Twig they print catalogue keys and nothing else —
+     * which is why they are not in filesWithOperatorProse() — but they stay in
+     * this net for the day someone types a sentence straight into one.
      *
      * @return iterable<string, array{string}>
      */
     public static function operatorFacingFiles(): iterable
     {
+        yield from self::filesWithOperatorProse();
+        yield 'status template' => ['contao/templates/be_mcp_status.html.twig'];
+        yield 'config template' => ['contao/templates/be_mcp_config.html.twig'];
+    }
+
+    /**
+     * The files that carry the wording itself.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function filesWithOperatorProse(): iterable
+    {
         yield 'de catalogue' => ['contao/languages/de/mcp_server.xlf'];
         yield 'en catalogue' => ['contao/languages/en/mcp_server.xlf'];
-        yield 'status template' => ['contao/templates/backend/be_mcp_status.html5'];
-        yield 'config template' => ['contao/templates/backend/be_mcp_config.html5'];
         // The refusal message is operator-facing too: it is what lands in
         // tl_log when a client is turned away, and what the client itself
         // gets back. Scoping this test to contao/ let it keep leading with
@@ -102,7 +116,7 @@ final class PairingWordingTest extends TestCase
      */
     public function testTheBackendOffersNoWayToGenerateAnAccessToken(): void
     {
-        foreach (['contao/templates/backend/be_mcp_status.html5', 'src/Backend/Module/ModuleMcpStatus.php'] as $path) {
+        foreach (['contao/templates/be_mcp_status.html.twig', 'src/Backend/Module/ModuleMcpStatus.php'] as $path) {
             self::assertStringNotContainsString(
                 'generate_iat',
                 (string) file_get_contents(self::ROOT.'/'.$path),
@@ -115,7 +129,7 @@ final class PairingWordingTest extends TestCase
      * Saying what is NOT true is only half the job — the operator still has
      * to be told where to click.
      */
-    #[DataProvider('operatorFacingFiles')]
+    #[DataProvider('filesWithOperatorProse')]
     public function testTheOperatorIsPointedAtThePairingWindow(string $relativePath): void
     {
         $contents = (string) file_get_contents(self::ROOT.'/'.$relativePath);

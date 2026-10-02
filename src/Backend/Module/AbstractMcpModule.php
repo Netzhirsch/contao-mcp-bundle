@@ -12,7 +12,6 @@ use Contao\CoreBundle\Exception\ResponseException;
 use Contao\Environment;
 use Contao\Input;
 use Contao\Message;
-use Contao\StringUtil;
 use Contao\System;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -36,6 +35,17 @@ use Symfony\Component\Security\Csrf\CsrfToken;
  *
  * Collaborators come from the container because Contao instantiates
  * BackendModule subclasses itself (no constructor injection).
+ *
+ * The templates are Twig (contao/templates/be_mcp_*.html.twig).
+ * Contao 6 renders a BackendTemplate only as `@Contao/<name>.html.twig` — it
+ * dropped .html5 templates — and 5.x prefers a Twig template of the same name
+ * over an .html5 one, so a single set serves every supported version. They
+ * sit at the root of contao/templates/ on purpose, as Contao's own be_*
+ * templates do: should that directory ever get a .twig-root marker, a
+ * subfolder would become part of the name and `be_mcp_status` would no
+ * longer be found.
+ * Anything that depends on the clock or on a PHP function is decided here
+ * and handed over as a plain value; the templates only print.
  */
 abstract class AbstractMcpModule extends BackendModule
 {
@@ -67,15 +77,17 @@ abstract class AbstractMcpModule extends BackendModule
 
         $config = $configStorage->load();
 
+        // Every value goes to the Twig template RAW — the template escapes.
+        // Contao 6 escapes with Twig's own html strategy, which double-encodes
+        // (5.x had contao_html, which did not), so a pre-encoded value such as
+        // getReferer(true)'s `&amp;` would turn into a broken link there.
         $this->Template->config = $config;
         $this->Template->configDefaults = $configStorage->defaults();
         $this->Template->endpointUrl = rtrim((string) ($config['backend_url'] ?? ''), '/').'/'.ltrim((string) $config['path'], '/');
         $this->Template->locale = $this->resolveLocale();
         $this->Template->bundleVersion = self::installedVersion();
         $this->Template->messages = Message::generate();
-        $this->Template->referer = $this->getReferer(true);
-        $this->Template->backTitle = StringUtil::specialchars($GLOBALS['TL_LANG']['MSC']['backBTTitle'] ?? '');
-        $this->Template->backLabel = $GLOBALS['TL_LANG']['MSC']['backBT'] ?? 'Back';
+        $this->Template->referer = $this->getReferer();
         $this->Template->requestToken = $container->get('contao.csrf.token_manager')->getDefaultTokenValue();
         $this->Template->actionUrl = $this->selfUrl();
 

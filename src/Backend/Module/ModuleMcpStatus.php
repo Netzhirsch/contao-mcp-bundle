@@ -61,6 +61,13 @@ class ModuleMcpStatus extends AbstractMcpModule
 
         $this->Template->oauthIsHttp = self::isHttpInsecure($config);
 
+        // The pairing window, decided against the clock here rather than in the
+        // template: PHP's date() and Twig's |date need not use the same zone.
+        $pairingUntil = (int) ($config['registration_open_until'] ?? 0);
+        $this->Template->pairingActive = $pairingUntil > time();
+        $this->Template->pairingUntil = date('H:i', $pairingUntil);
+        $this->Template->pairingMinutesLeft = max(1, (int) ceil(($pairingUntil - time()) / 60));
+
         // License state (trial → paid subscription), always shown so the
         // operator can see whether the tools are currently unlocked — see
         // License\LicenseGate.
@@ -86,12 +93,54 @@ class ModuleMcpStatus extends AbstractMcpModule
         // OAuth admin data only when the gate is actually active — under
         // auth_mode=none there are no clients/IATs to manage.
         if (($config['auth_mode'] ?? 'none') === 'oauth') {
-            $this->Template->oauthClients = $container->get(OAuthClientAdministration::class)->listClients();
-            $this->Template->oauthIats = $container->get(InitialAccessTokenManager::class)->listAll();
+            $this->Template->oauthClients = array_map(self::presentClient(...), $container->get(OAuthClientAdministration::class)->listClients());
+            $this->Template->oauthIats = array_map(self::presentIat(...), $container->get(InitialAccessTokenManager::class)->listAll());
         } else {
             $this->Template->oauthClients = [];
             $this->Template->oauthIats = [];
         }
+    }
+
+    /**
+     * A registered client plus its dates, formatted for the listing.
+     *
+     * @param array<string, mixed> $client
+     *
+     * @return array<string, mixed>
+     */
+    private static function presentClient(array $client): array
+    {
+        $authorizedAt = (int) ($client['authorized_at'] ?? 0);
+
+        return [
+            ...$client,
+            'created' => date('Y-m-d H:i', (int) ($client['created_at'] ?? 0)),
+            'authorized' => $authorizedAt > 0 ? date('Y-m-d H:i', $authorizedAt) : '',
+        ];
+    }
+
+    /**
+     * An Initial Access Token plus its dates and its state — redeemed, expired
+     * or still active — so the template does not have to read the clock.
+     *
+     * @param array<string, mixed> $iat
+     *
+     * @return array<string, mixed>
+     */
+    private static function presentIat(array $iat): array
+    {
+        $expiresAt = (int) ($iat['expires_at'] ?? 0);
+
+        return [
+            ...$iat,
+            'created' => date('Y-m-d H:i', (int) ($iat['created_at'] ?? 0)),
+            'expires' => date('Y-m-d H:i', $expiresAt),
+            'state' => match (true) {
+                (int) ($iat['used_at'] ?? 0) > 0 => 'used',
+                $expiresAt < time() => 'expired',
+                default => 'active',
+            },
+        ];
     }
 
     protected function handleAction(string $action, ContainerInterface $container, McpServerConfigStorage $configStorage): void

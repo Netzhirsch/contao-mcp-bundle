@@ -1,0 +1,50 @@
+{% trans_default_domain 'contao_mcp_server' %}
+{#
+    MCP-Server → Aktivität (ModuleMcpActivity): the last 100 tl_log entries
+    with source 'mcp%'. Every value arrives raw and is escaped here.
+#}
+<div id="tl_buttons">
+    <a href="{{ referer }}" class="header_back" title="{{ 'MSC.backBTTitle'|trans({}, 'contao_default') }}" accesskey="b" data-action="contao--scroll-offset#discard">{{ 'MSC.backBT'|trans({}, 'contao_default') }}</a>
+    <a href="{{ actionUrl }}" class="header_sync">{{ 'mcp_server.button_refresh'|trans }}</a>
+</div>
+
+{{ messages|raw }}
+
+{# Contao-Standard für Seiten-Hinweise: tl_message + tl_info (das Markup,
+   das auch Message::addInfo() erzeugt). #}
+<div class="tl_message">
+    <p class="tl_info">{{ 'mcp_server.mcp_activity_help'|trans }}</p>
+</div>
+
+{% if mcpActivity is empty %}
+    <p class="tl_gray"><em>{{ 'mcp_server.mcp_activity_empty'|trans }}</em></p>
+{% else %}
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist" style="width:14%;">{{ 'mcp_server.mcp_activity_col_when'|trans }}</th>
+                <th class="tl_folder_tlist" style="width:8%;">{{ 'mcp_server.mcp_activity_col_source'|trans }}</th>
+                <th class="tl_folder_tlist" style="width:18%;">{{ 'mcp_server.mcp_activity_col_user'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.mcp_activity_col_message'|trans }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in mcpActivity %}
+                <tr class="hover-row">
+                    <td class="tl_file_list" style="white-space:nowrap;">{{ entry.date }}</td>
+                    <td class="tl_file_list">
+                        {% if entry.source == 'mcp_oauth' %}
+                            <span class="tl_green">oauth</span>
+                        {% else %}
+                            <span class="tl_gray">{{ entry.source }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="tl_file_list">{{ entry.username }}</td>
+                    <td class="tl_file_list">{{ entry.text }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}

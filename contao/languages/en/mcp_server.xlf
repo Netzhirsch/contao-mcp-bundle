@@ -12,6 +12,8 @@
       <trans-unit id="mcp_server.status_url"><source>Endpoint</source></trans-unit>
       <trans-unit id="mcp_server.status_auth_mode"><source>Auth</source></trans-unit>
       <trans-unit id="mcp_server.status_bundle_version"><source>Bundle version</source></trans-unit>
+      <trans-unit id="mcp_server.status_on"><source>on</source></trans-unit>
+      <trans-unit id="mcp_server.status_off"><source>off</source></trans-unit>
 
       <!-- Update notice (announced by the license server, informational only) -->
       <trans-unit id="mcp_server.update_available"><source>Version %s of the MCP bundle is available — you are running %s.</source></trans-unit>

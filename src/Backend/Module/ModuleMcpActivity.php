@@ -22,6 +22,11 @@ class ModuleMcpActivity extends AbstractMcpModule
 
     protected function compileModule(ContainerInterface $container, McpServerConfigStorage $configStorage, array $config): void
     {
-        $this->Template->mcpActivity = $container->get(McpActivityLog::class)->recent(100);
+        // Formatted here, not with Twig's |date — that one need not run in the
+        // same time zone as PHP's date().
+        $this->Template->mcpActivity = array_map(
+            static fn (array $entry): array => [...$entry, 'date' => date('Y-m-d H:i:s', (int) $entry['tstamp'])],
+            $container->get(McpActivityLog::class)->recent(100),
+        );
     }
 }

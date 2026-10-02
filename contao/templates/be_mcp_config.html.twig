@@ -1,0 +1,106 @@
+{% trans_default_domain 'contao_mcp_server' %}
+{#
+    MCP-Server → Konfiguration (ModuleMcpConfig): the edit form for
+    var/mcp/config.json. Every value arrives raw and is escaped here.
+#}
+<div id="tl_buttons">
+    <a href="{{ referer }}" class="header_back" title="{{ 'MSC.backBTTitle'|trans({}, 'contao_default') }}" accesskey="b" data-action="contao--scroll-offset#discard">{{ 'MSC.backBT'|trans({}, 'contao_default') }}</a>
+</div>
+
+{{ messages|raw }}
+
+{% if oauthIsHttp ?? false %}
+<div class="tl_message">
+    <p class="tl_error">⚠ {{ 'mcp_server.http_warning'|trans }}</p>
+</div>
+{% endif %}
+
+<form class="tl_form tl_edit_form" method="post" action="{{ actionUrl }}" enctype="application/x-www-form-urlencoded">
+<div class="tl_formbody_edit">
+
+    <input type="hidden" name="FORM_SUBMIT" value="mcp_server_action">
+    <input type="hidden" name="REQUEST_TOKEN" value="{{ requestToken }}">
+    <input type="hidden" name="action" value="save_config">
+
+    <fieldset class="tl_tbox">
+        <legend>{{ 'mcp_server.headline_config'|trans }}</legend>
+        <div class="widget-group">
+
+            <div class="widget widget-text w50">
+                <h3><label for="ctrl_path">{{ 'mcp_server.config_path_label'|trans }}</label></h3>
+                <input type="text" name="path" id="ctrl_path" class="tl_text" value="{{ config.path }}">
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_path_help'|trans }}</p>
+            </div>
+
+            <div class="widget widget-text w50">
+                <h3><label for="ctrl_pl">{{ 'mcp_server.config_pagination_limit_label'|trans }}</label></h3>
+                <input type="number" name="pagination_limit" id="ctrl_pl" class="tl_text" value="{{ config.pagination_limit }}" min="1" max="10000">
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_pagination_limit_help'|trans }}</p>
+            </div>
+
+            <div class="widget widget-select w50 clr">
+                <h3><label for="ctrl_auth_mode">{{ 'mcp_server.config_auth_mode_label'|trans }}</label></h3>
+                <select name="auth_mode" id="ctrl_auth_mode" class="tl_select">
+                    {% set authMode = config.auth_mode ?? 'none' %}
+                    <option value="none"{% if authMode == 'none' %} selected{% endif %}>{{ 'mcp_server.config_auth_mode_none'|trans }}</option>
+                    <option value="oauth"{% if authMode == 'oauth' %} selected{% endif %}>{{ 'mcp_server.config_auth_mode_oauth'|trans }}</option>
+                </select>
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_auth_mode_help'|trans }}</p>
+            </div>
+
+            <div class="widget widget-text w50">
+                <h3><label for="ctrl_backend_url">{{ 'mcp_server.config_backend_url_label'|trans }}</label></h3>
+                <input type="text" name="backend_url" id="ctrl_backend_url" class="tl_text" value="{{ config.backend_url ?? '' }}" placeholder="http://contao-mcp.test">
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_backend_url_help'|trans }}</p>
+            </div>
+
+            <div class="widget widget-select w50 clr">
+                <h3><label for="ctrl_reg_mode">{{ 'mcp_server.config_reg_mode_label'|trans }}</label></h3>
+                <select name="oauth_registration_mode" id="ctrl_reg_mode" class="tl_select">
+                    {% set regMode = config.oauth_registration_mode ?? 'restricted' %}
+                    <option value="restricted"{% if regMode == 'restricted' %} selected{% endif %}>{{ 'mcp_server.config_reg_mode_restricted'|trans }}</option>
+                    <option value="open"{% if regMode == 'open' %} selected{% endif %}>{{ 'mcp_server.config_reg_mode_open'|trans }}</option>
+                </select>
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_reg_mode_help'|trans }}</p>
+            </div>
+
+            <div class="widget widget-select w50 clr">
+                <h3><label for="ctrl_cimd_mode">{{ 'mcp_server.config_cimd_mode_label'|trans }}</label></h3>
+                <select name="cimd_mode" id="ctrl_cimd_mode" class="tl_select">
+                    {% set cimdMode = config.cimd_mode ?? 'trusted' %}
+                    <option value="trusted"{% if cimdMode == 'trusted' %} selected{% endif %}>{{ 'mcp_server.config_cimd_mode_trusted'|trans }}</option>
+                    <option value="open"{% if cimdMode == 'open' %} selected{% endif %}>{{ 'mcp_server.config_cimd_mode_open'|trans }}</option>
+                    <option value="off"{% if cimdMode == 'off' %} selected{% endif %}>{{ 'mcp_server.config_cimd_mode_off'|trans }}</option>
+                </select>
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_cimd_mode_help'|trans }}</p>
+                {% if cimdMode != 'off' %}
+                    <p class="tl_help">{{ 'mcp_server.config_cimd_hosts_label'|trans }}:
+                        <code>{{ (config.cimd_trusted_hosts ?? [])|join(', ') }}</code></p>
+                {% endif %}
+            </div>
+
+            <div class="widget widget-checkbox w50 clr">
+                <h3>{{ 'mcp_server.config_lazy_mode_label'|trans }}</h3>
+                <input type="hidden" name="lazy_mode" value="0">
+                <label for="ctrl_lazy_mode" class="tl_checkbox_label">
+                    <input type="checkbox" name="lazy_mode" id="ctrl_lazy_mode" value="1"{% if config.lazy_mode ?? false %} checked{% endif %}>
+                    {{ 'mcp_server.config_lazy_mode_inline'|trans }}
+                </label>
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_lazy_mode_help'|trans }}</p>
+            </div>
+
+            {# The license server URL is baked into the bundle
+               (RenewalClient::DEFAULT_LICENSE_SERVER_URL) — customers never
+               need to set it. The config key still works as a dev override,
+               it is just not exposed here any more. #}
+        </div>
+    </fieldset>
+
+</div>
+
+<div class="tl_formbody_submit">
+    <div class="tl_submit_container">
+        <button type="submit" class="tl_submit">{{ 'mcp_server.button_save_config'|trans }}</button>
+    </div>
+</div>
+</form>
