@@ -6,6 +6,21 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Security
+- **Ein abgebrochener Smoke-Test konnte `/mcp` ohne Anmeldung zurücklassen.**
+  `contao:mcp:smoke-test` stellt für einzelne Prüfungen die echte
+  `var/mcp/config.json` um — `backend_url`, CIMD, ein offenes
+  Pairing-Fenster und für die Batch-Grenze `auth_mode=none` — und setzte sie
+  erst zurück, wenn diese Prüfungen durchgelaufen waren. Warf eine davon eine
+  Ausnahme, blieb die Datei so stehen: auf einer Live-Installation ein
+  MCP-Endpunkt ohne Authentifizierung. Nachgestellt mit einem erzwungenen
+  Abbruch an dieser Stelle: danach stand `auth_mode=none` in der Datei. Der
+  Test merkt sich die Datei jetzt beim Start und stellt sie am Ende in jedem
+  Fall byte-genau wieder her (gab es keine, bleibt keine zurück) — auch mit
+  `--keep`, das nur die Testdaten betrifft. Wer den Smoke-Test auf einer
+  erreichbaren Installation abgebrochen hat, sollte unter
+  *MCP-Server → Konfiguration* den Authentifizierungsmodus prüfen.
+
 ### Fixed
 - **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**
   `page_delete` und `page_delete_tree` suchen vor dem Löschen nach Einträgen,

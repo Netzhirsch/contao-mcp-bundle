@@ -64,6 +64,7 @@ use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver;
 use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\RedirectUriMatcher;
 use Netzhirsch\ContaoMcpBundle\Controller\OAuth\RegisterController;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
+use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 
 /**
@@ -145,15 +146,56 @@ final class McpSmokeTestCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $keep = (bool) $input->getOption('keep');
+        $config = $this->snapshotConfig();
         $fixtures = $this->seedFreshInstall($output);
 
         try {
             return $this->runChecks($input, $output);
         } finally {
+            $this->restoreConfig($config, $output);
             // Also when a section throws: a fixture page left behind on a real
             // install would be a page nobody created.
             $this->removeFixtures($fixtures, $output, $keep);
         }
+    }
+
+    /**
+     * Several sections rewrite var/mcp/config.json on the installation under
+     * test — backend_url, cimd_mode, an open pairing window and auth_mode=none
+     * for the batch ceiling — and put it back once their checks are done. A
+     * section that threw in between left it as it was: on a live site, /mcp
+     * without authentication, or registration open to anyone. The run now
+     * ends with the file it found, byte for byte, and without one if there
+     * was none. --keep does not change that; it is about test rows.
+     */
+    private function snapshotConfig(): ?string
+    {
+        $path = $this->configFile();
+
+        return is_file($path) ? (string) file_get_contents($path) : null;
+    }
+
+    private function restoreConfig(?string $config, OutputInterface $output): void
+    {
+        $path = $this->configFile();
+
+        if ($config === null) {
+            if (is_file($path) && !@unlink($path)) {
+                $output->writeln("<error>Could not remove {$path}, which the smoke test created. Delete it by hand.</error>");
+            }
+
+            return;
+        }
+
+        if ((is_file($path) ? file_get_contents($path) : null) !== $config
+            && !AtomicFile::write($path, $config, 0o600)) {
+            $output->writeln("<error>Could not restore {$path}. Check auth_mode and the pairing window in MCP-Server → Konfiguration.</error>");
+        }
+    }
+
+    private function configFile(): string
+    {
+        return $this->projectDir.'/var/mcp/config.json';
     }
 
     /**
