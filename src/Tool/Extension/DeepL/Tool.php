@@ -280,7 +280,7 @@ final class Tool
                                 permission check. Preview is capped at 50 records because
                                 it returns every source and translation.
               - max_characters: refuses before spending anything if the plan exceeds this
-                                (default 100000). Pass 0 to disable.
+                                (default 250000). Pass 0 to disable.
 
             Per record you get either changed_fields (save) or field → {source, translation}
             (preview). `dropped_fields` lists columns that were filled but do not belong to
@@ -372,7 +372,7 @@ final class Tool
                                   article_update / content_update, each with a Versions
                                   snapshot, a tl_log entry and its own permission check.
               - max_characters:   refuses before spending anything if the plan exceeds this
-                                  (default 100000). Pass 0 to disable.
+                                  (default 250000). Pass 0 to disable.
               - max_records:      cap on the collected tree. Default AND hard ceiling is
                                   1000 — a higher value is silently reduced to it, so plan
                                   larger trees branch by branch rather than in one call.

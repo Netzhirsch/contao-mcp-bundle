@@ -54,7 +54,7 @@ final class AuthorResolver
      *
      * Resolution order:
      *   1. OAuth-authenticated user (if their tl_user row still exists)
-     *   2. explicit bundle-config netzhirsch_contao_mcp.write.default_author_id
+     *   2. explicit bundle config contao_mcp.write.default_author_id (config/config.yaml)
      *   3. lowest-id admin user in tl_user
      *   4. 0 (no author)
      */

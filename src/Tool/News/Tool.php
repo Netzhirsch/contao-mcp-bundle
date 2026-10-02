@@ -221,7 +221,7 @@ final class Tool
                 time as the same combined unix timestamp (see tl_news::adjustTime).
               - start, stop: full ISO 8601 datetime (e.g. 2026-06-01T00:00:00) or empty to clear.
               - alias: auto-generated from headline via Contao's Slug service when omitted.
-              - author_id: defaults to the bundle config netzhirsch_contao_mcp.write.default_author_id,
+              - author_id: defaults to the bundle config contao_mcp.write.default_author_id,
                 with a fallback to the lowest-id admin user.
               - source: one of "default", "internal", "article", "external". Pair with jumpTo /
                 articleId / url respectively.

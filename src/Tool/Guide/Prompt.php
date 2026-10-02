@@ -30,8 +30,8 @@ use PhpMcp\Server\Attributes\McpPrompt;
  * on THIS installation. Which Contao version runs (5.3 rebuilds its DCA cache
  * differently from 5.7), which optional extensions exist, whether lazy mode is
  * on, how many tools there actually are. A text maintained on the client side
- * drifts from that — this bundle's own composer.json still advertises 175 tools
- * where there are 197.
+ * drifts from that — this bundle's own composer.json and READMEs have
+ * advertised a stale tool count more than once.
  *
  * What deliberately stays OUT: anything that can be said about a single tool.
  * That belongs in the tool's own description, and duplicating it here would
