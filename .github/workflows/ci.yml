@@ -148,6 +148,8 @@ jobs:
         #     Symfony 6.4, DBAL 3). This is why composer.json declares php ^8.1.
         #   - Contao 5.7 on PHP 8.3 + 8.4 — current production target
         #     (5.7's core-bundle requires PHP ^8.3).
+        # 5.4, 5.5 and 5.6 are end of life at Contao and excluded in
+        # composer.json (5.3.* || ^5.7 || ^6.0), so they have no leg.
         # `contao` doubles as the composer create-project constraint used below.
         include:
           - php: '8.1'

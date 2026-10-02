@@ -6,6 +6,22 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Removed
+- **Contao 5.4, 5.5 und 5.6 werden nicht mehr unterstützt.** Alle drei sind
+  bei Contao am Ende ihrer Laufzeit (5.4 seit 14.02.2025, 5.5 seit
+  14.08.2025, 5.6 seit 14.02.2026) und bekommen keine Sicherheitsupdates mehr.
+  Frisch installieren ließen sie sich ohnehin nur noch mit Umwegen: Composer
+  ab 2.9 verweigert sie wegen offener Sicherheitswarnungen, und
+  `league/flysystem-bundle` 3.7 hat eine Klasse entfernt, die ihr Core noch
+  braucht. `composer.json` verlangt jetzt `contao/core-bundle`
+  `5.3.* || ^5.7 || ^6.0`. Unterstützt bleiben **Contao 5.3 LTS** (Bugfixes
+  bis 14.02.2027, Sicherheitsupdates bis 14.02.2028), **5.7 LTS** und **6.0**
+  — genau die Versionen, gegen die die CI testet.
+
+  Eine Installation auf 5.4 bis 5.6 bricht dadurch nicht: Composer lässt sie
+  bei 1.37.1 stehen. Neuere Versionen des Bundles bekommt sie nach dem Update
+  auf Contao 5.7 LTS.
+
 ## [1.37.1] – 2026-10-02
 
 > Zwei Bugfixes für Contao 6. Unter Symfony 8 war der MCP-Server nicht
