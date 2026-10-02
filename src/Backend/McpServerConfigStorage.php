@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Backend;
 
+use Netzhirsch\ContaoMcpBundle\Routing\EndpointPath;
 use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
 
 /**
@@ -36,7 +37,7 @@ final class McpServerConfigStorage
     public function defaults(): array
     {
         return [
-            'path' => 'mcp',
+            'path' => EndpointPath::DEFAULT,
             'pagination_limit' => 500,
             // 'oauth' = OAuth 2.1 with PKCE, tokens issued by the Backend's
             //           /_mcp_oauth/* endpoints, verified as JWTs by the
@@ -112,6 +113,7 @@ final class McpServerConfigStorage
 
     public function __construct(
         private readonly string $projectDir,
+        private readonly string $backendRoutePrefix = '/contao',
     ) {
     }
 
@@ -191,8 +193,16 @@ final class McpServerConfigStorage
         // the daemon transport. We read only the fields we still recognise —
         // legacy fields are dropped silently. The first save() rewrites the
         // file without them.
+        // The endpoint is routed from this value on every request. One that
+        // could not be saved today — a dot, a space, the backend prefix — must
+        // not move it there; it stays at the default instead.
+        $path = self::normalisePath($decoded['path'] ?? null, $defaults['path']);
+        if (EndpointPath::problem($path, $this->backendRoutePrefix) !== null) {
+            $path = $defaults['path'];
+        }
+
         return [
-            'path' => self::normalisePath($decoded['path'] ?? null, $defaults['path']),
+            'path' => $path,
             'pagination_limit' => self::clampInt($decoded['pagination_limit'] ?? null, 1, 10000, $defaults['pagination_limit']),
             'auth_mode' => self::clampEnum($decoded['auth_mode'] ?? null, ['none', 'oauth'], $defaults['auth_mode']),
             'backend_url' => self::trimString($decoded['backend_url'] ?? null, ''),
@@ -222,6 +232,9 @@ final class McpServerConfigStorage
         $errors = [];
 
         $path = self::normalisePath($input['path'] ?? null, $defaults['path']);
+        if (($pathProblem = EndpointPath::problem($path, $this->backendRoutePrefix)) !== null) {
+            $errors[] = $pathProblem;
+        }
 
         $paginationLimit = (int) ($input['pagination_limit'] ?? 0);
         if ($paginationLimit < 1 || $paginationLimit > 10000) {
@@ -441,11 +454,9 @@ final class McpServerConfigStorage
         if (!\is_string($value)) {
             return $fallback;
         }
-        $s = trim($value);
-        if ($s === '') {
-            return $fallback;
-        }
-        // Stored without leading slash; the controller route adds it.
-        return ltrim($s, '/');
+        $s = EndpointPath::normalise($value);
+
+        // Stored without slashes at either end; the route adds the leading one.
+        return $s === '' ? $fallback : $s;
     }
 }

@@ -118,6 +118,8 @@ services:
         public: true
         arguments:
             $projectDir: '%kernel.project_dir%'
+            # A configured MCP path must not land in the backend.
+            $backendRoutePrefix: '%contao.backend.route_prefix%'
 
     # License stack (trial → paid subscription). LicenseToken autowires via its
     # default public-key constant (placeholder = free edition, real key =
@@ -202,6 +204,13 @@ services:
     Netzhirsch\ContaoMcpBundle\Controller\OAuth\TokenController:
         public: true
         tags: ['controller.service_arguments']
+
+    # Matches the endpoint, /healthz and the path-suffixed .well-known
+    # documents under the `path` from var/mcp/config.json — just above
+    # Symfony's RouterListener (32), so a saved path applies at once.
+    Netzhirsch\ContaoMcpBundle\EventListener\McpEndpointRouteListener:
+        tags:
+            - { name: 'kernel.event_listener', event: 'kernel.request', method: 'onKernelRequest', priority: 33 }
 
     # CORS handler for the OAuth endpoints — Inspector / Claude.ai
     # connect via cross-origin fetch.
@@ -309,7 +318,8 @@ services:
             $mcpToolCallLimiter: '@netzhirsch_contao_mcp.rate_limiter.mcp_tool_calls'
         tags: ['controller.service_arguments']
 
-    # Public, OAuth-free liveness probe at GET /mcp/healthz.
+    # Public, OAuth-free liveness probe at GET /<path>/healthz (/mcp/healthz
+    # by default), routed by McpEndpointRouteListener.
     # Project dir as raw arg so the controller can inspect var/mcp and
     # var/ disk-free without booting the full Contao framework.
     Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController:

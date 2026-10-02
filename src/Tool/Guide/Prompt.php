@@ -67,6 +67,18 @@ final class Prompt
             'Terminal42\\LeadsBundle\\Terminal42LeadsBundle',
             'leads_list, lead_get (form submissions)',
         ],
+        'contao/news-bundle' => [
+            'Contao\\NewsBundle\\ContaoNewsBundle',
+            'news_* (news and news archives)',
+        ],
+        'contao/calendar-bundle' => [
+            'Contao\\CalendarBundle\\ContaoCalendarBundle',
+            'calendar_* (calendars and events)',
+        ],
+        'contao/faq-bundle' => [
+            'Contao\\FaqBundle\\ContaoFaqBundle',
+            'faq_* (FAQs and categories)',
+        ],
         'contao/newsletter-bundle' => [
             'Contao\\NewsletterBundle\\ContaoNewsletterBundle',
             'newsletter_*',

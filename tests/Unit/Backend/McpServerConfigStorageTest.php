@@ -126,4 +126,34 @@ final class McpServerConfigStorageTest extends TestCase
         self::assertSame([], $loaded['disabled_tools']);
         self::assertSame(['ok_tool'], $loaded['extension_tools_enabled']);
     }
+
+    public function testAPathIsStoredWithoutSlashes(): void
+    {
+        $storage = new McpServerConfigStorage($this->dir);
+
+        $result = $storage->save([...$storage->defaults(), 'path' => ' /ki/mcp/ ']);
+
+        self::assertTrue($result['saved']);
+        self::assertSame('ki/mcp', $storage->load()['path']);
+    }
+
+    public function testAPathTheEndpointCannotTakeIsNotSaved(): void
+    {
+        $storage = new McpServerConfigStorage($this->dir, '/admin');
+
+        self::assertSame(['path_invalid'], $storage->save([...$storage->defaults(), 'path' => 'mcp.json'])['errors']);
+        self::assertSame(['path_reserved'], $storage->save([...$storage->defaults(), 'path' => 'admin/mcp'])['errors']);
+        self::assertSame(['path_reserved'], $storage->save([...$storage->defaults(), 'path' => 'files'])['errors']);
+        self::assertFileDoesNotExist($this->dir.'/var/mcp/config.json');
+    }
+
+    public function testAStoredPathThatIsNoLongerValidLoadsAsTheDefault(): void
+    {
+        // Written by hand, or by a version that took any string: the endpoint
+        // is routed from this value, so it must not land on "contao".
+        mkdir($this->dir.'/var/mcp', 0o775, true);
+        file_put_contents($this->dir.'/var/mcp/config.json', json_encode(['path' => 'contao', 'auth_mode' => 'oauth']));
+
+        self::assertSame('mcp', (new McpServerConfigStorage($this->dir))->load()['path']);
+    }
 }

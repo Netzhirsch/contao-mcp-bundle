@@ -15,6 +15,7 @@ use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
+use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
@@ -39,6 +40,7 @@ final class Tool
         private readonly QueryFilterResolver $filterResolver,
         private readonly Connection $connection,
         private readonly McpPermissionGuard $guard,
+        private readonly OptionalBundles $optionalBundles,
     ) {
     }
 
@@ -59,6 +61,9 @@ final class Tool
         ?string $updated_after = null,
         ?string $updated_before = null,
     ): array {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::CALENDAR)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
         $limit = max(1, min($limit, 100));
         $offset = max(0, $offset);
@@ -113,6 +118,9 @@ final class Tool
     )]
     public function get(int $id): array
     {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::CALENDAR)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
         $cal = CalendarModel::findById($id);
         if ($cal === null) {
@@ -142,6 +150,9 @@ final class Tool
         ?bool $requireLogin = null,
         ?bool $disableCaptcha = null,
     ): array {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::CALENDAR)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
 
         if (PageModel::findById($jumpTo) === null) {
@@ -204,6 +215,9 @@ final class Tool
         ?bool $requireLogin = null,
         ?bool $disableCaptcha = null,
     ): array {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::CALENDAR)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
         $cal = CalendarModel::findById($id);
         if ($cal === null) {
@@ -261,6 +275,9 @@ final class Tool
     )]
     public function delete(int $id, bool $confirm_destructive = false, bool $cascade = false): array
     {
+        if (($unavailable = $this->optionalBundles->unavailable(OptionalBundles::CALENDAR)) !== null) {
+            return $unavailable;
+        }
         $this->framework->initialize();
 
         if (!$confirm_destructive) {

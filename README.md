@@ -86,9 +86,8 @@ OpenGraph-/X-Card-Daten, Suchindex, Wartung + System-Einstellungen.
   (`numero2/contao-opengraph3`, siehe unten), **Übersetzen mit DeepL**
   (`numero2/contao-deepl`, siehe unten) und die Sprachverknüpfung
   `entity_language_link` (`terminal42/contao-changelanguage`). Ohne ihr Paket
-  antworten Newsletter-, Kommentar- und Erweiterungs-Tools mit
-  `extension_not_available`; die News-, Kalender- und FAQ-Tools setzen ihr
-  Bundle voraus.
+  antworten sie mit `extension_not_available` und nennen das fehlende Paket —
+  auch die generischen Tools, wenn man ihnen eine Tabelle wie `tl_news` gibt.
 - **Dateien hochladen**, auch große: `file_upload_begin`/`_chunk`/`_finish`
   übertragen eine Datei in Stücken, ohne dass sie vorher irgendwo öffentlich
   liegen muss; Größe, `sha256` und Magic Bytes werden geprüft, bevor etwas
@@ -178,11 +177,11 @@ wurde, antwortet auf `/mcp` mit **503** und nennt das Backend-Modul. Erst dort
 wählt man den Modus — `none` bleibt möglich, aber nur als ausdrückliche
 Entscheidung für einen privaten oder Loopback-Host.
 
-Die Route `/mcp` ist nach der Migration sofort registriert
-(`<backend_url>/mcp`) — Apache/PHP-FPM serviert sie wie jede andere
-Symfony-Route. Kein Daemon, kein Port, kein Reverse-Proxy nötig. Antworten gibt
-sie, sobald die Konfiguration einmal gespeichert und eine Lizenz oder Testphase
-aktiv ist.
+Der Endpunkt ist nach der Migration sofort da, unter `<backend_url>/mcp` (der
+Pfad ist einstellbar, siehe [Konfiguration](#konfiguration)) — Apache/PHP-FPM
+serviert ihn wie jede andere Symfony-Route. Kein Daemon, kein Port, kein
+Reverse-Proxy nötig. Antworten gibt er, sobald die Konfiguration einmal
+gespeichert und eine Lizenz oder Testphase aktiv ist.
 
 ### 4. Lizenz aktivieren (30 Tage kostenlos)
 
@@ -319,7 +318,8 @@ ab. Auf Contao 5 ist das Flag überflüssig.
 
 ## Transport und Protokoll
 
-Streamable HTTP auf einem einzigen Endpunkt, `POST /mcp`. Einen **SSE-Kanal gibt
+Streamable HTTP auf einem einzigen Endpunkt, `POST /mcp` (oder der eingestellte
+Pfad). Einen **SSE-Kanal gibt
 es nicht** — keinen GET-Stream und keine vom Server angestoßenen Nachrichten,
 nur JSON als Anfrage und Antwort. Protokollrevision **2025-03-26**; Clients mit
 **2024-11-05** werden ebenfalls angenommen. Jeder MCP-Client, der Streamable HTTP
@@ -341,7 +341,7 @@ grün durchlaufen.
 Fehlt eines der optionalen Contao-Bundles (News, Kalender, FAQ, Kommentare,
 Newsletter), überspringt er die Prüfungen, die es braucht, statt abzubrechen —
 jede auf einer eigenen ⊝-Zeile. Die Zusammenfassung zählt sie getrennt von den
-bestandenen (`15 section(s) skipped — not installed: …`): kein Fehlschlag, aber
+bestandenen (`17 section(s) skipped — not installed: …`): kein Fehlschlag, aber
 ein Hinweis, dass weniger geprüft wurde als auf einer vollen Installation.
 
 Für einzelne Prüfungen stellt der Test `var/mcp/config.json` kurz um — unter
@@ -391,7 +391,8 @@ OAuth-Konfig + `warnings: [...]` mit konkreten Fix-Befehlen. Vor jedem
 Site-Move oder Server-Wechsel laufen lassen; das Tool braucht einen
 Administrator.
 
-Für ein Monitoring ohne Token gibt es `GET /mcp/healthz`: 200, wenn die
+Für ein Monitoring ohne Token gibt es `GET /mcp/healthz` (bei einem anderen
+`path`: `/<path>/healthz`): 200, wenn die
 Datenbank antwortet, `var/mcp/` schreibbar ist, die OAuth-Schlüssel da sind (im
 Modus `oauth`) und mindestens 50 MB frei sind — sonst 503 mit den Namen der
 fehlgeschlagenen Prüfungen.
@@ -471,7 +472,7 @@ Felder:
 
 | Key | Default | Bedeutung |
 |---|---|---|
-| `path` | `mcp` | Pfad, den die Backend-Anzeige und `oauth-protected-resource` nennen. Der Endpunkt selbst liegt fest unter `/mcp` — ein anderer Wert verschiebt ihn nicht, also auf `mcp` lassen |
+| `path` | `mcp` | URL-Pfad des Endpunkts, ohne Schrägstrich am Anfang: `ki/mcp` ergibt `<backend_url>/ki/mcp`. `/healthz` und die OAuth-Metadaten ziehen mit, und zwar beim Speichern, ohne `cache:clear`; verbundene Clients brauchen danach die neue URL, ihre Tokens bleiben gültig. Erlaubt sind Kleinbuchstaben, Ziffern, `-` und `_`, auch mehrere Segmente — nicht im Backend, nicht in einem Verzeichnis von `public/` und nicht der Alias einer Seite, die der Endpunkt sonst verdecken würde |
 | `pagination_limit` | `500` | Max Tools pro `tools/list` (irrelevant in Lazy-Mode) |
 | `auth_mode` | `oauth` | `oauth` oder `none` (nur für private oder Loopback-Hosts) |
 | `backend_url` | `""` | Public Base-URL des Contao-Backends (Pflicht bei OAuth) |
@@ -1002,6 +1003,12 @@ Issues / Findings bitte ins Repo, plus Anhang:
 - Relevante Einträge aus dem Contao-Log — `var/logs/prod-<Datum>.log` unter
   Contao 5, `var/log/prod-<Datum>.log` unter Contao 6; bei einer Meldung mit
   `reference …` die Zeile mit dieser Referenz
+
+## Support
+
+<netzhirsch@netzhirsch.de>, Antwort innerhalb von 24 Stunden, im Abo
+enthalten. Eine kostenpflichtige Einrichtungshilfe ist als eigene, buchbare
+Leistung geplant.
 
 ## Update von einer Version ≤ 1.4.0
 

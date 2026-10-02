@@ -9,7 +9,6 @@ use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\OAuth\KeyManager;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * Lightweight liveness probe for external monitoring (Plesk watchdog,
@@ -52,7 +51,8 @@ use Symfony\Component\Routing\Attribute\Route;
  *   - External-network reachability (probe target is /this host/, not
  *     "the internet")
  *
- * Route: GET /mcp/healthz — no auth, no CSRF, no rate-limit gating
+ * Route: GET /<path>/healthz (/mcp/healthz by default, matched by
+ * McpEndpointRouteListener) — no auth, no CSRF, no rate-limit gating
  * the OAuth endpoints have. The path is OUTSIDE both /mcp (POST-only
  * JSON-RPC) and /_mcp_oauth/* (rate-limited authorization endpoints),
  * so a monitoring system that probes once per second doesn't trip the
@@ -69,12 +69,6 @@ final class McpHealthzController
     ) {
     }
 
-    #[Route(
-        path: '/mcp/healthz',
-        name: 'netzhirsch_contao_mcp_healthz',
-        methods: ['GET'],
-        defaults: ['_scope' => 'frontend'],
-    )]
     public function __invoke(): JsonResponse
     {
         $checks = [

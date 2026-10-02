@@ -6,7 +6,9 @@ namespace Netzhirsch\ContaoMcpBundle\Backend\Module;
 
 use Contao\Input;
 use Contao\Message;
+use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
+use Netzhirsch\ContaoMcpBundle\Routing\EndpointPath;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -30,6 +32,16 @@ class ModuleMcpConfig extends AbstractMcpModule
     {
         if ($action !== 'save_config') {
             return;
+        }
+
+        // The endpoint is matched before Contao's own routing, so a page with
+        // this alias would vanish behind it. Checked only when the path
+        // changes: a site whose page already shares the default "mcp" keeps
+        // being able to save everything else.
+        $path = EndpointPath::normalise((string) Input::post('path'));
+        if ($path !== '' && $path !== $configStorage->load()['path'] && self::isPageAlias($container, $path)) {
+            Message::addError($this->translate('config_save_failed').' '.$this->translate('error_path_page_alias', 'path_page_alias'));
+            $this->redirectSelf();
         }
 
         $input = [
@@ -69,5 +81,13 @@ class ModuleMcpConfig extends AbstractMcpModule
         }
 
         $this->redirectSelf();
+    }
+
+    private static function isPageAlias(ContainerInterface $container, string $alias): bool
+    {
+        $connection = $container->get('database_connection');
+
+        return $connection instanceof Connection
+            && false !== $connection->fetchOne('SELECT id FROM tl_page WHERE alias = ? LIMIT 1', [$alias]);
     }
 }

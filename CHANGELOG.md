@@ -38,13 +38,32 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   auf Contao 5.7 LTS.
 
 ### Changed
+- **Der Pfad des Endpunkts ist einstellbar.** `path` unter
+  *MCP-Server → Konfiguration* (Standard `mcp`) legt jetzt fest, wo der
+  Endpunkt liegt: `<backend_url>/<path>`, dazu `/<path>/healthz`,
+  `/<path>/.well-known/oauth-authorization-server` und
+  `/.well-known/oauth-protected-resource/<path>`. Bisher lag er fest unter
+  `/mcp`, während Backend-Anzeige und OAuth-Metadaten den eingestellten Pfad
+  ankündigten — ein anderer Wert konnte den OAuth-Login bei Clients scheitern
+  lassen, die die angekündigte Resource-URL mit der aufgerufenen vergleichen.
+  Der neue Pfad gilt ab dem Speichern, ohne `cache:clear`; der alte antwortet
+  dann nicht mehr. Verbundene Clients brauchen die neue URL, ihre Tokens
+  bleiben gültig. Erlaubt sind Kleinbuchstaben, Ziffern, `-` und `_`, auch in
+  mehreren Segmenten (`ki/mcp`). Abgelehnt werden Pfade im Backend
+  (`contao.backend.route_prefix`), in einem Verzeichnis von `public/` und der
+  Alias einer vorhandenen Seite, die der Endpunkt sonst verdecken würde.
+
+  **Wer `path` schon geändert hatte, findet den Endpunkt nach dem Update
+  dort** — bis 1.37.1 lag er trotzdem unter `/mcp`. Die Status-Seite zeigt die
+  gültige URL. Ein gespeicherter Wert, den das Formular heute ablehnen würde,
+  wird ignoriert; der Endpunkt bleibt dann unter `/mcp`.
 - **Der Smoke-Test läuft auch ohne die optionalen Contao-Bundles durch.** Fehlte
   `contao/news-bundle`, brach `contao:mcp:smoke-test` nach der Hälfte mit
   „Table tl_news_archive doesn't exist" ab: News dient an vielen Stellen als
   Beispieltabelle, weit über den News-Abschnitt hinaus. Prüfungen, die News,
   Kalender, FAQ, Kommentare oder Newsletter brauchen, werden jetzt
   übersprungen, wenn das Bundle fehlt — jede auf einer eigenen ⊝-Zeile. Die
-  Zusammenfassung zählt sie getrennt von den bestandenen („15 section(s)
+  Zusammenfassung zählt sie getrennt von den bestandenen („17 section(s)
   skipped — not installed: …"), damit eine schlanke Installation nicht
   besser dasteht, als sie geprüft wurde. Wo es gar nicht um News geht
   (External-ID-Labels, Sprachverknüpfung, Modulrechte), springt eine
@@ -66,10 +85,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
     Liste. Ohne die Datei lässt sich die Lizenz nicht erneuern.
   - **Konfiguration:** `auth_mode` steht standardmäßig auf `oauth`, nicht auf
     `none`; `config.json` entsteht erst beim ersten Speichern, bis dahin
-    antwortet `/mcp` mit 503; `path` verschiebt den Endpunkt nicht, der liegt
-    fest unter `/mcp`. Die übrigen Schlüssel stehen jetzt in der Tabelle.
+    antwortet `/mcp` mit 503. Die übrigen Schlüssel stehen jetzt in der
+    Tabelle.
   - **Was an den Lizenzserver geht:** Die Erneuerung schickt auch das bisherige
     Token mit, die Testphase auch die E-Mail-Adresse.
+  - **Support:** `composer.json` (und damit Packagist) und die deutsche README
+    nennen jetzt dieselbe Adresse wie die englische: netzhirsch@netzhirsch.de.
   - Außerdem: 196 statt 197 Tools, Lazy-Mode-Größe gemessen (rund 3 statt
     180 KB), Upload-Sitzungen, DeepL-Grenze 250 000 Zeichen (auch in den
     Tool-Beschreibungen), Log-Pfade unter Contao 5 und 6, unterstützte Versionen
@@ -90,6 +111,20 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Template-Tools verlangen `tpl_editor`.
 
 ### Fixed
+- **Ohne ihr Bundle melden die News-, Kalender- und FAQ-Tools jetzt
+  `extension_not_available`.** Die 30 Tools sind auf jeder Installation
+  registriert. Fehlte `contao/news-bundle`, `contao/calendar-bundle` oder
+  `contao/faq-bundle`, endete ein Aufruf in „Class Contao\NewsArchiveModel not
+  found" oder einer Abfrage gegen eine Tabelle, die es nicht gibt — ein interner
+  Fehler, der nichts erklärte. Jetzt antworten sie wie die Kommentar- und
+  Newsletter-Tools mit `extension_not_available` und nennen das fehlende Paket,
+  und zwar auf jedem Weg: direkter Aufruf, `contao_call` im Lazy-Mode und die
+  Rechteprüfung davor, die einen Nicht-Administrator sonst an einer Tabelle
+  ohne DCA hätte scheitern lassen. Dieselbe Antwort geben die generischen Tools,
+  wenn man ihnen eine solche Tabelle übergibt (`entity_move`,
+  `entity_duplicate`, `entity_field_patch`, `entity_query_options`,
+  `opengraph_*`, `external_id_set` …). Der Leitfaden `contao_guide` führt die
+  drei Bundles jetzt unter den optionalen Erweiterungen.
 - **Ohne News-, Kalender- oder FAQ-Bundle ließen sich keine Seiten löschen.**
   `page_delete` und `page_delete_tree` suchen vor dem Löschen nach Einträgen,
   die die Seite als Weiterleitungsziel (`jumpTo`) nutzen, und fragten dafür

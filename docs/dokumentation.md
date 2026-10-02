@@ -471,7 +471,7 @@ Das Backend (Menüpunkt **MCP-Server → Konfiguration**) speichert die Werte in
 
 | Feld | Default | Bedeutung |
 |---|---|---|
-| `path` | `mcp` | URL-Pfad des MCP-Endpunkts ohne führenden Slash. Endgültige Endpunkt-URL: `<backend_url>/path`. Selten zu ändern. |
+| `path` | `mcp` | URL-Pfad des MCP-Endpunkts ohne führenden Slash. Endpunkt-URL: `<backend_url>/<path>`; `/healthz` und die OAuth-Metadaten ziehen beim Speichern mit. Selten zu ändern. |
 | `pagination_limit` | `500` | Maximale Tools pro `tools/list`-Seite. Claude paginiert _nicht_, also muss der Wert oberhalb der Tool-Gesamtzahl liegen. **Im Lazy-Mode irrelevant** (dort sind's eh nur 6 Tools). |
 | `auth_mode` | `none` | Sicherheits-Toggle. `none` = offener Server, nur sicher auf `127.0.0.1`. `oauth` = OAuth 2.1 mit PKCE (siehe §5). |
 | `backend_url` | (leer) | Öffentliche Basis-URL des Contao-Backends, z.B. `https://www.kunde.de`. **Pflicht wenn `auth_mode=oauth`** — der MCP-Server gibt die OAuth-Endpunkte in seiner `/.well-known`-Metadata aus. |

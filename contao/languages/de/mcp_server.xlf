@@ -55,7 +55,7 @@
 
       <!-- Config field labels -->
       <trans-unit id="mcp_server.config_path_label"><source>Path</source><target>Pfad</target></trans-unit>
-      <trans-unit id="mcp_server.config_path_help"><source>Path that the backend display and the OAuth metadata (oauth-protected-resource) name. The endpoint itself is fixed at /mcp — another value does not move it but announces a path that does not exist. Keep "mcp".</source><target>Pfad, den die Backend-Anzeige und die OAuth-Metadaten (oauth-protected-resource) nennen. Der Endpunkt selbst liegt fest unter /mcp — ein anderer Wert verschiebt ihn nicht, sondern kündigt einen Pfad an, den es nicht gibt. Auf "mcp" lassen.</target></trans-unit>
+      <trans-unit id="mcp_server.config_path_help"><source>URL path of the MCP endpoint, "mcp" by default. Lower-case letters, digits, "-" and "_", several segments allowed (e.g. ki/mcp). The endpoint, its /healthz probe and the OAuth metadata move as soon as this is saved; connected clients then need the new URL.</source><target>URL-Pfad des MCP-Endpunkts, Standard „mcp“. Erlaubt sind Kleinbuchstaben, Ziffern, „-“ und „_“, auch mehrere Segmente (z. B. ki/mcp). Endpunkt, /healthz-Prüfung und OAuth-Metadaten ziehen beim Speichern sofort um; verbundene Clients brauchen danach die neue URL.</target></trans-unit>
       <trans-unit id="mcp_server.config_pagination_limit_label"><source>Pagination limit</source><target>Pagination-Limit</target></trans-unit>
       <trans-unit id="mcp_server.config_pagination_limit_help"><source>Maximum tools returned by `tools/list` per page. Claude Desktop / mcp-remote do NOT paginate; keep this above the total tool count (default 500).</source><target>Maximale Anzahl Tools, die `tools/list` pro Seite liefert. Claude Desktop / mcp-remote paginieren NICHT; Wert oberhalb der Gesamt-Tool-Anzahl lassen (Standard 500).</target></trans-unit>
       <trans-unit id="mcp_server.config_auth_mode_label"><source>Authentication mode</source><target>Authentifizierungs-Modus</target></trans-unit>
@@ -122,6 +122,9 @@
       <trans-unit id="mcp_server.error_pagination_limit_invalid"><source>Pagination limit must be 1–10000.</source><target>Pagination-Limit muss zwischen 1 und 10000 liegen.</target></trans-unit>
       <trans-unit id="mcp_server.error_dir_unwritable"><source>Could not create the config directory.</source><target>Konfigurations-Verzeichnis konnte nicht erstellt werden.</target></trans-unit>
       <trans-unit id="mcp_server.error_file_unwritable"><source>Could not write the config file.</source><target>Konfigurations-Datei konnte nicht geschrieben werden.</target></trans-unit>
+      <trans-unit id="mcp_server.error_path_invalid"><source>The path may only contain lower-case letters, digits, "-" and "_", in segments separated by "/".</source><target>Der Pfad darf nur Kleinbuchstaben, Ziffern, „-“ und „_“ enthalten, in Segmenten getrennt durch „/“.</target></trans-unit>
+      <trans-unit id="mcp_server.error_path_reserved"><source>The path belongs to the Contao backend or to a directory in public/.</source><target>Der Pfad gehört zum Contao-Backend oder zu einem Verzeichnis in public/.</target></trans-unit>
+      <trans-unit id="mcp_server.error_path_page_alias"><source>A page already uses this alias; the endpoint would hide it.</source><target>Eine Seite verwendet diesen Alias bereits; der Endpunkt würde sie verdecken.</target></trans-unit>
 
       <!-- MCP activity panel -->
       <trans-unit id="mcp_server.mcp_activity_title"><source>MCP activity</source><target>MCP-Aktivität</target></trans-unit>
