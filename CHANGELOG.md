@@ -8,25 +8,49 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [1.37.1] – 2026-10-02
 
-> Bugfix für Contao 6: Die Backend-Seiten unter „MCP-Server" (Status,
-> Konfiguration, Aktivität, Tools) öffnen sich dort jetzt — bisher brach jede
-> mit einem Fehler 500 ab. Keine Schemaänderung, keine Migration. Unter
-> Contao 5.x sehen die Seiten aus wie bisher.
+> Zwei Bugfixes für Contao 6. Unter Symfony 8 war der MCP-Server nicht
+> erreichbar (`/mcp`, `/mcp/healthz` und die `.well-known`-Metadaten
+> antworteten mit 404), und die Backend-Seiten unter „MCP-Server" brachen mit
+> einem Fehler 500 ab. Keine Schemaänderung, keine Migration. Unter Contao 5.x
+> sehen die Seiten aus wie bisher.
+>
+> **Nach dem Update den Cache leeren.** Contao Manager und `composer update`
+> tun das selbst. Wer ohne die Composer-Skripte deployt, führt
+> `vendor/bin/contao-console cache:clear` aus — sonst sucht Contao noch nach
+> den alten `.html5`-Templates, und die vier Backend-Seiten antworten mit einem
+> Fehler 500, auch unter 5.x.
 
 ### Fixed
+- **Unter Contao 6 mit Symfony 8 war der MCP-Server nicht erreichbar.**
+  `/mcp`, `/mcp/healthz` und die `.well-known`-Metadaten
+  (`oauth-authorization-server`, `oauth-protected-resource`) antworteten mit
+  404 — für einen Client sah die Installation aus, als gäbe es keinen
+  MCP-Server. Die beiden Controller deklarierten ihre Routen mit
+  `Symfony\Component\Routing\Annotation\Route`. Symfony 8 hat die Klasse
+  entfernt, und eine damit deklarierte Route scheitert nicht etwa, sie wird
+  schlicht nicht mehr registriert. Jetzt `Routing\Attribute\Route`, das es seit
+  Symfony 6.4 gibt, also in jeder unterstützten Version. Die OAuth-Endpunkte
+  unter `/_mcp_oauth/` nutzten es schon und waren nicht betroffen.
+
+  In einer gemischten Installation — Symfony-Komponenten teils 7.4, teils 8 —
+  brach sogar der Container-Build der ganzen Seite ab:
+  `Attribute class "Symfony\Component\Routing\Annotation\Route" not found`.
+  Unter Contao 5.x (Symfony 6.4/7.4) gab es die alte Klasse noch als Alias,
+  dort lief alles. PHPStan über `src/` gegen Contao 6.0 und Symfony 8.1 findet
+  keine weitere entfernte API.
+
 - **Unter Contao 6 brachen alle Backend-Seiten unter „MCP-Server" mit einem
   Fehler 500 ab**
   ([#3](https://github.com/Netzhirsch/contao-mcp-bundle/issues/3)):
   `Template "@Contao/be_mcp_status.html.twig" is not defined.` — ebenso für
   Konfiguration, Aktivität und Tools. Contao 6 rendert ein `BackendTemplate`
   nur noch als `@Contao/<name>.html.twig` und kennt `.html5`-Templates nicht
-  mehr; die vier Module lieferten aber genau solche aus. Der MCP-Endpunkt war
-  nicht betroffen, nur die Verwaltung im Backend.
+  mehr; die vier Module lieferten aber genau solche aus.
 
   Die Templates sind jetzt Twig (`contao/templates/be_mcp_*.html.twig`),
   ein Satz für alle unterstützten Versionen — Contao 5.x zieht ein
   Twig-Template gleichen Namens ohnehin vor. Markup und Verhalten bleiben
-  gleich, verglichen gegen die gerenderten `.html5`-Seiten unter 5.3 und 5.7.
+  gleich, verglichen gegen die gerenderten `.html5`-Seiten unter 5.3 bis 5.7.
   Zwei Dinge mussten dabei mit:
 
   - **Werte gehen roh ins Template, Twig escaped.** Contao 6 escaped mit Twigs
@@ -46,9 +70,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   er weiter, bekommt aber `backTitle` und `backLabel` nicht mehr geliefert. Die
   Anpassung gehört ins Twig-Template.
 
-  Der Smoke-Test treibt nur die Werkzeuge und hat das Backend nie geöffnet —
-  deshalb blieb er grün. Die CI meldet sich jetzt in jeder Zeile der Matrix
-  (Contao 5.3, 5.7, 6.0) als Administrator an und öffnet die vier Module.
+Beides blieb unbemerkt, weil der Smoke-Test die Werkzeuge im Prozess aufruft: Er
+öffnet weder das Backend, noch geht er durch den Router. Die CI meldet sich
+jetzt in jeder Zeile der Matrix als Administrator an, öffnet die vier Module
+und erreicht den Endpunkt über HTTP. Geprüft wurde 1.37.1 auf Contao 5.3, 5.4,
+5.5, 5.6, 5.7 und 6.0 — die Linien 5.4 bis 5.6 sind bei Contao am Ende ihrer
+Laufzeit und lassen sich mit aktuellem Composer nicht mehr frisch installieren,
+dort mit dem Stand einer bestehenden Installation.
 
 ## [1.37.0] – 2026-10-01
 
