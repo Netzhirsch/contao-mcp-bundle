@@ -6,6 +6,13 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.37.1] – 2026-10-02
+
+> Bugfix für Contao 6: Die Backend-Seiten unter „MCP-Server" (Status,
+> Konfiguration, Aktivität, Tools) öffnen sich dort jetzt — bisher brach jede
+> mit einem Fehler 500 ab. Keine Schemaänderung, keine Migration. Unter
+> Contao 5.x sehen die Seiten aus wie bisher.
+
 ### Fixed
 - **Unter Contao 6 brachen alle Backend-Seiten unter „MCP-Server" mit einem
   Fehler 500 ab**
