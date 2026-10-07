@@ -6,6 +6,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.38.1] – 2026-10-07
+
+> Fehlerbehebung aus dem laufenden Betrieb. Betrifft nur `entity_duplicate` mit
+> `overrides` auf einer Datums- oder Zahlenspalte; alles andere verhält sich
+> unverändert.
+
 ### Fixed
 - **`entity_duplicate`: Datums-Overrides landen nicht mehr ungeprüft in der
   Datenbank.** Von dp-dock.com gemeldet als `duplicate_failed` mit einer
