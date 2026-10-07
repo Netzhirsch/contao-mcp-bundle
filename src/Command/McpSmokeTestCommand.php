@@ -3881,6 +3881,37 @@ final class McpSmokeTestCommand extends Command
                 [$srcAuthor, $dupId > 0 ? (int) $this->connection->fetchOne('SELECT author FROM tl_article WHERE id = ?', [$dupId]) : 0],
                 static fn (array $r) => $r[0] > 0 ? $r[1] === $r[0] : true);
 
+            // Reported from dp-dock.com as `duplicate_failed` with a log
+            // reference: the real error was "Data truncated for column
+            // 'date'" two layers down. Overrides went into the INSERT
+            // unchecked, and a date column that holds a Unix timestamp is
+            // exactly where a caller sends a readable date.
+            $dupDate = $this->duplicateTool->duplicate(
+                'tl_article',
+                $ctreeArticleId,
+                into_pid: $ctreePageId,
+                overrides: (object) ['title' => $stamp.'_dup_datum', 'start' => '2026-12-24'],
+            );
+            $dupDateId = (int) ($dupDate['new_id'] ?? 0);
+            $expect('an ISO date in an overrides column that stores a timestamp is converted',
+                $dupDateId > 0
+                    ? $this->connection->fetchOne('SELECT start FROM tl_article WHERE id = ?', [$dupDateId])
+                    : null,
+                static fn ($v) => (string) $v === (string) strtotime('2026-12-24'));
+
+            // '' is how Contao says "no start date" in a varchar(10) column,
+            // so it has to keep working — only a numeric column cannot hold it.
+            $expect('an empty value still clears a varchar date column',
+                $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
+                    overrides: (object) ['title' => $stamp.'_dup_leer', 'start' => '']),
+                static fn ($r) => ($r['duplicated'] ?? false) === true);
+
+            $expect('a date the tool cannot read is refused by name, not by the database',
+                $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
+                    overrides: (object) ['start' => 'sometime next week']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'ISO 8601'));
+
             $expect('a column the table does not have is refused before anything is copied',
                 $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
                     overrides: (object) ['gibtEsNicht' => 'x']),

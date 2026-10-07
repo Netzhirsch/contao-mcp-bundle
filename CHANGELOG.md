@@ -6,6 +6,33 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Fixed
+- **`entity_duplicate`: Datums-Overrides landen nicht mehr ungeprüft in der
+  Datenbank.** Von dp-dock.com gemeldet als `duplicate_failed` mit einer
+  Log-Referenz — der echte Fehler stand zwei Schichten tiefer: *„Data truncated
+  for column 'date'"*. Die Überschreibungen gingen unverändert in das INSERT.
+
+  `tl_news.date` ist ein **Unix-Zeitstempel**, kein Datumsstring. Ein Aufrufer,
+  der ein Datum setzen will, schreibt naheliegenderweise `"2026-10-07"` — und
+  genau das konnte die Spalte als Einziges nicht aufnehmen. Reproduziert:
+  `""`, `null` und ein ISO-Datum scheiterten alle drei.
+
+  Welche Spalte ein Zeitstempel ist, verrät der SQL-Typ nicht: `tl_news.date`
+  ist `int`, `tl_calendar_events.startDate` `bigint NULL` und `tl_news.start`
+  `varchar(10)` — alle drei halten einen Zeitstempel, während `tl_content.sorting`
+  ein `int` ist, das wirklich eine Zahl meint. Entschieden wird deshalb über
+  `eval.rgxp` aus der DCA.
+
+  Jetzt gilt: Ein ISO-Datum wird umgerechnet (`"2026-10-07"` und
+  `"2026-10-07T14:30:00"`), Zahlen bleiben unangetastet, und was weder das eine
+  noch das andere ist, wird **unter Nennung der Spalte** abgelehnt statt von der
+  Datenbank. Ein leerer Wert bleibt dort erlaubt, wo Contao ihn selbst für „kein
+  Datum" benutzt (`varchar(10)`), und wird nur abgewiesen, wo eine Zahlenspalte
+  ihn nicht halten kann.
+
+  Alles andere — Strings, Booleans, unbekannte Spalten — verhält sich
+  unverändert. Drei Prüfungen im Smoke-Test halten den Fall fest.
+
 ## [1.38.0] – 2026-10-02
 
 > Unterstützt Contao 5.3 LTS, 5.7 LTS und 6.0. Contao 5.4 bis 5.6 sind am Ende
