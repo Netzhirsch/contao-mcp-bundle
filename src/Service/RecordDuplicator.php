@@ -8,6 +8,8 @@ use Contao\Controller;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Slug\Slug;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Schema\Column;
+use Doctrine\DBAL\Types\Type;
 
 /**
  * DCA-driven recursive record duplication — mirrors Contao's backend "copy"
@@ -106,7 +108,7 @@ final class RecordDuplicator
                 ));
             }
 
-            $out[$column] = match (true) {
+            $value = match (true) {
                 \is_bool($value) => $value ? 1 : 0,
                 $value === null, \is_scalar($value) => $value,
                 default => throw new \InvalidArgumentException(sprintf(
@@ -116,9 +118,108 @@ final class RecordDuplicator
                     get_debug_type($value),
                 )),
             };
+
+            $out[$column] = $this->coerceOverride($table, $column, $value);
         }
 
         return $out;
+    }
+
+    /**
+     * Brings one override into the shape its column can actually hold.
+     *
+     * The case that brought this here: `entity_duplicate` on tl_news with
+     * `date: "2026-10-07"` died as `duplicate_failed` with a log reference, and
+     * the real error was two layers down — "Data truncated for column 'date'".
+     * `tl_news.date` is a Unix timestamp, so a human date string is the obvious
+     * thing for a caller to send and the one thing the column cannot take.
+     *
+     * Which columns are timestamps is not something the SQL type can answer:
+     * `tl_news.date` is `int`, `tl_calendar_events.startDate` is `bigint NULL`
+     * and `tl_news.start` is `varchar(10)` — all three hold a Unix timestamp,
+     * while `tl_content.sorting` is an `int` that holds an actual number. The
+     * DCA says which is which, through `eval.rgxp`, so that is what decides.
+     *
+     * Everything else keeps passing through untouched: this is about the two
+     * shapes that reach the database as something nobody typed, not about
+     * second-guessing the caller.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function coerceOverride(string $table, string $column, mixed $value): mixed
+    {
+        $doctrineType = $this->columnType($table, $column);
+
+        if ($doctrineType === null) {
+            return $value;
+        }
+
+        $isTimestamp = \in_array($this->rgxpOf($table, $column), ['date', 'time', 'datim'], true);
+        $isInteger = \in_array($doctrineType, ['integer', 'smallint', 'bigint'], true);
+
+        if (!$isTimestamp && !$isInteger) {
+            return $value;
+        }
+
+        if (\is_int($value)) {
+            return $value;
+        }
+
+        if ($value === null || $value === '') {
+            // Contao stores "no date" as '' in its varchar(10) date columns —
+            // tl_article.start is NOT NULL with default '' — so there an empty
+            // value is the answer, not a mistake. Only a numeric column truly
+            // cannot hold one.
+            if (!$isInteger) {
+                return $value;
+            }
+
+            // A nullable number can be emptied; on a NOT NULL one the caller
+            // has to say what they mean, because picking 0 or "now" for them
+            // would be a guess with a date on it.
+            if (!$this->columnIsNotNull($table, $column)) {
+                return null;
+            }
+
+            throw new \InvalidArgumentException(sprintf(
+                'overrides["%s"]: %s.%s cannot be empty — the column is NOT NULL%s. '
+                .'Pass a value, or leave the override out to keep the source record\'s.',
+                $column,
+                $table,
+                $column,
+                $isTimestamp ? ' and holds a Unix timestamp' : '',
+            ));
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        if (!$isTimestamp) {
+            throw new \InvalidArgumentException(sprintf(
+                'overrides["%s"]: %s.%s is an integer column, got "%s".',
+                $column,
+                $table,
+                $column,
+                (string) $value,
+            ));
+        }
+
+        $timestamp = strtotime((string) $value);
+
+        if ($timestamp === false) {
+            throw new \InvalidArgumentException(sprintf(
+                'overrides["%s"]: %s.%s holds a Unix timestamp. "%s" is neither a number nor a date '
+                .'this can read — pass ISO 8601 (e.g. "2026-10-07" or "2026-10-07T14:30:00") '
+                .'or the timestamp itself.',
+                $column,
+                $table,
+                $column,
+                (string) $value,
+            ));
+        }
+
+        return $timestamp;
     }
 
     /**
@@ -444,12 +545,58 @@ final class RecordDuplicator
 
     private function hasColumn(string $table, string $column): bool
     {
-        static $cache = [];
-        $cache[$table] ??= array_map(
-            static fn ($c) => $c->getName(),
-            $this->connection->createSchemaManager()->listTableColumns($table),
-        );
+        return isset($this->columnsOf($table)[strtolower($column)]);
+    }
 
-        return \in_array($column, $cache[$table], true);
+    /**
+     * Doctrine's type name for a column, or null when the column is unknown.
+     */
+    private function columnType(string $table, string $column): ?string
+    {
+        $columns = $this->columnsOf($table);
+        $key = strtolower($column);
+
+        return isset($columns[$key]) ? Type::lookupName($columns[$key]->getType()) : null;
+    }
+
+    private function columnIsNotNull(string $table, string $column): bool
+    {
+        $columns = $this->columnsOf($table);
+        $key = strtolower($column);
+
+        return isset($columns[$key]) && $columns[$key]->getNotnull();
+    }
+
+    /**
+     * The DCA's `eval.rgxp` for a field — the only place that says whether an
+     * integer column means a number or a point in time.
+     */
+    private function rgxpOf(string $table, string $column): string
+    {
+        $this->framework->getAdapter(Controller::class)->loadDataContainer($table);
+
+        $definition = $GLOBALS['TL_DCA'][$table]['fields'][$column]['eval']['rgxp'] ?? '';
+
+        return \is_string($definition) ? $definition : '';
+    }
+
+    /**
+     * @return array<string, Column>
+     */
+    private function columnsOf(string $table): array
+    {
+        static $cache = [];
+
+        if (!isset($cache[$table])) {
+            $columns = [];
+
+            foreach ($this->connection->createSchemaManager()->listTableColumns($table) as $column) {
+                $columns[strtolower($column->getName())] = $column;
+            }
+
+            $cache[$table] = $columns;
+        }
+
+        return $cache[$table];
     }
 }
