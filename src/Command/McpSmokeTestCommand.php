@@ -2345,6 +2345,93 @@ final class McpSmokeTestCommand extends Command
                     $output->writeln('  <fg=yellow>⊝ no regular page — skipping the field-rights checks</>');
                 }
 
+                // (d5) File mounts, reported by a customer on 16.10.2026: the
+                // guard checks the paths a call NAMES, and `files_list` defaults
+                // to the root while `files_search` needs no path at all. Both
+                // walked the whole upload tree for a user mounted on one folder.
+                // Everything here runs as a user with exactly one mount.
+                $this->mcpCallContext->clear();
+                $mountDir = $stamp.'_mount';
+                $foreignDir = $stamp.'_foreign';
+                $this->fileTool->folderCreate('', $mountDir);
+                $this->fileTool->folderCreate('', $foreignDir);
+                $this->fileTool->folderCreate($mountDir, 'inner');
+                $mountUuid = $this->connection->fetchOne('SELECT uuid FROM tl_files WHERE path = ?', ['files/'.$mountDir]);
+
+                if ($mountUuid !== false && $mountUuid !== null) {
+                    $this->connection->insert('tl_user_group', [
+                        'tstamp' => time(),
+                        'name' => $stamp.'_filegroup',
+                        'modules' => serialize(['files']),
+                        'filemounts' => serialize([$mountUuid]),
+                        'fop' => serialize(['f1', 'f2', 'f3']),
+                        'netzhirschMcpAccess' => 1,
+                    ]);
+                    $fileGroupId = (int) $this->connection->lastInsertId();
+
+                    $row['username'] = $stamp.'_fileuser';
+                    $row['email'] = $stamp.'_files@example.invalid';
+                    $row['disable'] = 0;
+                    $row['inherit'] = 'group';
+                    $row['groups'] = serialize([$fileGroupId]);
+                    $quotedFile = [];
+                    foreach ($row as $col => $val) {
+                        $quotedFile[$this->connection->quoteIdentifier((string) $col)] = $val;
+                    }
+                    $this->connection->insert('tl_user', $quotedFile);
+                    $fileUserId = (int) $this->connection->lastInsertId();
+
+                    $this->mcpCallContext->setIdentity($fileUserId, 'smoke-files', null, null);
+                    $namesOf = static fn (array $r): array => array_map(
+                        static fn (array $i): string => (string) ($i['name'] ?? ''),
+                        \is_array($r['items'] ?? null) ? $r['items'] : [],
+                    );
+
+                    // THE reported case: no argument at all.
+                    $rootListing = $this->fileTool->list();
+                    $expect('files_list on the root shows only the mounted folder',
+                        $rootListing,
+                        fn ($r) => \in_array($mountDir, $namesOf($r), true) && !\in_array($foreignDir, $namesOf($r), true));
+                    $expect('files_list on the root does not count what it hides',
+                        $rootListing,
+                        fn ($r) => ($r['total'] ?? -1) === \count($namesOf($r)));
+
+                    // The second half of the report: a glob over everything.
+                    $expect('files_search finds nothing outside the mount',
+                        $this->fileTool->search('*', null, 'all', false, 200),
+                        fn ($r) => [] === array_filter(
+                            \is_array($r['items'] ?? null) ? $r['items'] : [],
+                            static fn (array $i): bool => !str_starts_with((string) ($i['dbafs_path'] ?? ''), 'files/'.$mountDir),
+                        ));
+
+                    // Inside the mount everything still works — a fix that
+                    // locks the user out of their own folder is not a fix.
+                    $expect('the mounted folder itself still lists',
+                        $this->fileTool->list($mountDir),
+                        fn ($r) => \in_array('inner', $namesOf($r), true));
+
+                    $expect('a named foreign folder is refused',
+                        $this->permissionEnforcer->check('files_list', ['path' => $foreignDir]),
+                        fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
+                    $expect('an upload into the upload root is refused',
+                        $this->permissionEnforcer->check('file_upload', ['parent_path' => '', 'name' => 'x.txt']),
+                        fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
+                    $expect('an upload into the own mount is allowed',
+                        $this->permissionEnforcer->check('file_upload', ['parent_path' => $mountDir, 'name' => 'x.txt']),
+                        fn ($r) => $r === null);
+                    // The group has f1-f3, so deleting a FILE is theirs, while
+                    // deleting a folder recursively (f4) is not: the mount says
+                    // where, the fop right says what — both have to be asked.
+                    $expect('deleting a file in the own mount is allowed by f3',
+                        $this->permissionEnforcer->check('file_delete', ['path' => $mountDir.'/x.txt']),
+                        fn ($r) => $r === null);
+                    $expect('but deleting a folder there is refused without f4',
+                        $this->permissionEnforcer->check('folder_delete', ['path' => $mountDir.'/inner']),
+                        fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
+                } else {
+                    $output->writeln('  <fg=yellow>⊝ mount folder has no DBAFS entry — skipping the file-mount checks</>');
+                }
+
                 // (e) Trusted mode (auth_mode=none → no identity) allows everything.
                 $this->mcpCallContext->clear();
                 $expect('trusted mode (no identity) allows page create', $this->permissionGuard->ensureCan('tl_page', 'create', null, ['title' => 'x']), fn ($r) => $r === null);
@@ -2368,6 +2455,20 @@ final class McpSmokeTestCommand extends Command
                 }
                 if (($fieldGroupId ?? 0) > 0) {
                     $this->connection->delete('tl_user_group', ['id' => $fieldGroupId]);
+                }
+                if (($fileUserId ?? 0) > 0) {
+                    $this->connection->delete('tl_user', ['id' => $fileUserId]);
+                }
+                if (($fileGroupId ?? 0) > 0) {
+                    $this->connection->delete('tl_user_group', ['id' => $fileGroupId]);
+                }
+                // Folders last and in trusted mode — the identity above may not
+                // delete them, which is the whole point of the block.
+                $this->mcpCallContext->clear();
+                foreach ([($mountDir ?? '').'/inner', $mountDir ?? '', $foreignDir ?? ''] as $dir) {
+                    if ($dir !== '' && $dir !== '/inner') {
+                        $this->fileTool->folderDelete($dir, true, true);
+                    }
                 }
             }
         } else {

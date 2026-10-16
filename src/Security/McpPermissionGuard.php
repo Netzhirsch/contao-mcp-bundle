@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Security;
 
+use Contao\BackendUser;
 use Contao\Controller;
 use Contao\DataContainer;
 use Contao\Database;
@@ -130,6 +131,7 @@ final class McpPermissionGuard
         private readonly Connection $connection,
         private readonly ContaoFramework $framework,
         private readonly LoggerInterface $logger,
+        private readonly string $uploadPath = 'files',
     ) {
     }
 
@@ -481,13 +483,36 @@ final class McpPermissionGuard
             return $this->deny('permission_denied', 'Your backend user could not be resolved.', ['user_id' => $userId]);
         }
 
-        foreach ($paths as $path) {
-            $path = ltrim(str_replace('\\', '/', $path), '/');
-            if ($path === '') {
-                continue; // the upload root itself — the mount check below covers its children
-            }
+        $reading = !isset(self::FOP_PERMISSIONS[$operation]);
+        $scope = $this->fileScope();
 
-            if (!$this->accessDecisionManager->decide($token, [ContaoCorePermissions::USER_CAN_ACCESS_PATH], [$path])) {
+        foreach ($paths as $path) {
+            // File-tool arguments are relative to the upload folder
+            // (`kunde/bild.jpg`), while mounts and the voter are DBAFS-shaped
+            // (`files/kunde/bild.jpg`). Handing the raw argument to the voter
+            // compared two different things, so it answered "no" to every path
+            // a mounted user owns — the file tools were unusable for exactly
+            // the users this gate exists for, and nobody noticed because
+            // failing closed looks like the gate working.
+            //
+            // An empty path is the upload root, and used to be skipped
+            // entirely: that made the root the one place where no mount
+            // applied. files_list defaults to path="" and so listed the whole
+            // tree, and an upload with parent_path="" landed beside every
+            // customer's folder. Reported from outside, not found by the audit.
+            $path = ltrim(str_replace('\\', '/', $path), '/');
+            $path = $path === '' ? $this->uploadPath : $this->uploadPath.'/'.$path;
+
+            // Reading is allowed one step wider than writing: a user mounted on
+            // `files/kunde/a` must be able to open `files/kunde` to get there,
+            // exactly as the backend file tree lets them. What such a listing
+            // may CONTAIN is not decided here — the tool scopes its own output
+            // through {@see fileScope()}, because rows are not arguments.
+            $permitted = $reading
+                ? $scope === null || $scope->mayDescend($path)
+                : $this->accessDecisionManager->decide($token, [ContaoCorePermissions::USER_CAN_ACCESS_PATH], [$path]);
+
+            if (!$permitted) {
                 return $this->deny(
                     'permission_denied',
                     sprintf('"%s" is outside your file mounts.', $path),
@@ -507,6 +532,45 @@ final class McpPermissionGuard
         }
 
         return null;
+    }
+
+    /**
+     * What the caller may see of the upload tree, or null when nothing is
+     * restricted (admin, or trusted mode with no user).
+     *
+     * {@see ensureFileAccess()} can only judge paths that appear in the call.
+     * `files_list` without an argument and `files_search` without `path` name
+     * none, so their RESULTS have to be scoped instead — a listing is not an
+     * argument, and no voter ever sees it. That was the hole a restricted user
+     * could read the whole tree through: folder names, file names, sizes and
+     * UUIDs of every customer on the install.
+     *
+     * The mounts come off the resolved BackendUser, where Contao has already
+     * merged the group's and converted the UUIDs to paths. A user we cannot
+     * resolve gets an empty scope, which shows nothing — the safe direction.
+     */
+    public function fileScope(): ?FileScope
+    {
+        $userId = $this->callContext->getUserId();
+        if ($userId === null || $userId <= 0) {
+            return null; // trusted mode
+        }
+        if ($this->userContext->isAdmin($userId)) {
+            return null;
+        }
+
+        $user = $this->userContext->tokenFor($userId)?->getUser();
+
+        // property_exists() is always false on a Contao user: everything lives
+        // in arrData behind __get. Read the magic property instead.
+        if (!$user instanceof BackendUser || !\is_array($user->filemounts)) {
+            return new FileScope([]);
+        }
+
+        return new FileScope(array_values(array_filter(
+            $user->filemounts,
+            static fn ($mount): bool => \is_string($mount) && $mount !== '',
+        )));
     }
 
     /**

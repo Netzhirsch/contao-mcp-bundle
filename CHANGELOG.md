@@ -6,6 +6,54 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.38.2] – 2026-10-16
+
+> Sicherheitsrelease. Betrifft jede Installation mit `auth_mode: oauth` und
+> Backend-Benutzern ohne Admin-Rechte. Admins und `auth_mode: none` sind
+> unverändert. **Update empfohlen, besonders unterhalb 1.20.0.**
+
+### Security
+- **`files_list` und `files_search` haben die Filemounts übergangen.** Gemeldet
+  von Mueller & Feh (wisst-international.com) am 16.10.2026: Ein Benutzer mit
+  Filemounts auf zwei Unterordner sah über MCP das komplette `files/`-Verzeichnis
+  — inklusive Ordnern, die im Backend für ihn nicht existieren (dort:
+  Datenbank-Dumps und Theme-Dateien).
+
+  Die Prüfung aus 1.20.0 kontrolliert die Pfade, die **im Aufruf stehen**. Genau
+  daran lag es: `files_list` hat `path=""` als Vorgabe und `files_search` braucht
+  gar keinen Pfad. Wo kein Pfad steht, war nichts zu prüfen — und der leere Pfad
+  wurde zusätzlich ausdrücklich übersprungen. Dasselbe Loch beim Schreiben:
+  `file_upload` und `folder_create` mit `parent_path=""` landeten in der Wurzel,
+  neben den Ordnern aller anderen.
+
+  Neu ist, dass die beiden Lese-Werkzeuge ihre **Ausgabe** einschränken, nicht
+  nur ihren Aufruf (`FileScope`): Zeilen sind keine Argumente, und kein Voter
+  sieht sie je. `files_search` steigt in fremde Ordner gar nicht erst ab. Die
+  Trennung, an der es hing, ist jetzt benannt — *drin* (zählt als Treffer) und
+  *auf dem Weg dorthin* (darf geöffnet werden, damit ein tief gemounteter
+  Benutzer seinen eigenen Ordner überhaupt erreicht, genau wie im Backend).
+
+  `total` zählt nur noch, was auch sichtbar ist. Sonst hätte die Zahl allein
+  verraten, wie viel daneben liegt.
+
+### Fixed
+- **Die Datei-Werkzeuge waren für gemountete Nicht-Admins unbenutzbar.** Beim
+  Nachstellen des Berichts aufgefallen, seit 1.20.0 vorhanden: Die Werkzeuge
+  nehmen Pfade relativ zum Upload-Ordner (`kunde/bild.jpg`), Contaos Mounts und
+  der Voter sind DBAFS-Pfade (`files/kunde/bild.jpg`). Verglichen wurden beide
+  direkt miteinander, also nie dasselbe — die Antwort war „nein" für jeden Pfad,
+  der dem Benutzer gehört.
+
+  Dass das nie gemeldet wurde, liegt an der Richtung: Ein Gate, das alles
+  ablehnt, sieht aus wie ein Gate, das funktioniert.
+
+### Notes
+- Der Smoke-Test legt dafür jetzt einen Benutzer mit genau einem Filemount und
+  `fop` f1–f3 an und prüft beide Seiten: dass die Wurzel nur den eigenen Ordner
+  zeigt, dass eine Suche über alles nichts Fremdes findet — und dass im eigenen
+  Mount weiterhin alles geht. Eine Korrektur, die den Benutzer aus seinem
+  eigenen Ordner aussperrt, ist keine.
+
 ## [1.38.1] – 2026-10-07
 
 > Fehlerbehebung aus dem laufenden Betrieb. Betrifft nur `entity_duplicate` mit

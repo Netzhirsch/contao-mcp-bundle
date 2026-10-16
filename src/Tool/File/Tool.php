@@ -13,6 +13,8 @@ use Contao\File as ContaoFile;
 use Contao\FilesModel;
 use Contao\Folder as ContaoFolder;
 use Contao\StringUtil;
+use Netzhirsch\ContaoMcpBundle\Security\FileScope;
+use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Security\OutboundUrlGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\McpCallContext;
@@ -79,7 +81,25 @@ final class Tool
         private readonly HttpClientInterface $httpClient,
         private readonly OutboundUrlGuard $outboundGuard,
         private readonly McpCallContext $callContext,
+        private readonly McpPermissionGuard $permissionGuard,
     ) {
+    }
+
+    /**
+     * Drops every entry the caller may not see from a listing or a search.
+     *
+     * The permission guard checks the paths a call NAMES; these two tools
+     * return paths nobody named, so they have to ask separately. A folder stays
+     * visible when it leads to a mount — otherwise a user mounted deep could
+     * never navigate to their own folder.
+     */
+    private static function visibleTo(?FileScope $scope, string $dbafsPath, bool $isDir): bool
+    {
+        if ($scope === null) {
+            return true; // admin or trusted mode
+        }
+
+        return $isDir ? $scope->mayDescend($dbafsPath) : $scope->allows($dbafsPath);
     }
 
     /**
@@ -111,6 +131,8 @@ final class Tool
         $entries = array_values(array_filter($entries, static fn (string $n): bool => $n !== '.' && $n !== '..'));
         sort($entries, \SORT_NATURAL | \SORT_FLAG_CASE);
 
+        $scope = $this->permissionGuard->fileScope();
+
         $out = [];
         $matched = 0;
         foreach ($entries as $name) {
@@ -118,6 +140,15 @@ final class Tool
             $isDir = is_dir($childAbs);
             if ($type === 'files' && $isDir) continue;
             if ($type === 'folders' && !$isDir) continue;
+            $relative = ($path === '' ? '' : trim($path, '/').'/').$name;
+            $dbafsPath = $this->paths->toDbafsPath($relative);
+
+            // Before counting: a hidden entry must not show up in `total`
+            // either, or the count alone would report how much lies outside
+            // the caller's mounts.
+            if (!self::visibleTo($scope, $dbafsPath, $isDir)) {
+                continue;
+            }
             ++$matched;
             if ($matched <= $offset) {
                 continue;
@@ -125,8 +156,6 @@ final class Tool
             if (\count($out) >= $limit) {
                 continue;
             }
-            $relative = ($path === '' ? '' : trim($path, '/').'/').$name;
-            $dbafsPath = $this->paths->toDbafsPath($relative);
             $model = FilesModel::findByPath($dbafsPath);
             $out[] = $model !== null
                 ? $this->serializer->summary($model)
@@ -246,6 +275,24 @@ final class Tool
             $finder->files();
         } elseif ($type === 'folders') {
             $finder->directories();
+        }
+
+        $scope = $this->permissionGuard->fileScope();
+
+        // Without a `path` this walks the whole upload tree, and nothing in the
+        // call names a single one of the paths it returns — which is how a
+        // restricted user could read every folder and file name on the install
+        // with one glob. Prune at the directory level so the scan does not even
+        // enter a foreign folder (cheaper than filtering afterwards), and still
+        // test every entry below, because pruning alone would pass the files
+        // sitting directly in an ancestor folder.
+        if ($scope !== null) {
+            $finder->filter(function (\SplFileInfo $entry) use ($scope, $relRoot): bool {
+                $rel = str_replace('\\', '/', $entry->getRelativePathname());
+                $dbafs = $this->paths->toDbafsPath($relRoot === '' ? $rel : $relRoot.'/'.$rel);
+
+                return self::visibleTo($scope, $dbafs, $entry->isDir());
+            }, true); // prune: skip the whole subtree, don't just drop its entries
         }
 
         $matched = 0;

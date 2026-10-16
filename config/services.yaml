@@ -22,6 +22,9 @@ services:
             - '../src/Service/Usage/UsageTarget.php'
             # Refusal is an exception carrying an error code, not a service.
             - '../src/Tool/Extension/OpenGraph/Refusal.php'
+            # Value object describing a caller's file mounts — built by the
+            # permission guard per call, never injected.
+            - '../src/Security/FileScope.php'
 
     # Tools are resolved by php-mcp/server through the PSR-11 container via FQCN.
     # Symfony's service_container only exposes public services, so tools must be public.
@@ -379,6 +382,12 @@ services:
     Netzhirsch\ContaoMcpBundle\Tool\File\PathResolver:
         arguments:
             $projectDir: '%kernel.project_dir%'
+            $uploadPath: '%contao.upload_path%'
+
+    # Same parameter, for the other direction: the guard turns an empty path
+    # argument into the upload root before asking about the mounts.
+    Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard:
+        arguments:
             $uploadPath: '%contao.upload_path%'
 
     # Reads stylesheets/templates off disk to find references that never touch
