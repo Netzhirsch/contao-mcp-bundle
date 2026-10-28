@@ -331,6 +331,14 @@ services:
             $projectDir: '%kernel.project_dir%'
         tags: ['controller.service_arguments']
 
+    # PUT /<path>/upload/<id>: raw bytes for an upload opened with
+    # file_upload_begin, buffered in var/mcp/uploads.
+    Netzhirsch\ContaoMcpBundle\Controller\McpUploadController:
+        public: true
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+        tags: ['controller.service_arguments']
+
     Netzhirsch\ContaoMcpBundle\EventListener\OAuthRateLimitListener:
         arguments:
             $oauthRegisterLimiter: '@netzhirsch_contao_mcp.rate_limiter.oauth_register'

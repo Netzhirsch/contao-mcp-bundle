@@ -58,28 +58,120 @@ final class UploadValidatorTest extends TestCase
     /**
      * @return iterable<string, array{string, string}>
      */
-    public static function activeSvgs(): iterable
+    public static function activeMarkup(): iterable
     {
-        yield 'script element' => ['logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'];
-        yield 'event handler' => ['logo.svg', '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'];
-        yield 'javascript url' => ['logo.svg', '<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>'];
-        yield 'foreign object' => ['logo.svg', '<svg><foreignObject><body>hi</body></foreignObject></svg>'];
-        yield 'entity' => ['logo.svg', '<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg>&xxe;</svg>'];
-        yield 'html file' => ['page.html', '<html><body><script>alert(1)</script></body></html>'];
-        yield 'uppercase tag' => ['logo.svg', '<svg><SCRIPT>alert(1)</SCRIPT></svg>'];
+        yield 'html script' => ['page.html', '<html><body><script>alert(1)</script></body></html>'];
+        yield 'htm handler' => ['page.htm', '<html><body onload="alert(1)"></body></html>'];
+        yield 'xhtml uppercase' => ['page.xhtml', '<html><SCRIPT>alert(1)</SCRIPT></html>'];
+        yield 'xml entity' => ['data.xml', '<!DOCTYPE x [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><x>&xxe;</x>'];
     }
 
     /**
-     * Contao's default upload types include svg, and an SVG is a document: it
-     * runs when a visitor opens it directly, on the site's own origin.
+     * Markup the browser runs from `files/`, and for which there is no
+     * sanitiser: active content is refused.
      */
-    #[DataProvider('activeSvgs')]
-    public function testMarkupCarryingScriptIsRefused(string $name, string $bytes): void
+    #[DataProvider('activeMarkup')]
+    public function testActiveMarkupIsRefused(string $name, string $bytes): void
     {
         $result = $this->validator()->validateContent($name, $bytes);
 
         self::assertFalse($result['ok'], $name);
         self::assertSame('active_content_refused', $result['error']);
+    }
+
+    /**
+     * SVG is cleaned by SvgSanitizer, the way the backend cleans it, so the
+     * content check does not refuse it by pattern any more.
+     */
+    public function testSvgIsLeftToTheSanitiser(): void
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+
+        self::assertTrue($this->validator()->validateContent('logo.svg', $svg)['ok']);
+        self::assertContains('svg', UploadValidator::SVG_EXTENSIONS);
+    }
+
+    /**
+     * The pattern check that remains (HTML, and SVG on a Contao without the
+     * sanitiser) must not fire on a document that merely mentions the word.
+     * It used to refuse any DOCTYPE plus "entity" anywhere — a logo titled
+     * "Corporate Identity" was refused as XXE.
+     */
+    public function testTheWordEntityIsNotAnEntityDeclaration(): void
+    {
+        $svg = "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n<svg><title>Corporate Identity</title></svg>";
+
+        self::assertNull(UploadValidator::activeMarkupIn($svg));
+        self::assertNotNull(UploadValidator::activeMarkupIn('<!DOCTYPE x [<!ENTITY a "b">]><x/>'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function backendNames(): iterable
+    {
+        yield 'question mark' => ['Foto?.png', 'Foto-.png'];
+        yield 'angle brackets' => ['x<y>.png', 'x-y-.png'];
+        yield 'colon' => ['12:30 Termin.pdf', '12-30 Termin.pdf'];
+        yield 'tab' => ["tab\tname.png", 'tabname.png'];
+        yield 'umlauts stay' => ['Grüße aus Köln.png', 'Grüße aus Köln.png'];
+        yield 'hash and spaces stay' => ['Bild #1 (final).png', 'Bild #1 (final).png'];
+    }
+
+    /**
+     * The backend file manager runs every name through
+     * StringUtil::sanitizeFileName(); this path now does too, so a name the
+     * backend would never have stored is not stored here either.
+     */
+    #[DataProvider('backendNames')]
+    public function testNamesAreCleanedLikeTheBackendCleansThem(string $given, string $stored): void
+    {
+        $result = UploadValidator::sanitiseName($given);
+
+        self::assertTrue($result['ok'], $given);
+        self::assertSame($stored, $result['name']);
+    }
+
+    /**
+     * The backend would turn the slash into a dash as well. Here it is a
+     * mistake to point out: the folder belongs in parent_path.
+     */
+    public function testAPathAsNameIsRefusedNotFlattened(): void
+    {
+        $result = UploadValidator::sanitiseName('bilder/logo.png');
+
+        self::assertFalse($result['ok']);
+        self::assertStringContainsString('parent_path', $result['message']);
+    }
+
+    public function testAPdfHeaderMayFollowABom(): void
+    {
+        self::assertTrue($this->validator()->validateContent('doc.pdf', "\xEF\xBB\xBF%PDF-1.7\n")['ok']);
+        self::assertFalse($this->validator()->validateContent('doc.pdf', str_repeat(' ', 2000).'%PDF-1.7')['ok']);
+    }
+
+    /**
+     * WebP lives in a RIFF container like WAV and AVI; "RIFF" alone says
+     * nothing, the format name at byte 8 does.
+     */
+    public function testWebpNeedsItsFormatNameNotJustRiff(): void
+    {
+        $validator = new UploadValidator(new class {
+            public function get(string $key): mixed
+            {
+                return $key === 'uploadTypes' ? 'webp' : null;
+            }
+        });
+
+        self::assertTrue($validator->validateContent('a.webp', 'RIFF'."\x00\x00\x00\x00".'WEBPVP8 ')['ok']);
+        self::assertFalse($validator->validateContent('a.webp', 'RIFF'."\x00\x00\x00\x00".'WAVEfmt ')['ok']);
+    }
+
+    public function testOnlyMarkupIsReadWhole(): void
+    {
+        self::assertTrue(UploadValidator::needsFullContent('HTML'));
+        self::assertFalse(UploadValidator::needsFullContent('jpg'));
+        self::assertFalse(UploadValidator::needsFullContent('svg'));
     }
 
     public function testAPlainSvgIsAccepted(): void

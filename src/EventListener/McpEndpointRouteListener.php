@@ -15,7 +15,7 @@ use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
  *
  * A #[Route] attribute fixes its path when the container is built. This path
  * is changed in the backend at runtime and has to move the endpoint the moment
- * it is saved, not after the next cache:clear — so the four routes that depend
+ * it is saved, not after the next cache:clear — so the routes that depend
  * on it ({@see EndpointPath::route()}) are matched here, just before Symfony's
  * RouterListener (priority 32), which leaves a request alone once it carries a
  * _controller. The attributes set, and the 405 for a method the route does not
@@ -60,7 +60,10 @@ final class McpEndpointRouteListener
             // What the attribute routes declared as their defaults: Contao's
             // frontend firewall and request matchers key on it.
             '_scope' => 'frontend',
-            '_route_params' => ['_scope' => 'frontend'],
-        ]);
+            '_route_params' => ['_scope' => 'frontend'] + ($route['attributes'] ?? []),
+            // None of these routes is a form a browser submits with a session:
+            // they authenticate by bearer token, not by cookie.
+            '_token_check' => false,
+        ] + ($route['attributes'] ?? []));
     }
 }

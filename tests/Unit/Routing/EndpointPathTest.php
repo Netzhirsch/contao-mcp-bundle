@@ -52,17 +52,38 @@ final class EndpointPathTest extends TestCase
         self::assertNull(EndpointPath::problem('contao/mcp', '/admin'));
     }
 
-    public function testTheFourRoutesFollowThePath(): void
+    public function testTheRoutesFollowThePath(): void
     {
         self::assertSame(EndpointPath::ROUTE_ENDPOINT, EndpointPath::route('/ki/mcp', 'ki/mcp')['name'] ?? null);
         self::assertSame(EndpointPath::ROUTE_HEALTHZ, EndpointPath::route('/ki/mcp/healthz', 'ki/mcp')['name'] ?? null);
         self::assertSame(EndpointPath::ROUTE_AS_METADATA, EndpointPath::route('/ki/mcp/.well-known/oauth-authorization-server', 'ki/mcp')['name'] ?? null);
         self::assertSame(EndpointPath::ROUTE_PRM, EndpointPath::route('/.well-known/oauth-protected-resource/ki/mcp', 'ki/mcp')['name'] ?? null);
+        self::assertSame(EndpointPath::ROUTE_UPLOAD, EndpointPath::route('/ki/mcp/upload/'.str_repeat('a1', 16), 'ki/mcp')['name'] ?? null);
+    }
+
+    /**
+     * The upload id is the only part of a path any route takes from it; it
+     * reaches the controller as a request attribute, and only PUT is taken.
+     */
+    public function testTheUploadRouteCarriesItsIdAndTakesOnlyPut(): void
+    {
+        $id = str_repeat('0f', 16);
+        $route = EndpointPath::route('/mcp/upload/'.$id, 'mcp');
+
+        self::assertSame(['upload_id' => $id], $route['attributes'] ?? null);
+        self::assertSame(['PUT'], $route['methods'] ?? null);
     }
 
     public function testNothingElseIsClaimed(): void
     {
-        foreach (['/mcp', '/mcp/healthz', '/ki/mcp/', '/ki/mcpx', '/x/ki/mcp', '/.well-known/oauth-protected-resource', '/'] as $pathInfo) {
+        $id = str_repeat('a', 32);
+
+        foreach ([
+            '/mcp', '/mcp/healthz', '/ki/mcp/', '/ki/mcpx', '/x/ki/mcp', '/.well-known/oauth-protected-resource', '/',
+            // Anything but exactly 32 lower-case hex characters is not an upload.
+            '/ki/mcp/upload/', '/ki/mcp/upload/'.substr($id, 1), '/ki/mcp/upload/'.$id.'a', '/ki/mcp/upload/'.strtoupper($id),
+            '/ki/mcp/upload/'.$id.'/', '/ki/mcp/upload/../'.$id, '/mcp/upload/'.$id,
+        ] as $pathInfo) {
             self::assertNull(EndpointPath::route($pathInfo, 'ki/mcp'), $pathInfo);
         }
     }

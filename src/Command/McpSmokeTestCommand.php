@@ -133,6 +133,7 @@ final class McpSmokeTestCommand extends Command
         private readonly McpController $mcpController,
         private readonly RegisterController $registerController,
         private readonly McpServerConfigStorage $configStorage,
+        private readonly \Netzhirsch\ContaoMcpBundle\Controller\McpUploadController $uploadController,
         private readonly string $projectDir,
     ) {
         parent::__construct();
@@ -3107,6 +3108,8 @@ final class McpSmokeTestCommand extends Command
         $this->connection->delete('tl_module', ['id' => $usageModuleId]);
         $this->connection->delete('tl_page', ['id' => $usagePageId]);
 
+        $this->checkUploads($expect, $output, $stamp);
+
         // ═══════════════════════ Public folders ════════════════════
         // Everything served straight from the web root — webfonts, own JS,
         // favicons — depends on this marker. Without the tool the last step of
@@ -5153,6 +5156,214 @@ final class McpSmokeTestCommand extends Command
         }
 
         return $failed === 0 ? Command::SUCCESS : Command::FAILURE;
+    }
+
+    /**
+     * Every way a file gets into files/ through MCP, end to end against the
+     * real Contao: inline, in slices, by direct PUT — plus what the backend does
+     * to an upload and this path now does too (name, SVG, image size, the
+     * postUpload hook).
+     *
+     * There was no such section before 1.39.0. The chunked upload of 1.36.0
+     * never ran against a real installation in this test, which is how its
+     * chunk size — five times what the tools themselves called unreliable —
+     * went out unnoticed.
+     *
+     * @param callable(string, mixed, callable): void $expect
+     */
+    private function checkUploads(callable $expect, OutputInterface $output, string $stamp): void
+    {
+        $output->writeln("\n<comment>Datei-Upload</comment>");
+
+        $dir = $stamp.'_upload';
+        $this->fileTool->folderCreate('', $dir);
+        $abs = $this->projectDir.'/files/'.$dir;
+        $png = "\x89PNG\r\n\x1A\n".random_bytes(2000);
+        $stored = static fn (string $name): string|false => @file_get_contents($abs.'/'.$name);
+
+        try {
+            // ── One-shot ─────────────────────────────────────────────────
+            $inline = $this->fileTool->upload($dir, 'inline.png', base64_encode($png));
+            $expect('inline upload stores the exact bytes and gets a UUID', $inline,
+                fn ($r) => ($r['uploaded'] ?? false) === true && \is_string($r['uuid'] ?? null) && $stored('inline.png') === $png);
+
+            $expect('a wrong sha256 stores nothing',
+                $this->fileTool->upload($dir, 'mismatch.png', base64_encode($png), false, null, null, str_repeat('0', 64)),
+                fn ($r) => ($r['error'] ?? '') === 'checksum_mismatch' && $stored('mismatch.png') === false);
+
+            $expect('a name is cleaned like the backend cleans it',
+                $this->fileTool->upload($dir, 'Foto?.png', base64_encode($png)),
+                fn ($r) => ($r['name_changed_from'] ?? '') === 'Foto?.png' && $stored('Foto-.png') === $png);
+
+            $expect('a path as name is refused, not flattened',
+                $this->fileTool->upload($dir, 'sub/x.png', base64_encode($png)),
+                fn ($r) => ($r['error'] ?? '') === 'invalid_filename');
+
+            $expect('overwrite without permission is refused',
+                $this->fileTool->upload($dir, 'inline.png', base64_encode($png)),
+                fn ($r) => ($r['error'] ?? '') === 'file_exists');
+
+            $replacement = "\x89PNG\r\n\x1A\n".random_bytes(900);
+            $overwritten = $this->fileTool->upload($dir, 'inline.png', base64_encode($replacement), true);
+            $expect('overwrite replaces the bytes and keeps the UUID', $overwritten,
+                fn ($r) => ($r['uuid'] ?? null) === ($inline['uuid'] ?? 'x') && $stored('inline.png') === $replacement);
+            $expect('and leaves no partial file behind',
+                glob($abs.'/.mcp-upload-*') ?: [],
+                fn ($r) => $r === []);
+
+            // ── Chunked ──────────────────────────────────────────────────
+            $big = "\x89PNG\r\n\x1A\n".random_bytes(70000);
+            $begin = $this->fileTool->uploadBegin($dir, 'chunked.png', \strlen($big), false, null, hash('sha256', $big));
+            $id = (string) ($begin['upload_id'] ?? '');
+            $expect('begin recommends a chunk below where inline base64 breaks', $begin,
+                fn ($r) => $id !== '' && ($r['chunk_size_recommended'] ?? 0) <= 37500);
+
+            $slices = str_split($big, 32768);
+            $expect('a slice that does not match its declared size is refused and not appended',
+                $this->fileTool->uploadChunk($id, 0, base64_encode(substr($slices[0], 0, 100)), 32768),
+                fn ($r) => ($r['error'] ?? '') === 'chunk_truncated');
+            $expect('a slice that does not match its sha256 is refused',
+                $this->fileTool->uploadChunk($id, 0, base64_encode($slices[0]), null, str_repeat('0', 64)),
+                fn ($r) => ($r['error'] ?? '') === 'chunk_checksum_mismatch');
+
+            $last = [];
+            foreach ($slices as $i => $slice) {
+                $last = $this->fileTool->uploadChunk($id, $i, base64_encode($slice), \strlen($slice), hash('sha256', $slice));
+            }
+            $expect('after a refused slice the same sequence still goes through', $last,
+                fn ($r) => ($r['complete'] ?? false) === true);
+            $expect('finish stores the exact bytes', $this->fileTool->uploadFinish($id),
+                fn ($r) => ($r['uploaded'] ?? false) === true && $stored('chunked.png') === $big);
+
+            // ── Direct PUT ───────────────────────────────────────────────
+            $direct = "%PDF-1.7\n".random_bytes(300000);
+            $begin = $this->fileTool->uploadBegin($dir, 'direct.pdf', \strlen($direct));
+            $token = substr((string) ($begin['direct_upload']['headers']['Authorization'] ?? ''), 7);
+            $expect('begin hands out a direct upload with a token and a curl line', $begin,
+                fn ($r) => \strlen($token) === 64 && str_contains((string) ($r['direct_upload']['curl'] ?? ''), '--data-binary'));
+
+            $put = function (string $id, string $token, int $offset, string $body): \Symfony\Component\HttpFoundation\JsonResponse {
+                $request = \Symfony\Component\HttpFoundation\Request::create('/mcp/upload/'.$id, 'PUT', [], [], [], [
+                    'HTTP_AUTHORIZATION' => 'Bearer '.$token,
+                    'HTTP_UPLOAD_OFFSET' => (string) $offset,
+                    'CONTENT_TYPE' => 'application/octet-stream',
+                ], $body);
+                $request->attributes->set('upload_id', $id);
+
+                return ($this->uploadController)($request);
+            };
+
+            $directId = (string) ($begin['upload_id'] ?? '');
+            $expect('a PUT with a wrong token is a 404',
+                $put($directId, str_repeat('0', 64), 0, $direct)->getStatusCode(),
+                fn ($r) => $r === 404);
+            $expect('the first half arrives',
+                $put($directId, $token, 0, substr($direct, 0, 150000))->getStatusCode(),
+                fn ($r) => $r === 200);
+            $expect('a repeated first half is refused with the offset to resume at',
+                json_decode((string) $put($directId, $token, 0, substr($direct, 0, 150000))->getContent(), true),
+                fn ($r) => ($r['received_bytes'] ?? 0) === 150000);
+            $expect('the second half completes it',
+                json_decode((string) $put($directId, $token, 150000, substr($direct, 150000))->getContent(), true),
+                fn ($r) => ($r['complete'] ?? false) === true);
+            $expect('finish stores the PUT bytes exactly', $this->fileTool->uploadFinish($directId),
+                fn ($r) => ($r['uploaded'] ?? false) === true && $stored('direct.pdf') === $direct);
+
+            // ── SVG ──────────────────────────────────────────────────────
+            if (class_exists(\enshrined\svgSanitize\Sanitizer::class)) {
+                $illustrator = "<?xml version=\"1.0\"?>\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\" [\n\t<!ENTITY ns_ai \"http://ns.adobe.com/AdobeIllustrator/10.0/\">\n]>\n"
+                    .'<svg xmlns:i="&ns_ai;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>Corporate Identity</title><rect width="10" height="10"/></svg>';
+                $expect('an Illustrator SVG is accepted and stored as valid XML',
+                    $this->fileTool->upload($dir, 'logo.svg', base64_encode($illustrator)),
+                    fn ($r) => ($r['uploaded'] ?? false) === true && (new \DOMDocument())->loadXML((string) $stored('logo.svg'), LIBXML_NONET));
+
+                $scripted = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect width="1" height="1"/></svg>';
+                $expect('script in an SVG is removed and reported',
+                    $this->fileTool->upload($dir, 'scripted.svg', base64_encode($scripted)),
+                    fn ($r) => ($r['sanitized']['removed'] ?? []) !== [] && !str_contains((string) $stored('scripted.svg'), '<script'));
+
+                // A refused finish keeps the session so it can be repeated —
+                // which only works if sanitising did not rewrite the buffer.
+                $begin = $this->fileTool->uploadBegin($dir, 'late.svg', \strlen($scripted));
+                $lateId = (string) ($begin['upload_id'] ?? '');
+                $this->fileTool->uploadChunk($lateId, 0, base64_encode($scripted));
+                file_put_contents($abs.'/late.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+                $expect('a finish refused because the file appeared meanwhile keeps the session',
+                    $this->fileTool->uploadFinish($lateId),
+                    fn ($r) => ($r['error'] ?? '') === 'file_exists');
+                unlink($abs.'/late.svg');
+                $expect('and the same session finishes once the way is clear',
+                    $this->fileTool->uploadFinish($lateId),
+                    fn ($r) => ($r['uploaded'] ?? false) === true && !str_contains((string) $stored('late.svg'), '<script'));
+            }
+
+            // ── Backend parity: image size and postUpload ────────────────
+            if (\function_exists('imagecreatetruecolor')) {
+                $image = imagecreatetruecolor(300, 200);
+                ob_start();
+                imagepng($image);
+                $wide = (string) ob_get_clean();
+
+                $width = \Contao\Config::get('imageWidth');
+                $height = \Contao\Config::get('imageHeight');
+                \Contao\Config::set('imageWidth', 100);
+                \Contao\Config::set('imageHeight', 100);
+
+                try {
+                    $resized = $this->fileTool->upload($dir, 'wide.png', base64_encode($wide));
+                } finally {
+                    \Contao\Config::set('imageWidth', $width);
+                    \Contao\Config::set('imageHeight', $height);
+                }
+
+                $expect('an image above the configured size is scaled like in the backend', $resized,
+                    fn ($r) => ($r['resized_to']['width'] ?? 0) === 100 && (getimagesize($abs.'/wide.png')[0] ?? 0) === 100);
+            } else {
+                $output->writeln('  <fg=yellow>⊝ no GD — skipping the image scaling check</>');
+            }
+
+            $hooks = $GLOBALS['TL_HOOKS']['postUpload'] ?? null;
+            $seen = [];
+            $GLOBALS['TL_HOOKS']['postUpload'] = [
+                static function (array $paths) use (&$seen): void { $seen = $paths; },
+                static function (): void { throw new \RuntimeException('hook broke'); },
+            ];
+
+            try {
+                $hooked = $this->fileTool->upload($dir, 'hooked.png', base64_encode($png));
+            } finally {
+                if ($hooks === null) {
+                    unset($GLOBALS['TL_HOOKS']['postUpload']);
+                } else {
+                    $GLOBALS['TL_HOOKS']['postUpload'] = $hooks;
+                }
+            }
+
+            $expect('the postUpload hook sees the new file, as in the backend',
+                $seen, fn ($r) => $r === ['files/'.$dir.'/hooked.png']);
+            $expect('a failing hook is reported, the upload still stands', $hooked,
+                fn ($r) => ($r['uploaded'] ?? false) === true && \count($r['warnings'] ?? []) === 1);
+
+            // ── Limits ───────────────────────────────────────────────────
+            $opened = [];
+            $refused = null;
+            for ($i = 0; $i <= \Netzhirsch\ContaoMcpBundle\Tool\File\UploadSessions::MAX_OPEN_PER_USER; ++$i) {
+                $r = $this->fileTool->uploadBegin($dir, 'open'.$i.'.png', 10);
+                if (isset($r['upload_id'])) {
+                    $opened[] = $r['upload_id'];
+                } else {
+                    $refused = $r;
+                    break;
+                }
+            }
+            $expect('open uploads are capped per user', $refused,
+                fn ($r) => ($r['error'] ?? '') === 'too_many_uploads');
+            foreach ($opened as $openId) {
+                $this->fileTool->uploadAbort($openId);
+            }
+        } finally {
+            $this->fileTool->folderDelete($dir, true, true);
+        }
     }
 
     /**

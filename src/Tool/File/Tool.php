@@ -13,17 +13,20 @@ use Contao\File as ContaoFile;
 use Contao\FilesModel;
 use Contao\Folder as ContaoFolder;
 use Contao\StringUtil;
+use Contao\System;
+use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
+use Netzhirsch\ContaoMcpBundle\Routing\EndpointPath;
 use Netzhirsch\ContaoMcpBundle\Security\FileScope;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
-use Netzhirsch\ContaoMcpBundle\Security\OutboundUrlGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\McpCallContext;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use PhpMcp\Server\Attributes\McpTool;
 use PhpMcp\Server\Attributes\Schema;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\DependencyInjection\ParameterBag\ContainerBagInterface;
 use Symfony\Component\Finder\Finder;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * MCP facade for tl_files (Contao's file manager).
@@ -68,8 +71,11 @@ final class Tool
      */
     private const SEARCH_MAX_VISITED = 100_000;
 
-    /** Hard ceiling for a source_url pull before the configured maxFileSize check. */
-    private const SOURCE_URL_MAX_BYTES = 64 * 1024 * 1024; // 64 MB
+    /**
+     * Formats the backend holds to tl_settings.imageWidth / imageHeight — the
+     * list Contao's FileUpload uses.
+     */
+    private const RASTER_EXTENSIONS = ['gif', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'heic', 'jxl'];
 
     public function __construct(
         private readonly ContaoFramework $framework,
@@ -78,10 +84,12 @@ final class Tool
         private readonly Serializer $serializer,
         private readonly AuthorResolver $authorResolver,
         private readonly string $projectDir,
-        private readonly HttpClientInterface $httpClient,
-        private readonly OutboundUrlGuard $outboundGuard,
+        private readonly SourceUrlFetcher $sourceUrls,
         private readonly McpCallContext $callContext,
         private readonly McpPermissionGuard $permissionGuard,
+        private readonly RequestStack $requestStack,
+        private readonly McpServerConfigStorage $configStorage,
+        private readonly ContainerBagInterface $parameters,
     ) {
     }
 
@@ -531,7 +539,30 @@ final class Tool
      */
     #[McpTool(
         name: 'file_upload',
-        description: 'Uploads a new file. parent_path is the destination folder relative to the upload directory ("" for root). Provide the content EITHER as content_base64 (raw bytes, base-64) OR as source_url (the server pulls the file itself — REQUIRED for files above ~50 KB, since inline base64 is truncated by the MCP transport). source_url must be http/https to a public host (private/loopback/link-local addresses are refused). If the bytes are yours and there is no URL to give — a file you just produced — use file_upload_begin / file_upload_chunk / file_upload_finish instead; that path has no size ceiling. Validates extension against tl_settings.uploadTypes and size against tl_settings.maxFileSize. Refuses to overwrite by default (pass overwrite=true). meta is an optional {locale: {title, alt, link, caption}} dict. Logged to tl_log.',
+        description: <<<'DESC'
+            Uploads a new file in ONE call. parent_path is the destination folder relative
+            to the upload directory ("" for the root), name is only the file name.
+
+            Pick the way the bytes travel by what you have:
+              - You can run a shell command → file_upload_begin, then PUT the raw file to
+                the direct_upload URL it returns (one curl call, the bytes never pass
+                through you), then file_upload_finish. Works for any size up to the limit.
+              - The file is on a public http(s) URL → source_url; the server pulls it
+                (redirects are followed, private/loopback addresses are refused).
+              - Small text you produced yourself (SVG, CSV, TXT, JSON) → content_base64.
+                Keep inline base64 under ~30 KB of raw data: longer strings get cut or
+                garbled in the tool call. Pass sha256 if you can compute it.
+              - Larger bytes and no shell → file_upload_begin / file_upload_chunk.
+
+            The name is cleaned the way the Contao backend cleans it (`: * ? " < > |` and
+            control characters become `-`); the answer says so if it changed. SVGs are
+            sanitised exactly like a backend upload (scripts, event handlers, external
+            references removed). Images larger than the configured maximum dimensions are
+            scaled down, as in the backend. Validates extension against
+            tl_settings.uploadTypes and size against tl_settings.maxFileSize. Refuses to
+            overwrite by default (pass overwrite=true). meta is an optional
+            {locale: {title, alt, link, caption}} dict. Logged to tl_log.
+            DESC,
     )]
     public function upload(
         string $parent_path,
@@ -540,9 +571,9 @@ final class Tool
         bool $overwrite = false,
         #[Schema(type: 'object', additionalProperties: self::META_ITEM_SCHEMA, description: 'Localised file metadata: {locale: {title, alt, link, caption}}. Example: {"de": {"title": "…"}}.')] mixed $meta = null,
         ?string $source_url = null,
+        ?string $sha256 = null,
     ): array {
         $this->framework->initialize();
-        $validator = $this->makeValidator();
 
         try {
             $parentAbs = $this->paths->resolveAbsolute($parent_path);
@@ -553,44 +584,86 @@ final class Tool
             return ['error' => 'parent_not_found', 'message' => "Parent folder is not a directory: {$parent_path}"];
         }
 
+        if ($sha256 !== null && preg_match('/^[0-9a-fA-F]{64}$/', $sha256) !== 1) {
+            return ['error' => 'invalid_input', 'message' => 'sha256 must be 64 hex characters, or omitted.'];
+        }
+
         // Obtain the bytes from exactly one source: a server-side URL pull
         // (robust for large files) or inline base64 (fine for small files).
         $hasUrl = $source_url !== null && $source_url !== '';
         if ($hasUrl && $content_base64 !== '') {
             return ['error' => 'invalid_input', 'message' => 'Provide either content_base64 OR source_url, not both.'];
         }
-        if ($hasUrl) {
-            [$bytes, $err] = $this->fetchFromUrl($source_url);
-            if ($err !== null) {
-                return $err;
-            }
-        } else {
-            if ($content_base64 === '') {
-                return ['error' => 'invalid_input', 'message' => 'Provide content_base64 (small files) or source_url (large files).'];
-            }
-            // Strip whitespace before strict decoding: MCP/LLM transports often
-            // line-wrap or pad large base64 strings, and base64_decode(strict)
-            // rejects ANY non-alphabet char (incl. \n) — a wrapped-but-valid
-            // payload would otherwise fail as "invalid_base64". Tolerate padding.
-            $clean = preg_replace('/\s+/', '', $content_base64) ?? $content_base64;
-            $bytes = base64_decode($clean, true);
-            if ($bytes === false) {
-                // Diagnostics: length + tail reveal truncation (the inline transport
-                // truncates very large strings — use source_url for the robust path).
-                $len = \strlen($content_base64);
-                return [
-                    'error' => 'invalid_base64',
-                    'message' => sprintf(
-                        'content_base64 is not valid base64 after whitespace stripping. Received %d chars (tail: "%s"). Inline base64 is unreliable above ~50–60 KB binary (the transport truncates the string); use source_url to let the server pull the file instead.',
-                        $len,
-                        substr($clean, -24),
-                    ),
-                    'received_length' => $len,
-                ];
-            }
+        if (!$hasUrl && $content_base64 === '') {
+            return ['error' => 'invalid_input', 'message' => 'Provide content_base64 (small files) or source_url (a file on a public URL). For anything else, use file_upload_begin.'];
         }
 
-        return $this->storeBytes($parent_path, $parentAbs, $name, $bytes, $overwrite, $meta);
+        // Name, extension and an existing target, judged before fetching
+        // anything: none of them should cost a 30 MB download first.
+        $named = UploadValidator::sanitiseName($name);
+        if (!$named['ok']) {
+            return ['error' => $named['error'], 'message' => $named['message']];
+        }
+        $early = $this->makeValidator()->validateUpload($named['name'], 0);
+        if (!($early['ok'] ?? false)) {
+            unset($early['ok']);
+
+            return $early;
+        }
+        if (!$overwrite && file_exists($parentAbs.\DIRECTORY_SEPARATOR.$named['name'])) {
+            $target = ($parent_path === '' ? '' : trim($parent_path, '/').'/').$named['name'];
+
+            return ['error' => 'file_exists', 'message' => "File already exists: {$target}. Pass overwrite=true to replace."];
+        }
+
+        $sessions = $this->sessions();
+        $tmp = $sessions->tempFile();
+
+        try {
+            if ($hasUrl) {
+                $error = $this->sourceUrls->fetchToFile((string) $source_url, $tmp, $this->makeValidator()->maxFileSize());
+                if ($error !== null) {
+                    return $error;
+                }
+            } else {
+                // Strip whitespace before strict decoding: transports often
+                // line-wrap or pad large base64 strings, and base64_decode(strict)
+                // rejects ANY non-alphabet char (incl. \n).
+                $clean = preg_replace('/\s+/', '', $content_base64) ?? $content_base64;
+                $bytes = base64_decode($clean, true);
+
+                if ($bytes === false) {
+                    $len = \strlen($content_base64);
+
+                    return [
+                        'error' => 'invalid_base64',
+                        'message' => sprintf(
+                            'content_base64 is not valid base64 after whitespace stripping. Received %d chars (tail: "%s"). A long base64 argument is where uploads break: it gets cut off or garbled on the way. Use file_upload_begin — with a shell, PUT the file to its direct_upload URL; without one, send it in file_upload_chunk slices of %d bytes.',
+                            $len,
+                            substr($clean, -24),
+                            UploadSessions::CHUNK_SIZE_RECOMMENDED,
+                        ),
+                        'received_length' => $len,
+                    ];
+                }
+
+                if (false === @file_put_contents($tmp, $bytes)) {
+                    return ['error' => 'write_failed', 'message' => 'Could not buffer the upload in var/mcp/uploads.'];
+                }
+                unset($bytes, $clean);
+            }
+
+            if ($sha256 !== null && strtolower($sha256) !== hash_file('sha256', $tmp)) {
+                return [
+                    'error' => 'checksum_mismatch',
+                    'message' => sprintf('What arrived (%d bytes) does not match the sha256 you gave. Nothing was stored. If you sent base64 inline, it was most likely changed on the way — use file_upload_begin instead.', (int) filesize($tmp)),
+                ];
+            }
+
+            return $this->storeFile($parent_path, $parentAbs, $name, $tmp, $overwrite, $meta);
+        } finally {
+            @unlink($tmp);
+        }
     }
 
     /**
@@ -599,22 +672,25 @@ final class Tool
     #[McpTool(
         name: 'file_upload_begin',
         description: <<<'DESC'
-            Opens a chunked upload, for bytes you hold yourself and cannot put on a
-            public URL. Use this instead of file_upload whenever the file is above
-            ~50 KB: inline base64 is truncated by the transport, and source_url needs
-            a host the server can reach.
+            Opens an upload for bytes you hold yourself. Everything that can be checked
+            before a byte is sent is checked here — destination folder and your rights
+            there, file name, extension against tl_settings.uploadTypes, the declared
+            size against tl_settings.maxFileSize, and the meta payload.
 
-            Everything that can be checked before a byte is sent is checked here —
-            destination folder, file name, extension against tl_settings.uploadTypes,
-            the declared size against tl_settings.maxFileSize, and the meta payload.
-            You will not transfer a megabyte only to be told the extension is refused.
+            Pass total_size_bytes exactly; pass sha256 of the whole file if you can, so
+            the server verifies what arrived.
 
-            Pass total_size_bytes exactly: the transfer is rejected if the sum of the
-            chunks does not match it. Pass sha256 of the whole file to have the server
-            verify what arrived.
+            Then send the bytes ONE of two ways:
+              1. direct_upload (preferred whenever you can run a command): PUT the raw
+                 file to direct_upload.url with the headers given — the answer contains a
+                 ready curl line. The bytes never pass through you, so size and
+                 base64 errors stop mattering. If the server answers 413 (a web-server
+                 body limit), send it in several PUTs, each with Upload-Offset set to the
+                 bytes already received.
+              2. file_upload_chunk, in slices of chunk_size_recommended raw bytes.
 
-            Returns upload_id, the recommended chunk size and when the session expires.
-            Then call file_upload_chunk in order, then file_upload_finish.
+            Finally call file_upload_finish. An idle upload expires after
+            expires_in_seconds; every received slice resets that clock.
             DESC,
     )]
     public function uploadBegin(
@@ -645,8 +721,16 @@ final class Tool
             return ['error' => 'invalid_input', 'message' => 'sha256 must be 64 hex characters, or omitted.'];
         }
 
+        // The name the file will really get — the target path reported back
+        // must be the one finish writes to.
+        $named = UploadValidator::sanitiseName($name);
+
+        if (!$named['ok']) {
+            return ['error' => $named['error'], 'message' => $named['message']];
+        }
+
         // Name, extension and size, judged now rather than after the transfer.
-        $validation = $this->makeValidator()->validateUpload($name, $total_size_bytes);
+        $validation = $this->makeValidator()->validateUpload($named['name'], $total_size_bytes);
 
         if (!($validation['ok'] ?? false)) {
             unset($validation['ok']);
@@ -662,14 +746,23 @@ final class Tool
             }
         }
 
-        $targetRelative = ($parent_path === '' ? '' : trim($parent_path, '/').'/').$name;
+        $targetRelative = ($parent_path === '' ? '' : trim($parent_path, '/').'/').$named['name'];
 
-        if (file_exists($parentAbs.\DIRECTORY_SEPARATOR.$name) && !$overwrite) {
+        if (file_exists($parentAbs.\DIRECTORY_SEPARATOR.$named['name']) && !$overwrite) {
             return ['error' => 'file_exists', 'message' => "File already exists: {$targetRelative}. Pass overwrite=true to replace."];
         }
 
         $sessions = $this->sessions();
         $sessions->sweep();
+
+        $userId = $this->callContext->getUserId();
+
+        if ($sessions->openFor($userId) >= UploadSessions::MAX_OPEN_PER_USER) {
+            return [
+                'error' => 'too_many_uploads',
+                'message' => sprintf('You have %d unfinished uploads open. Finish or abort one (file_upload_abort) before starting another; idle ones expire after %d minutes.', UploadSessions::MAX_OPEN_PER_USER, intdiv(UploadSessions::TTL_SECONDS, 60)),
+            ];
+        }
 
         try {
             $id = $sessions->create([
@@ -679,20 +772,28 @@ final class Tool
                 'overwrite' => $overwrite,
                 'meta' => $meta,
                 'sha256' => $sha256 === null ? null : strtolower($sha256),
-                'user_id' => $this->callContext->getUserId(),
+                'user_id' => $userId,
             ]);
+            $token = $sessions->issueDirectToken($id);
         } catch (\Throwable $e) {
             return ToolError::opaque($this->logger, $e, 'upload_begin_failed', ['parent_path' => $parent_path]);
         }
 
-        return [
+        $answer = [
             'upload_id' => $id,
             'target_path' => $targetRelative,
             'total_size_bytes' => $total_size_bytes,
+            'direct_upload' => $this->directUploadInfo($id, $token),
             'chunk_size_recommended' => UploadSessions::CHUNK_SIZE_RECOMMENDED,
             'expires_in_seconds' => UploadSessions::TTL_SECONDS,
             'next_sequence' => 0,
         ];
+
+        if ($named['name'] !== trim($name)) {
+            $answer['name_changed_from'] = $name;
+        }
+
+        return $answer;
     }
 
     /**
@@ -701,82 +802,100 @@ final class Tool
     #[McpTool(
         name: 'file_upload_chunk',
         description: <<<'DESC'
-            Sends the next slice of a chunked upload. sequence starts at 0 and must go
-            up by one each call — the answer tells you the next one it expects, so a
-            lost or repeated call is refused instead of silently corrupting the file.
+            Sends the next slice of an upload opened with file_upload_begin. Use this
+            only when you cannot run a command — otherwise PUT the whole file to the
+            direct_upload URL instead.
 
-            content_base64 is that slice of the RAW file, base-64 encoded. Do not
-            base64 the whole file and then cut the base64 string: slice the bytes,
-            encode each slice.
+            sequence starts at 0 and goes up by one each call; the answer says which
+            one it expects next, so a lost or repeated call is refused instead of
+            corrupting the file.
 
-            The running total may not exceed the declared total_size_bytes.
+            content_base64 is that slice of the RAW file, base-64 encoded. Slice the
+            bytes, encode each slice — do not base64 the whole file and cut the string.
+            Keep slices at chunk_size_recommended raw bytes or less.
+
+            Pass size_bytes (the raw length of this slice) and, if you can, sha256 of
+            the slice: a slice that was cut or changed on the way is then refused on
+            its own, and you resend just that one instead of discovering a broken
+            file at the end. The answer reports chunk_bytes either way — compare it.
             DESC,
     )]
-    public function uploadChunk(string $upload_id, int $sequence, string $content_base64): array
+    public function uploadChunk(string $upload_id, int $sequence, string $content_base64, ?int $size_bytes = null, ?string $sha256 = null): array
     {
         $sessions = $this->sessions();
-        $manifest = $sessions->load($upload_id);
-
-        if ($manifest === null) {
-            return [
-                'error' => 'upload_not_found',
-                'message' => 'No open upload with that id — it was never started, already finished, or expired. Start a new one with file_upload_begin.',
-            ];
-        }
-
-        if (($denied = $this->denyForeignSession($manifest)) !== null) {
-            return $denied;
-        }
-
-        $expected = (int) $manifest['next_sequence'];
-
-        if ($sequence !== $expected) {
-            return [
-                'error' => 'out_of_sequence',
-                'message' => sprintf('Expected sequence %d, got %d. Chunks must arrive in order and exactly once.', $expected, $sequence),
-                'next_sequence' => $expected,
-                'received_bytes' => (int) $manifest['received_bytes'],
-            ];
-        }
-
         $clean = preg_replace('/\s+/', '', $content_base64) ?? $content_base64;
         $bytes = base64_decode($clean, true);
 
         if ($bytes === false || $bytes === '') {
             return [
                 'error' => 'invalid_base64',
-                'message' => 'content_base64 is not valid base64 after whitespace stripping, or decoded to nothing.',
+                'message' => 'content_base64 is not valid base64 after whitespace stripping, or decoded to nothing. Nothing was appended; resend this slice, smaller if it keeps failing.',
             ];
         }
 
-        $total = (int) $manifest['total_size_bytes'];
-        $after = (int) $manifest['received_bytes'] + \strlen($bytes);
-
-        if ($after > $total) {
-            $sessions->discard($upload_id);
-
+        if ($size_bytes !== null && $size_bytes !== \strlen($bytes)) {
             return [
-                'error' => 'size_exceeded',
-                'message' => sprintf(
-                    'The chunks add up to %d bytes, more than the %d declared at begin. The upload was discarded.',
-                    $after,
-                    $total,
-                ),
+                'error' => 'chunk_truncated',
+                'message' => sprintf('This slice decoded to %d bytes, not the %d you declared — it was cut or changed on the way. Nothing was appended; resend it, smaller if it keeps happening.', \strlen($bytes), $size_bytes),
+                'chunk_bytes' => \strlen($bytes),
+            ];
+        }
+
+        if ($sha256 !== null && strtolower($sha256) !== hash('sha256', $bytes)) {
+            return [
+                'error' => 'chunk_checksum_mismatch',
+                'message' => 'This slice does not match the sha256 you gave — it was changed on the way. Nothing was appended; resend it.',
+                'chunk_bytes' => \strlen($bytes),
             ];
         }
 
         try {
-            $manifest = $sessions->append($manifest, $bytes);
+            $result = $sessions->locked($upload_id, function (array $manifest) use ($sessions, $upload_id, $sequence, $bytes): array {
+                if (($denied = $this->denyForeignSession($manifest)) !== null) {
+                    return $denied;
+                }
+
+                $expected = (int) $manifest['next_sequence'];
+
+                if ($sequence !== $expected) {
+                    return [
+                        'error' => 'out_of_sequence',
+                        'message' => sprintf('Expected sequence %d, got %d. Chunks must arrive in order and exactly once.', $expected, $sequence),
+                        'next_sequence' => $expected,
+                        'received_bytes' => (int) $manifest['received_bytes'],
+                    ];
+                }
+
+                $total = (int) $manifest['total_size_bytes'];
+                $after = (int) $manifest['received_bytes'] + \strlen($bytes);
+
+                if ($after > $total) {
+                    $sessions->discard($upload_id);
+
+                    return [
+                        'error' => 'size_exceeded',
+                        'message' => sprintf('The chunks add up to %d bytes, more than the %d declared at begin. The upload was discarded.', $after, $total),
+                    ];
+                }
+
+                $manifest = $sessions->append($manifest, $bytes);
+
+                return [
+                    'accepted' => true,
+                    'chunk_bytes' => \strlen($bytes),
+                    'received_bytes' => (int) $manifest['received_bytes'],
+                    'remaining_bytes' => $total - (int) $manifest['received_bytes'],
+                    'next_sequence' => (int) $manifest['next_sequence'],
+                    'complete' => (int) $manifest['received_bytes'] === $total,
+                ];
+            });
         } catch (\Throwable $e) {
             return ToolError::opaque($this->logger, $e, 'upload_chunk_failed', ['upload_id' => $upload_id]);
         }
 
-        return [
-            'accepted' => true,
-            'received_bytes' => (int) $manifest['received_bytes'],
-            'remaining_bytes' => $total - (int) $manifest['received_bytes'],
-            'next_sequence' => (int) $manifest['next_sequence'],
-            'complete' => (int) $manifest['received_bytes'] === $total,
+        return $result ?? [
+            'error' => 'upload_not_found',
+            'message' => 'No open upload with that id — it was never started, already finished, or expired. Start a new one with file_upload_begin.',
         ];
     }
 
@@ -786,13 +905,13 @@ final class Tool
     #[McpTool(
         name: 'file_upload_finish',
         description: <<<'DESC'
-            Completes a chunked upload: checks that the chunks add up to the declared
-            size, verifies sha256 when one was given, and only then runs the same
-            content checks a one-shot file_upload runs — magic bytes against the
-            extension, active markup, the overwrite decision — before the file is
-            written and registered in tl_files.
+            Completes an upload: checks that what arrived adds up to the declared size,
+            verifies sha256 when one was given, and only then runs the same checks and
+            steps a one-shot file_upload runs — name cleanup, magic bytes against the
+            extension, SVG sanitising, image scaling, the overwrite decision — before
+            the file is written and registered in tl_files.
 
-            Those checks deliberately happen here and not per chunk: a single slice
+            Those checks deliberately happen here and not per slice: a single slice
             says nothing about the file it ends up in.
 
             Returns the same shape as file_upload.
@@ -803,15 +922,36 @@ final class Tool
         $this->framework->initialize();
 
         $sessions = $this->sessions();
-        $manifest = $sessions->load($upload_id);
 
-        if ($manifest === null) {
+        try {
+            $result = $sessions->locked($upload_id, fn (array $manifest): array => $this->finishLocked($sessions, $upload_id, $manifest));
+        } catch (\Throwable $e) {
+            return ToolError::opaque($this->logger, $e, 'upload_finish_failed', ['upload_id' => $upload_id]);
+        }
+
+        if ($result === null) {
             return [
                 'error' => 'upload_not_found',
                 'message' => 'No open upload with that id — it was never started, already finished, or expired.',
             ];
         }
 
+        // Discarded outside the lock: discarding removes the lock file itself.
+        if (!isset($result['error']) || ($result['discard'] ?? false)) {
+            $sessions->discard($upload_id);
+        }
+        unset($result['discard']);
+
+        return $result;
+    }
+
+    /**
+     * @param array<string, mixed> $manifest
+     *
+     * @return array<string, mixed>
+     */
+    private function finishLocked(UploadSessions $sessions, string $upload_id, array $manifest): array
+    {
         if (($denied = $this->denyForeignSession($manifest)) !== null) {
             return $denied;
         }
@@ -829,25 +969,24 @@ final class Tool
             ];
         }
 
-        $bytes = $sessions->bytes($upload_id);
+        $data = $sessions->dataPath($upload_id);
+        clearstatcache(true, $data);
 
-        if (\strlen($bytes) !== $total) {
-            $sessions->discard($upload_id);
-
+        if ((int) @filesize($data) !== $total) {
             return [
                 'error' => 'buffer_mismatch',
                 'message' => 'The buffered file does not have the declared size any more. The upload was discarded; start again.',
+                'discard' => true,
             ];
         }
 
         $expectedHash = $manifest['sha256'] ?? null;
 
-        if (\is_string($expectedHash) && $expectedHash !== hash('sha256', $bytes)) {
-            $sessions->discard($upload_id);
-
+        if (\is_string($expectedHash) && $expectedHash !== hash_file('sha256', $data)) {
             return [
                 'error' => 'checksum_mismatch',
                 'message' => 'The assembled file does not match the sha256 given at begin. The upload was discarded; start again.',
+                'discard' => true,
             ];
         }
 
@@ -856,37 +995,28 @@ final class Tool
         try {
             $parentAbs = $this->paths->resolveAbsolute((string) $manifest['parent_path']);
         } catch (\InvalidArgumentException $e) {
-            $sessions->discard($upload_id);
-
-            return ['error' => 'invalid_path', 'message' => $e->getMessage()];
+            return ['error' => 'invalid_path', 'message' => $e->getMessage(), 'discard' => true];
         }
 
         if (!is_dir($parentAbs)) {
-            $sessions->discard($upload_id);
-
             return [
                 'error' => 'parent_not_found',
                 'message' => sprintf('The destination folder "%s" no longer exists. The upload was discarded.', (string) $manifest['parent_path']),
+                'discard' => true,
             ];
         }
 
-        $result = $this->storeBytes(
+        // On a refusal the session is kept, so the caller can fix the cause —
+        // an overwrite flag, a folder — without sending everything again. It
+        // expires on its own either way.
+        return $this->storeFile(
             (string) $manifest['parent_path'],
             $parentAbs,
             (string) $manifest['name'],
-            $bytes,
+            $data,
             (bool) $manifest['overwrite'],
             $manifest['meta'] ?? null,
-        );
-
-        // Keep the session when the store refused, so the caller can fix the
-        // cause — an overwrite flag, a folder — without sending everything
-        // again. It expires on its own either way.
-        if (!isset($result['error'])) {
-            $sessions->discard($upload_id);
-        }
-
-        return $result + ['chunked' => true];
+        ) + ['chunked' => true];
     }
 
     /**
@@ -894,7 +1024,7 @@ final class Tool
      */
     #[McpTool(
         name: 'file_upload_abort',
-        description: 'Throws away an unfinished chunked upload and its buffered bytes. Sessions also expire on their own, so this is for tidiness, not for correctness.',
+        description: 'Throws away an unfinished upload and its buffered bytes. Uploads also expire on their own, so this is for tidiness — and for making room when too_many_uploads is reported.',
     )]
     public function uploadAbort(string $upload_id): array
     {
@@ -947,39 +1077,129 @@ final class Tool
     }
 
     /**
-     * Validates the finished bytes and puts them on disk.
+     * Where and how to PUT the raw file, so that a client with a shell does not
+     * have to turn it into base64 and pass it through its own context.
      *
-     * Shared by the one-shot upload and the chunked one on purpose: this is
-     * where the extension check, the magic-byte check, the overwrite decision,
-     * the DBAFS entry and the log line live. Two copies of that would be two
-     * places for a check to go missing, and the chunked path is exactly the one
-     * where a missing check would matter most.
+     * The URL needs the host the request came in on; without a request (CLI,
+     * smoke test) only the path is known, and that is what is returned.
      *
      * @return array<string, mixed>
      */
-    private function storeBytes(
+    private function directUploadInfo(string $id, string $token): array
+    {
+        $endpoint = EndpointPath::normalise((string) ($this->configStorage->load()['path'] ?? ''));
+        $path = '/'.($endpoint !== '' ? $endpoint : EndpointPath::DEFAULT).'/upload/'.$id;
+        $request = $this->requestStack->getMainRequest();
+        $url = $request !== null ? $request->getSchemeAndHttpHost().$request->getBasePath().$path : null;
+
+        return [
+            'url' => $url,
+            'path' => $path,
+            'method' => 'PUT',
+            'headers' => [
+                'Authorization' => 'Bearer '.$token,
+                'Upload-Offset' => '0',
+                'Content-Type' => 'application/octet-stream',
+            ],
+            'curl' => sprintf(
+                'curl -sS -X PUT -H "Authorization: Bearer %s" -H "Upload-Offset: 0" -H "Content-Type: application/octet-stream" --data-binary @<FILE> %s',
+                $token,
+                $url ?? '<SITE>'.$path,
+            ),
+            'note' => 'The token is valid for this upload only and expires with it. After the PUT answers complete=true, call file_upload_finish. In Windows PowerShell call curl.exe, not curl (an alias for something else there).',
+        ];
+    }
+
+    /**
+     * Validates a finished file and puts it in place — the one path every
+     * upload ends in, whether its bytes came inline, from a URL, in slices or
+     * by direct PUT.
+     *
+     * It does what the Contao file manager does with an upload, in the same
+     * order, because a file that reaches `files/` through MCP should not be
+     * different from one a person uploaded: the name is cleaned, an SVG is
+     * sanitised, images are held to the configured dimensions, the
+     * `postUpload` hook runs. On top of that it checks the content against the
+     * extension, which the backend does not.
+     *
+     * It works on a file on disk, not on a string: the size of an upload must
+     * not decide how much memory the request needs. Only the first bytes are
+     * read for the signature check; markup is read whole, and is small.
+     *
+     * The file reaches its destination by copy-then-rename, so an overwrite
+     * that fails half-way leaves the old file intact instead of a truncated
+     * one.
+     *
+     * @return array<string, mixed>
+     */
+    private function storeFile(
         string $parent_path,
         string $parentAbs,
-        string $name,
-        string $bytes,
+        string $requestedName,
+        string $source,
         bool $overwrite,
         mixed $meta,
     ): array {
         $validator = $this->makeValidator();
 
-        $validation = $validator->validateUpload($name, \strlen($bytes));
+        $named = UploadValidator::sanitiseName($requestedName);
+        if (!$named['ok']) {
+            return ['error' => $named['error'], 'message' => $named['message']];
+        }
+        $name = $named['name'];
+
+        clearstatcache(true, $source);
+        $size = (int) @filesize($source);
+
+        $validation = $validator->validateUpload($name, $size);
         if (!($validation['ok'] ?? false)) {
             unset($validation['ok']);
+
             return $validation;
         }
 
-        // The name says what the server will serve it as; only the bytes say
-        // what it is. Checked before anything touches the filesystem.
-        $contentCheck = $validator->validateContent($name, $bytes);
-        if (!($contentCheck['ok'] ?? false)) {
-            unset($contentCheck['ok']);
+        $extension = strtolower(pathinfo($name, \PATHINFO_EXTENSION));
+        $extra = [];
 
-            return $contentCheck;
+        // The cleaned SVG is held here and written next to the target, never
+        // back over $source: for a chunked upload $source is the session
+        // buffer, which must keep its declared size so a finish that is refused
+        // (file exists, folder gone) can simply be repeated.
+        $sanitisedSvg = null;
+
+        if (\in_array($extension, UploadValidator::SVG_EXTENSIONS, true)) {
+            $raw = (string) @file_get_contents($source);
+            $svg = (new SvgSanitizer())->sanitize($raw, str_starts_with($raw, "\x1F\x8B"));
+
+            if (!$svg['ok']) {
+                return ['error' => $svg['error'], 'message' => $svg['message']];
+            }
+
+            if ($svg['bytes'] !== $raw) {
+                $sanitisedSvg = $svg['bytes'];
+                $extra['sanitized'] = $svg['removed'] !== []
+                    ? ['removed' => $svg['removed']]
+                    : ['removed' => [], 'note' => 'Normalised the way the Contao backend normalises SVGs (DOCTYPE and comments dropped); nothing active was found.'];
+            }
+            unset($raw, $svg);
+        } else {
+            // The name says what the server will serve it as; only the bytes
+            // say what it is. Checked before anything touches files/.
+            $sample = UploadValidator::needsFullContent($extension)
+                ? (string) @file_get_contents($source)
+                : (string) @file_get_contents($source, false, null, 0, 4096);
+
+            $contentCheck = $validator->validateContent($name, $sample);
+            if (!($contentCheck['ok'] ?? false)) {
+                unset($contentCheck['ok']);
+
+                return $contentCheck;
+            }
+        }
+
+        $tooLarge = $this->refuseOversizedImage($extension, $source);
+        if ($tooLarge !== null) {
+            return $tooLarge;
         }
 
         // Validate meta BEFORE touching the filesystem — atomicity: a bad
@@ -1002,13 +1222,39 @@ final class Tool
             return ['error' => 'file_exists', 'message' => "File already exists: {$targetRelative}. Pass overwrite=true to replace."];
         }
 
-        if (false === @file_put_contents($targetAbs, $bytes)) {
-            return ['error' => 'write_failed', 'message' => "Could not write file to {$targetAbs}"];
+        $partial = $parentAbs.\DIRECTORY_SEPARATOR.'.mcp-upload-'.bin2hex(random_bytes(6));
+        $written = $sanitisedSvg !== null
+            ? false !== @file_put_contents($partial, $sanitisedSvg)
+            : @copy($source, $partial);
+
+        if (!$written || !@rename($partial, $targetAbs)) {
+            @unlink($partial);
+
+            return ['error' => 'write_failed', 'message' => "Could not write {$targetRelative}. Check that the folder is writable for the web server."];
+        }
+        unset($sanitisedSvg);
+
+        // What the backend sets, so a file uploaded here is as readable to the
+        // rest of the system as one uploaded there.
+        @chmod($targetAbs, 0o666 & ~umask());
+
+        $dbafsPath = $this->paths->toDbafsPath($targetRelative);
+
+        $resized = $this->resizeIfConfigured($extension, $dbafsPath);
+        if ($resized !== null) {
+            $extra['resized_to'] = $resized;
         }
 
-        // Sync to tl_files so subsequent file_get / list calls see it.
-        $dbafsPath = $this->paths->toDbafsPath($targetRelative);
-        $model = Dbafs::addResource($dbafsPath);
+        try {
+            $model = Dbafs::addResource($dbafsPath);
+        } catch (\Throwable $e) {
+            $this->logger->error('MCP upload: the file was written but could not be registered in tl_files.', ['path' => $dbafsPath, 'exception' => $e]);
+
+            return [
+                'error' => 'registration_failed',
+                'message' => sprintf('%s was written, but could not be registered in tl_files, so it has no UUID yet. An administrator can fix that with dbafs_sync; re-uploading with overwrite=true also works.', $targetRelative),
+            ];
+        }
 
         // Apply the already-validated meta.
         if ($encodedMeta !== null && $model instanceof FilesModel) {
@@ -1016,12 +1262,155 @@ final class Tool
             $model->save();
         }
 
-        $this->log(sprintf('Uploaded file %s (%d bytes) via MCP', $dbafsPath, \strlen($bytes)), __METHOD__);
+        $warnings = $this->runPostUploadHooks($dbafsPath);
+        if ($warnings !== []) {
+            $extra['warnings'] = $warnings;
+        }
+
+        clearstatcache(true, $targetAbs);
+        $storedSize = (int) @filesize($targetAbs);
+
+        $this->log(sprintf('Uploaded file %s (%d bytes) via MCP', $dbafsPath, $storedSize), __METHOD__);
+
+        if ($name !== trim($requestedName)) {
+            $extra['name_changed_from'] = $requestedName;
+        }
 
         return ($model instanceof FilesModel
                 ? $this->serializer->summary($model)
                 : $this->serializer->fromFilesystem($targetAbs, $targetRelative))
-            + ['uploaded' => true, 'size_bytes' => \strlen($bytes)];
+            + ['uploaded' => true, 'size_bytes' => $storedSize]
+            + $extra;
+    }
+
+    /**
+     * Refuses an image larger than the configured maximum dimensions, when the
+     * site is set to refuse instead of scale (`contao.image.reject_large_uploads`)
+     * — the same rule and the same condition as the backend.
+     *
+     * @return array{error: string, message: string}|null
+     */
+    private function refuseOversizedImage(string $extension, string $source): ?array
+    {
+        if (!\in_array($extension, self::RASTER_EXTENSIONS, true)) {
+            return null;
+        }
+
+        $config = $this->framework->getAdapter(Config::class);
+        $maxWidth = (int) $config->get('imageWidth');
+        $maxHeight = (int) $config->get('imageHeight');
+
+        if ($maxWidth < 1 || $maxHeight < 1 || !$this->parameter('contao.image.reject_large_uploads')) {
+            return null;
+        }
+
+        $dimensions = @getimagesize($source);
+
+        if (!\is_array($dimensions) || ($dimensions[0] <= $maxWidth && $dimensions[1] <= $maxHeight)) {
+            return null;
+        }
+
+        return [
+            'error' => 'image_too_large',
+            'message' => sprintf('The image is %d × %d px; this site accepts at most %d × %d px. Scale it down before uploading.', $dimensions[0], $dimensions[1], $maxWidth, $maxHeight),
+        ];
+    }
+
+    /**
+     * Scales a stored image down to tl_settings.imageWidth / imageHeight, as
+     * the backend does after every upload. Off unless one of them is set.
+     *
+     * @return array{width: int, height: int}|null the new size, or null when nothing was scaled
+     */
+    private function resizeIfConfigured(string $extension, string $dbafsPath): ?array
+    {
+        $config = $this->framework->getAdapter(Config::class);
+        $maxWidth = (int) $config->get('imageWidth');
+        $maxHeight = (int) $config->get('imageHeight');
+
+        if (($maxWidth < 1 && $maxHeight < 1) || !\in_array($extension, self::RASTER_EXTENSIONS, true)) {
+            return null;
+        }
+
+        try {
+            $file = new ContaoFile($dbafsPath);
+
+            if (!$file->isGdImage) {
+                return null;
+            }
+
+            [$width, $height] = $file->imageSize + [0, 0];
+
+            if ($width < 1 || $height < 1) {
+                return null;
+            }
+
+            $scale = min(
+                $maxWidth > 0 ? $maxWidth / $width : 1.0,
+                $maxHeight > 0 ? $maxHeight / $height : 1.0,
+                1.0,
+            );
+
+            if ($scale >= 1.0) {
+                return null;
+            }
+
+            $newWidth = (int) round($width * $scale);
+            $newHeight = (int) round($height * $scale);
+            $file->resizeTo($newWidth, $newHeight);
+
+            return ['width' => $newWidth, 'height' => $newHeight];
+        } catch (\Throwable $e) {
+            // Scaling is a nicety on top of a successful upload; a GD that
+            // cannot read the format must not turn that into a failure.
+            $this->logger->warning('MCP upload: could not scale the image down.', ['path' => $dbafsPath, 'exception' => $e]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Runs the `postUpload` hook, as the file manager does after an upload.
+     *
+     * Extensions hang real work on it — image optimisation, WebP generation,
+     * virus scanning — and a file that skipped it is a file those extensions
+     * never saw. A hook that fails here is reported, not fatal: the file is
+     * already in place, and most hooks were written for a backend request and
+     * may trip over the lack of one.
+     *
+     * @return list<string> one line per hook that failed
+     */
+    private function runPostUploadHooks(string $dbafsPath): array
+    {
+        $hooks = $GLOBALS['TL_HOOKS']['postUpload'] ?? null;
+
+        if (!\is_array($hooks) || $hooks === []) {
+            return [];
+        }
+
+        $system = $this->framework->getAdapter(System::class);
+        $warnings = [];
+
+        foreach ($hooks as $callback) {
+            try {
+                if (\is_array($callback)) {
+                    $system->importStatic($callback[0])->{$callback[1]}([$dbafsPath]);
+                } elseif (\is_callable($callback)) {
+                    $callback([$dbafsPath]);
+                }
+            } catch (\Throwable $e) {
+                $label = \is_array($callback) ? implode('::', array_map('strval', $callback)) : 'closure';
+                $this->logger->warning('MCP upload: a postUpload hook failed.', ['hook' => $label, 'path' => $dbafsPath, 'exception' => $e]);
+                $warnings[] = sprintf('The postUpload hook %s failed (%s). The file is stored; whatever that hook does after an upload did not happen.', $label, $e->getMessage());
+            }
+        }
+
+        return $warnings;
+    }
+
+    private function parameter(string $name): bool
+    {
+        return $this->parameters->has($name) && (bool) $this->parameters->get($name);
     }
 
     /**
@@ -1349,79 +1738,6 @@ final class Tool
     }
 
     // -----------------------------------------------------------------
-
-    /**
-     * Server-side pull for source_url, with an SSRF guard: http/https only,
-     * the resolved host must be a PUBLIC IP (private/reserved/loopback/
-     * link-local — incl. the 169.254.169.254 cloud-metadata address — are
-     * refused), redirects are NOT followed (a redirect could bypass the host
-     * check), and the body is hard-capped before the configured maxFileSize
-     * check runs on the actual bytes.
-     *
-     * @return array{0: string|null, 1: array<string, mixed>|null} [bytes, error]
-     */
-    private function fetchFromUrl(string $url): array
-    {
-        $parts = parse_url($url);
-        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        $host = (string) ($parts['host'] ?? '');
-        if (!\in_array($scheme, ['http', 'https'], true) || $host === '') {
-            return [null, ['error' => 'invalid_source_url', 'message' => 'source_url must be an http(s) URL with a host.']];
-        }
-
-        // Address check + pin, shared with the other outbound paths. This used
-        // to be a local copy that checked the resolved ip and then handed the
-        // HOSTNAME to the client, which resolves it a second time — the window
-        // an attacker's DNS answers differently in. It also used
-        // filter_var(NO_PRIV_RANGE|NO_RES_RANGE), which passes CGNAT and NAT64.
-        [$host, $pinnedIp, $urlError] = $this->outboundGuard->pin($url);
-
-        if ($urlError !== null) {
-            // Keep the error codes this tool has always returned — callers and
-            // the smoke test match on them.
-            return [null, [
-                'error' => match ($urlError['error']) {
-                    'invalid_url' => 'invalid_source_url',
-                    'url_unresolvable' => 'source_url_unresolvable',
-                    default => 'source_url_blocked',
-                },
-                'message' => $urlError['message'],
-            ]];
-        }
-
-        try {
-            $response = $this->httpClient->request('GET', $url, [
-                'timeout' => 20,
-                'max_redirects' => 0,        // a redirect could point back at a blocked host
-                'max_duration' => 30,
-                'headers' => ['Accept' => '*/*'],
-                // Connect to the address that was checked, not to whatever the
-                // name resolves to on the second lookup.
-                'resolve' => [$host => $pinnedIp],
-            ]);
-            $status = $response->getStatusCode();
-            if ($status < 200 || $status >= 300) {
-                return [null, ['error' => 'source_url_http_error', 'message' => sprintf('source_url returned HTTP %d.', $status)]];
-            }
-
-            // Stream with a hard byte cap to avoid pulling an unbounded body.
-            $bytes = '';
-            foreach ($this->httpClient->stream($response) as $chunk) {
-                $bytes .= $chunk->getContent();
-                if (\strlen($bytes) > self::SOURCE_URL_MAX_BYTES) {
-                    return [null, ['error' => 'source_url_too_large', 'message' => sprintf('Remote file exceeds the %d MB pull ceiling.', self::SOURCE_URL_MAX_BYTES >> 20)]];
-                }
-            }
-
-            if ($bytes === '') {
-                return [null, ['error' => 'source_url_empty', 'message' => 'source_url returned an empty body.']];
-            }
-
-            return [$bytes, null];
-        } catch (\Throwable $e) {
-            return [null, ['error' => 'source_url_failed', 'message' => 'Could not fetch source_url: '.$e->getMessage()]];
-        }
-    }
 
     private function makeValidator(): UploadValidator
     {
