@@ -6,6 +6,8 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.39.0] – 2026-10-28
+
 > Der Datei-Upload, einmal ganz durchgesehen. Die Tools behalten ihre Namen und
 > Pflichtparameter; neu sind ein Direkt-Upload per `PUT` und einige optionale
 > Parameter. Wer bisher Chunks von 256 KB geschickt hat, sollte auf die neue
