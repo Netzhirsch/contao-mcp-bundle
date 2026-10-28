@@ -6,6 +6,129 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+> Der Datei-Upload, einmal ganz durchgesehen. Die Tools behalten ihre Namen und
+> Pflichtparameter; neu sind ein Direkt-Upload per `PUT` und einige optionale
+> Parameter. Wer bisher Chunks von 256 KB geschickt hat, sollte auf die neue
+> Empfehlung wechseln — oder auf den Direkt-Upload.
+
+### Added
+- **Direkt-Upload: Die Bytes müssen nicht mehr durchs Modell.** Jeder Weg, eine
+  Datei zu übergeben, lief bisher über ein Tool-Argument: Das Modell schreibt
+  die Datei als Base64 in den Aufruf. Genau da brechen Uploads — das Argument
+  wird lang, wird abgeschnitten, ein Zeichen kippt. Ein Client mit Shell hat
+  die Datei aber längst auf der Platte.
+
+  `file_upload_begin` liefert jetzt einen `direct_upload`-Block mit URL,
+  Headern und fertiger `curl`-Zeile. Ein `PUT /<path>/upload/<id>` füllt die
+  Zwischenablage der Sitzung, in Blöcken auf die Platte, unabhängig von der
+  Dateigröße; `file_upload_finish` prüft und legt ab wie bisher.
+
+  Was dieser Endpunkt **nicht** braucht, ist OAuth: Er legt nichts in
+  `files/` ab, sondern füllt nur den Puffer einer Sitzung, die ein
+  authentifizierter Aufrufer geöffnet hat. Alle Prüfungen laufen weiter in
+  `finish`, hinter Authentifizierung und Rechteprüfung. Der Endpunkt verlangt
+  den Nachweis, dass der Aufrufer derjenige ist, für den die Sitzung geöffnet
+  wurde — ein Token mit 256 Bit, einmal ausgegeben, nur als Hash gespeichert,
+  verfällt mit der Sitzung. Ein falsches Token bekommt dieselbe 404 wie eine
+  unbekannte ID. `Upload-Offset` (wie im tus-Protokoll) verhindert, dass ein
+  wiederholter `PUT` dieselben Bytes zweimal anhängt, und erlaubt das Aufteilen,
+  wenn der Webserver ein Body-Limit hat.
+
+- **`file_upload_chunk` prüft jede Scheibe einzeln**, wenn der Client es
+  will: `size_bytes` und `sha256` pro Scheibe. Eine abgeschnittene oder
+  veränderte Scheibe wird sofort abgelehnt und nur sie neu geschickt. Vorher
+  fiel das erst beim Abschluss auf — oder gar nicht: Ein vertauschtes Zeichen
+  im Base64-Alphabet ist gültiges Base64 und ergab eine still beschädigte
+  Datei. Jede Antwort nennt `chunk_bytes`.
+
+- **`file_upload` nimmt ein optionales `sha256`**, aus demselben Grund.
+
+### Changed
+- **Die Chunk-Empfehlung war fünfmal zu groß.** `chunk_size_recommended` lag
+  bei 256 KB, während dieselben Tools Inline-Base64 oberhalb von etwa 50 KB
+  für unzuverlässig erklärten. Ein Chunk *ist* ein Inline-Base64-String; dass
+  er in einem eigenen Aufruf reist, ändert nichts an seiner Länge. Jetzt 32 KB.
+
+- **SVGs werden bereinigt wie im Backend, statt per Muster abgelehnt.** Die
+  eigene Musterprüfung lag nachweislich in beide Richtungen falsch: Sie lehnte
+  eine Illustrator-Exportdatei als XXE ab (deren Namespaces sind interne
+  Entities) und jede SVG mit DOCTYPE, in der irgendwo das Wort „entity“
+  vorkam — `<title>Corporate Identity</title>` genügte. Gemessen, nicht
+  vermutet.
+
+  Contao bereinigt Backend-Uploads seit 5.3.38 mit `enshrined/svg-sanitize`;
+  derselbe Sanitizer läuft jetzt hier, die Antwort nennt unter `sanitized`, was
+  entfernt wurde. Eine Stelle macht das Backend falsch, und hier nicht: Es
+  wirft den DOCTYPE weg, die Verweise auf dessen Entities aber nicht — eine
+  Illustrator-SVG wird dadurch ungültiges XML und zeigt nichts an. Einfache
+  Text-Entities werden deshalb vorher aufgelöst (keine externen, keine
+  Parameter-, keine verschachtelten — also kein XXE und kein „billion laughs“),
+  und das Ergebnis wird vor dem Ablegen noch einmal geparst.
+
+  Auf Contao 5.3.0 bis 5.3.37, wo der Sanitizer fehlt, bleibt die Ablehnung —
+  ohne den Fehlalarm.
+
+- **`source_url` folgt Weiterleitungen**, bis zu fünf, und prüft jede wie die
+  erste URL. Vorher wurde jede Weiterleitung abgelehnt, damit keine auf eine
+  interne Adresse zeigt — und damit scheiterten Download-Buttons, CDNs und
+  Freigabelinks, die fast alle zuerst mit 30x antworten. Der Download geht in
+  Blöcken auf die Platte, bricht ab, sobald er `maxFileSize` überschreitet, und
+  wird bei passendem `Content-Length` gar nicht erst begonnen. 401/403 erklären,
+  dass der Server anonym abruft.
+
+- **Was mit einer Datei passiert, entspricht jetzt dem Backend.** Bisher nicht:
+  - Dateinamen werden mit `StringUtil::sanitizeFileName()` bereinigt —
+    `Foto?.png` wurde so abgelegt, mit einer URL, die am `?` endet, und auf
+    einem Windows-Host gar nicht. Die Antwort nennt `name_changed_from`. Ein
+    Pfad als Name wird abgelehnt statt platt gemacht.
+  - Bilder werden auf `imageWidth`/`imageHeight` verkleinert (`resized_to`),
+    oder abgelehnt, wenn `contao.image.reject_large_uploads` gesetzt ist.
+  - Der `postUpload`-Hook läuft. Erweiterungen hängen daran Bildoptimierung,
+    WebP-Erzeugung, Virenscans; eine Datei, die ihn übersprungen hat, haben
+    sie nie gesehen. Ein scheiternder Hook steht in `warnings`, statt den
+    bereits abgelegten Upload zu kippen.
+
+- **Abgelegt wird per Kopie und Umbenennen.** Ein Überschreiben, das mittendrin
+  scheiterte, hinterließ eine abgeschnittene Datei statt der alten. Und
+  scheitert die Registrierung in `tl_files`, sagt die Antwort das jetzt, statt
+  als undurchsichtiger Fehler zu enden.
+
+- **Kein Upload liest die Datei mehr komplett in den Speicher.** Prüfsumme per
+  `hash_file()`, Signatur aus den ersten Bytes; ganz gelesen wird nur Markup.
+
+- **Sitzungen verfallen nach einer Stunde *Leerlauf*, nicht eine Stunde nach
+  dem Start.** Mit kleinen Scheiben und einem Modell, das pro Aufruf eine halbe
+  Minute braucht, lief eine Sitzung sonst ab, während die Datei noch ankam.
+
+### Fixed
+- **Zwei gleichzeitige Aufrufe für dieselbe Sitzung konnten eine Scheibe
+  doppelt anhängen** — ein Modell, das Tool-Aufrufe parallel absetzt, oder eine
+  Wiederholung, die das Original überholt. Beide lasen denselben Stand, beide
+  bestanden die Reihenfolgeprüfung. Jetzt mit Sperre pro Sitzung.
+- **PDF-Signatur:** `%PDF-` darf laut Format irgendwo im ersten Kilobyte stehen;
+  Dateien mit BOM davor wurden abgelehnt.
+- **WebP-Signatur:** „RIFF“ allein ließ auch WAV und AVI durch; geprüft wird
+  jetzt das Format an Byte 8.
+- `write_failed` nannte den absoluten Serverpfad.
+
+### Security
+- **Höchstens zehn offene Uploads pro Benutzer** (`too_many_uploads`). Jede
+  Sitzung kann bis `maxFileSize` in `var/` belegen; ohne Deckel füllt eine
+  Schleife, die `begin` aufruft, die Platte, bevor die erste abläuft.
+
+### Notes
+- **Der Smoke-Test prüft Uploads zum ersten Mal Ende-zu-Ende**: einstufig,
+  gechunkt mit abgelehnten und wiederholten Scheiben, Direkt-`PUT` in zwei
+  Teilen mit Wiederholung, Illustrator-SVG, bereinigtes Skript-SVG,
+  Bildverkleinerung, `postUpload`-Hook samt scheiterndem Hook, Überschreiben,
+  Obergrenze offener Uploads. Den gechunkten Upload aus 1.36.0 hat er nie
+  ausgeführt — so ist die Chunk-Größe durchgegangen.
+- README (DE/EN) mit Entscheidungshilfe, welcher Weg wann passt, einer Tabelle
+  der Grenzen samt Umgehung und dem Fall, dass das Modell die Datei gar nicht
+  hat (Anhang im Chat).
+- PHPs `post_max_size` greift für den `PUT` nicht — gemessen mit
+  `post_max_size=1K` und 20 KB Body.
+
 ## [1.38.2] – 2026-10-16
 
 > Sicherheitsrelease. Betrifft jede Installation mit `auth_mode: oauth` und

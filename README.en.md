@@ -86,9 +86,10 @@ the search index, maintenance and system settings.
   `entity_language_link` (`terminal42/contao-changelanguage`). Without their
   package they answer `extension_not_available`, naming the missing package —
   the generic tools too, when handed a table such as `tl_news`.
-- **File uploads**, large ones included: `file_upload_begin`/`_chunk`/`_finish`
-  move a file in pieces without it having to sit anywhere public first; size,
-  `sha256` and magic bytes are checked before anything is written (see below).
+- **File uploads**, large ones included: a client with a shell sends the file
+  straight by `PUT`, without passing it through the model; otherwise in pieces
+  or from a URL. Name, SVG, image size and the `postUpload` hook are handled as
+  in the backend, magic bytes are checked on top (see below).
 - **Third-party text is marked**: read answers name the fields that hold visitor
   or editorial text under `_untrusted_fields`, so an agent does not mistake
   instructions in them for instructions.
@@ -419,7 +420,7 @@ only YAML and environment settings.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `path` | `mcp` | URL path of the endpoint, no leading slash: `ki/mcp` gives `<backend_url>/ki/mcp`. `/healthz` and the OAuth metadata move with it, on save, without `cache:clear`; connected clients then need the new URL, their tokens stay valid. Lower-case letters, digits, `-` and `_`, several segments allowed — not inside the backend, not in a directory of `public/` and not the alias of a page the endpoint would otherwise hide |
+| `path` | `mcp` | URL path of the endpoint, no leading slash: `ki/mcp` gives `<backend_url>/ki/mcp`. `/healthz`, `/upload/<id>` and the OAuth metadata move with it, on save, without `cache:clear`; connected clients then need the new URL, their tokens stay valid. Lower-case letters, digits, `-` and `_`, several segments allowed — not inside the backend, not in a directory of `public/` and not the alias of a page the endpoint would otherwise hide |
 | `pagination_limit` | `500` | Max tools per `tools/list` (irrelevant in lazy mode) |
 | `auth_mode` | `oauth` | `oauth`, or `none` for a private or loopback host only |
 | `backend_url` | `""` | Public base URL of the Contao backend (required for OAuth) |
@@ -460,51 +461,145 @@ The tool points this out itself on a 401/403. The credentials live only in
 
 ## Uploading files
 
-For small files `file_upload` with `content_base64` is enough. Above roughly
-50 KB that breaks: the MCP transport truncates long base64 strings. The only way
-out used to be `source_url` — the server fetches the file itself — which needs
-the file on a publicly reachable host. For something a client has only just
-produced, that is no option.
+The hard part of an upload over MCP is not the server but the path the bytes
+take **through the model**: with `content_base64` the model writes the file
+into a tool call character by character. Once that argument gets long it is
+cut off, or a character flips — and the file arrives broken or not at all. So
+there are four ways in, and the right one depends on what the client has:
 
-That is what the chunked route is for:
+| The client … | Way | Size |
+|---|---|---|
+| can run commands (Claude Code, an agent with a shell) | `file_upload_begin` → **direct upload via `PUT`** → `file_upload_finish` | up to `maxFileSize` |
+| has the file on a public URL | `file_upload` with `source_url` | up to `maxFileSize`, at most 64 MB |
+| produced a small text file itself (SVG, CSV, TXT, JSON) | `file_upload` with `content_base64` | up to about 30 KB |
+| has bytes but no shell | `file_upload_begin` → `file_upload_chunk` … → `file_upload_finish` | a few hundred KB in practice |
+
+### Direct upload (recommended)
+
+`file_upload_begin` answers with a `direct_upload` block: URL, headers and a
+ready `curl` line. The bytes go past the model:
+
+```bash
+curl -sS -X PUT \
+  -H "Authorization: Bearer <token>" \
+  -H "Upload-Offset: 0" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @image.jpg \
+  https://example.com/mcp/upload/<upload_id>
+```
+
+Then `file_upload_finish(upload_id)`. That is where the file is checked and
+stored — the `PUT` only fills the session's buffer.
+
+- The token is valid for this one upload, only its hash is on disk, and it
+  expires with the session. A wrong token gets the same 404 as an unknown id.
+- `Upload-Offset` is the number of bytes already received. A repeated `PUT`
+  after a dropped connection is refused with `409` and the right offset,
+  instead of appending the same bytes twice.
+- If the web server answers `413`, its body limit applies (nginx:
+  `client_max_body_size`, 1 MB by default). Send the file in parts, each with
+  the offset from the previous answer:
+
+  ```bash
+  split -b 900k image.jpg part_
+  curl … -H "Upload-Offset: 0"      --data-binary @part_aa …
+  curl … -H "Upload-Offset: 921600" --data-binary @part_ab …
+  ```
+
+- In Windows PowerShell call `curl.exe`, not `curl` — that is an alias for
+  something else there.
+
+### Chunked (no shell)
 
 ```
 file_upload_begin(parent_path, name, total_size_bytes, overwrite?, meta?, sha256?)
-  → { upload_id, chunk_size_recommended, next_sequence }
+  → { upload_id, direct_upload, chunk_size_recommended, next_sequence }
 
-file_upload_chunk(upload_id, sequence, content_base64)   ← repeatedly, in order
-  → { received_bytes, remaining_bytes, next_sequence, complete }
+file_upload_chunk(upload_id, sequence, content_base64, size_bytes?, sha256?)   ← repeatedly
+  → { chunk_bytes, received_bytes, remaining_bytes, next_sequence, complete }
 
 file_upload_finish(upload_id)
-  → like file_upload
-
-file_upload_abort(upload_id)
+  → same as file_upload
 ```
 
-**When splitting:** slice the **raw bytes** and base64-encode every slice on its
-own. Do not encode the whole file and then cut the base64 string.
+Slice the **raw bytes** into pieces of at most `chunk_size_recommended`
+(32 KB) and base64-encode each piece on its own. With `size_bytes` and
+`sha256` per slice, a slice that was cut or changed on the way is refused right
+away (`chunk_truncated`, `chunk_checksum_mismatch`) and only that slice is
+resent — instead of discovering a broken file at the end.
 
-What is checked when:
+Every slice that arrives resets the one-hour idle timeout.
 
-| When | Check |
+### What happens to a file
+
+Every way ends in the same step, and it does what the backend file manager does
+with an upload — a file that arrives over MCP should not differ from one a
+person uploaded:
+
+| Step | as in the backend |
 |---|---|
-| `begin` | target folder, file name, extension against `tl_settings.uploadTypes`, announced size against `maxFileSize`, `meta`, existing file (without `overwrite`) |
-| every `chunk` | order (no gaps, each exactly once), running total ≤ announced size |
-| `finish` | total matches, `sha256` matches, **magic bytes against the extension**, active markup, overwrite |
+| Clean the name: `: * ? " < > \|` and control characters become `-` (the answer reports `name_changed_from`) | `StringUtil::sanitizeFileName()` |
+| Extension against `tl_settings.uploadTypes`, size against `tl_settings.maxFileSize` | yes |
+| Sanitise SVGs: scripts, event handlers and external references are removed (listed under `sanitized`) | `enshrined/svg-sanitize`, as since Contao 5.3.38 |
+| Scale images down to `imageWidth`/`imageHeight` (`resized_to`), or refuse them when `contao.image.reject_large_uploads` is set | yes |
+| Run the `postUpload` hook (image optimisers, WebP, virus scanners …); a hook that fails is reported in `warnings` | yes |
+| Check the content against the extension (magic bytes): a `.png` that is HTML is refused | **in addition** |
+| Refuse HTML/XML that carries script | **in addition** |
 
-The content check sits at the end on purpose: a single chunk says nothing about
-the file it ends up in. A `.png` that is really HTML is therefore only caught at
-the end — but it is caught, and nothing is written.
+Two deliberate differences from the backend:
 
-The buffer lives in `var/mcp/uploads/<id>/`, directory `0700`, files `0600`,
-outside the web root. A session belongs to the backend user who opened it and
-expires after an hour; the next `begin` removes expired leftovers. No cron job
-is needed for that.
+- **A path as the name** (`images/logo.png`) is refused instead of becoming
+  `images-logo.png`. The folder belongs in `parent_path`.
+- **Illustrator SVGs** ("Save As" with a DOCTYPE and namespace entities) come
+  out of the backend sanitiser as invalid XML, and the browser shows nothing.
+  Here plain text entities are resolved first, and whatever is still not a
+  valid SVG afterwards is refused with a reason instead of being stored broken.
 
-When `finish` cannot store the file — it exists by now, the content does not
-match the extension — **the session stays**, so nothing has to be sent again.
-When the target folder has disappeared or the total or `sha256` do not match, it
-is discarded; start again with `file_upload_begin`.
+Files are written by copy-then-rename: an overwrite that fails half-way leaves
+the old file intact.
+
+### Limits and how to get around them
+
+| Limit | Value | Symptom | Way around |
+|---|---|---|---|
+| Base64 in a tool call | unreliable from about 30–50 KB | `invalid_base64`, `checksum_mismatch`, broken file | direct upload; without a shell, chunks |
+| `tl_settings.maxFileSize` | 2,048,000 bytes (≈ 2 MB) by default | `file_too_large` | raise *System → Settings → Upload settings → Maximum upload file size* (bytes). Applies to the backend too. |
+| `tl_settings.uploadTypes` | Contao's default list | `extension_not_allowed` (with the allowed list) | extend *Settings → Upload settings → Upload file types* |
+| Image size `imageWidth`/`imageHeight` | off by default | `resized_to` or `image_too_large` | adjust the settings, or scale the image first |
+| Web-server body limit | nginx 1 MB, Apache 2.4.53+ 1 GB | HTTP `413` | several `PUT`s with `Upload-Offset`; or raise `client_max_body_size` |
+| `source_url` | public address, anonymous, ≤ 5 redirects, ≤ 64 MB, 120 s | `source_url_blocked`, `source_url_http_error` (401/403: login needed) | put the file behind a direct download link; otherwise direct upload |
+| Open uploads | 10 per user | `too_many_uploads` | `file_upload_abort` the stale ones |
+| Session idle time | 1 hour | `upload_not_found` | start again with `file_upload_begin` |
+| SVG with external or nested entities | refused | `invalid_svg` | in Illustrator use *Export As → SVG* instead of *Save As*; or upload in the backend |
+| HTML/XML with script | refused | `active_content_refused` | remove the script; or copy the file via SFTP |
+| Permissions | the group's file mounts and file operations | `permission_denied` | adjust the group in the backend |
+
+PHP's `upload_max_filesize` applies to form uploads only and does not affect
+MCP. `post_max_size` does not apply to the direct upload either — it is a
+`PUT`, measured with `post_max_size=1K` and a 20 KB body. Memory use no longer
+depends on the file size: every way writes to disk in blocks.
+
+### When the model does not have the file
+
+When someone attaches an image or PDF in a chat, the model **sees** it — it
+does not have the original file, and it cannot rebuild it byte for byte.
+Without a shell with network access, the file has to reach Contao another way:
+
+1. **Upload it in the backend** (*Files → Upload files*). The model then finds it
+   with `files_search` and carries on with its UUID.
+2. **Copy it via SFTP/SSH** into `files/…` and synchronise — backend
+   *Files → Synchronize*, or the `dbafs_sync` tool (admin). Without that step
+   the file has no `tl_files` row and no UUID.
+3. **Put it online** (a cloud link with a direct download, not the preview
+   page) and use `source_url`.
+
+### Buffer
+
+Under `var/mcp/uploads/<id>/`, directory `0700`, files `0600`, outside the web
+root. A session belongs to the backend user who opened it; expired leftovers
+are removed by the next `begin`, no cron needed. When `finish` refuses to store
+the file — it exists already, the content does not match — **the session is
+kept**, so nothing has to be sent again.
 
 ## OpenGraph & X cards
 

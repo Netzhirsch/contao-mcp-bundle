@@ -45,11 +45,12 @@ Beide Formate sind unterstützt: `.html5` (PHP-Legacy) und `.html.twig` (moderne
 
 ## 3. Dateien hochladen und verwalten
 
-Für `tl_files` + das `files/`-Verzeichnis gibt es 9 Tools. Pfade sind **immer relativ zum Upload-Ordner** — der LLM gibt `content/foo.jpg` an, nicht `files/content/foo.jpg`:
+Für `tl_files` + das `files/`-Verzeichnis gibt es diese Tools. Pfade sind **immer relativ zum Upload-Ordner** — der LLM gibt `content/foo.jpg` an, nicht `files/content/foo.jpg`:
 
 - `files_list(path = "", limit, offset, type)` — listet Verzeichnis-Inhalte. `path=""` ist die Wurzel, `type` filtert auf `"files"`, `"folders"` oder `"all"`.
 - `file_get(path, include_content)` — Metadaten zur Datei. Mit `include_content=true` kommt zusätzlich `content_base64` zurück, aber nur wenn die Datei **kleiner als 1 MB** ist. Sonst gibt's `content_omitted: {reason: "too_large", …}`.
-- `file_upload(parent_path, name, content_base64, overwrite, meta)` — legt eine neue Datei an. Der Inhalt muss als Base64-String übergeben werden (MCP-JSON-RPC kennt keine Binär-Streams). Validierung gegen `tl_settings.uploadTypes` und `tl_settings.maxFileSize`. Standard: keine Überschreibung — `overwrite=true` zum Ersetzen. `meta` ist optional: `{de: {title, alt, caption, link}, en: {...}}`.
+- `file_upload(parent_path, name, content_base64 | source_url, overwrite, meta, sha256)` — legt eine Datei in einem Aufruf an: kleine Inhalte als Base64, größere über eine öffentliche URL, die der Server selbst holt. Standard: keine Überschreibung — `overwrite=true` zum Ersetzen. `meta` ist optional: `{de: {title, alt, caption, link}, en: {...}}`.
+- `file_upload_begin` / `file_upload_chunk` / `file_upload_finish` / `file_upload_abort` — Upload in mehreren Schritten. Ein Client mit Shell schickt die Datei per `PUT` an die URL aus `begin`, ohne sie durchs Modell zu reichen; sonst in Base64-Scheiben. Welcher Weg wann passt, was mit der Datei passiert und welche Grenzen gelten — samt Umgehung von Hand —, steht in der README unter „Dateien hochladen“.
 - `file_update_meta(path, meta)` — ersetzt die i18n-Metadaten einer Datei.
 - `file_rename(path, new_name)` — benennt im selben Ordner um.
 - `file_move(path, new_parent_path)` — verschiebt in einen anderen Ordner.
@@ -60,7 +61,7 @@ Für `tl_files` + das `files/`-Verzeichnis gibt es 9 Tools. Pfade sind **immer r
 **Sicherheit:**
 
 - _Path-Traversal-Schutz:_ `..`, `NUL`-Bytes, absolute Pfade, Windows-Laufwerksbuchstaben werden abgelehnt. `realpath`-Check stellt sicher, dass alle Operationen im `files/`-Tree bleiben.
-- _Extension-Whitelist:_ Uploads gegen `tl_settings.uploadTypes` validiert (sichtbar in _System → Einstellungen → Uploads_). Falsche Extensions kommen mit einer Liste der erlaubten zurück, damit der LLM weiß was geht.
+- _Extension-Whitelist:_ Uploads gegen `tl_settings.uploadTypes` validiert (sichtbar in _System → Einstellungen → Datei-Uploads_). Falsche Extensions kommen mit einer Liste der erlaubten zurück, damit der LLM weiß was geht.
 - _Größenlimit:_ `tl_settings.maxFileSize` wird bei Uploads geprüft. `file_get` hat ein zusätzliches eigenes Limit von 1 MB für base64-Content.
 - _DBAFS-Sync:_ Jede Schreib-Operation aktualisiert `tl_files` automatisch via `Contao\Dbafs`. Filesystem und Datenbank bleiben konsistent.
 
