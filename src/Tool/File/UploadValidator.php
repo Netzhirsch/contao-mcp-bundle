@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\File;
 
 use Contao\StringUtil;
+use Contao\Validator;
 
 /**
  * Centralises the "may we accept this file?" decisions: extension whitelist,
@@ -48,6 +49,46 @@ final class UploadValidator
     public function maxFileSize(): int
     {
         return (int) $this->config->get('maxFileSize');
+    }
+
+    /**
+     * The name the file will be stored under, as the backend would store it.
+     *
+     * Contao's file manager runs every uploaded name through
+     * `StringUtil::sanitizeFileName()`: control characters go, and the
+     * characters Windows does not allow in a name (`: * ? " < > |`) become `-`.
+     * This path skipped that, so `Foto?.png` was stored as such — a name whose
+     * URL ends at the `?`, and which a Windows host refuses outright.
+     *
+     * A path separator is NOT turned into `-` here although the backend would:
+     * `bilder/logo.png` as a name almost always means the folder belongs in
+     * `parent_path`, and quietly storing `bilder-logo.png` would hide that.
+     *
+     * @return array{ok: true, name: string}|array{ok: false, error: string, message: string}
+     */
+    public static function sanitiseName(string $filename): array
+    {
+        $name = trim($filename);
+
+        if (str_contains($name, '/') || str_contains($name, '\\')) {
+            return [
+                'ok' => false,
+                'error' => 'invalid_filename',
+                'message' => "\"{$name}\" is a path, not a file name. Put the folder into parent_path and only the file name into name.",
+            ];
+        }
+
+        try {
+            $clean = trim(StringUtil::sanitizeFileName($name));
+        } catch (\InvalidArgumentException) {
+            return ['ok' => false, 'error' => 'invalid_filename', 'message' => 'The file name is not valid UTF-8.'];
+        }
+
+        if ($clean === '' || !Validator::isValidFileName($clean)) {
+            return ['ok' => false, 'error' => 'invalid_filename', 'message' => 'The file name is empty or longer than 255 characters once cleaned up.'];
+        }
+
+        return ['ok' => true, 'name' => $clean];
     }
 
     /**
@@ -130,11 +171,25 @@ final class UploadValidator
     ];
 
     /**
-     * Markup types that the browser runs when it fetches them from `files/`.
+     * Markup types that the browser runs when it fetches them from `files/`,
+     * and for which there is no sanitiser — so active content is refused.
+     *
+     * SVG is not in this list: it is cleaned by {@see SvgSanitizer}, the same
+     * way the Contao backend cleans it, instead of being refused by pattern.
      *
      * @var list<string>
      */
-    private const ACTIVE_MARKUP_EXTENSIONS = ['svg', 'svgz', 'html', 'htm', 'xhtml', 'xml'];
+    private const ACTIVE_MARKUP_EXTENSIONS = ['html', 'htm', 'xhtml', 'xml'];
+
+    /** Extensions {@see SvgSanitizer} handles. */
+    public const SVG_EXTENSIONS = ['svg', 'svgz'];
+
+    /**
+     * How far into the file a signature may start. Only PDF uses it: the
+     * format allows the `%PDF-` header anywhere in the first kilobyte, and
+     * generators that put a BOM or a blank line in front of it exist.
+     */
+    private const PDF_HEADER_WINDOW = 1024;
 
     /**
      * What the first bytes of a file must look like for the extension it
@@ -187,7 +242,7 @@ final class UploadValidator
         $extension = strtolower(pathinfo(trim($filename), \PATHINFO_EXTENSION));
 
         if (\in_array($extension, self::ACTIVE_MARKUP_EXTENSIONS, true)) {
-            $found = self::activeMarkupIn($bytes, $extension === 'svgz');
+            $found = self::activeMarkupIn($bytes);
             if ($found !== null) {
                 return [
                     'ok' => false,
@@ -204,7 +259,7 @@ final class UploadValidator
         $signatures = self::MAGIC[$extension] ?? null;
         if ($signatures !== null) {
             foreach ($signatures as $signature) {
-                if (str_starts_with($bytes, $signature)) {
+                if (self::startsLike($extension, $bytes, $signature)) {
                     return ['ok' => true];
                 }
             }
@@ -223,25 +278,43 @@ final class UploadValidator
     }
 
     /**
+     * Whether {@see validateContent()} has to see the whole file for this
+     * extension. Markup can carry script anywhere; every other check looks at
+     * the first bytes only, so a large file is never read whole for it.
+     */
+    public static function needsFullContent(string $extension): bool
+    {
+        return \in_array(strtolower($extension), self::ACTIVE_MARKUP_EXTENSIONS, true);
+    }
+
+    /**
+     * Whether the file begins with the signature its extension promises.
+     *
+     * WebP is a RIFF container like WAV and AVI, so "RIFF" alone says nothing;
+     * the format name sits at byte 8. A PDF header may start anywhere in the
+     * first kilobyte.
+     */
+    private static function startsLike(string $extension, string $bytes, string $signature): bool
+    {
+        return match ($extension) {
+            'pdf' => str_contains(substr($bytes, 0, self::PDF_HEADER_WINDOW), $signature),
+            'webp' => str_starts_with($bytes, $signature) && substr($bytes, 8, 4) === 'WEBP',
+            default => str_starts_with($bytes, $signature),
+        };
+    }
+
+    /**
      * Names what makes a markup file active, or null when nothing does.
      *
-     * Deliberately a REJECTION, not a sanitiser. Sanitising SVG correctly is a
-     * project of its own — namespaces, entities, CDATA, `xlink:href`,
-     * case and whitespace tricks — and a sanitiser that is 95% right is worse
-     * than a refusal, because it produces a file everybody now believes is safe.
+     * A REJECTION, not a sanitiser — used for HTML/XML, for which there is no
+     * sanitiser, and for SVG only on a Contao too old to ship one (see
+     * {@see SvgSanitizer}). Sanitising markup correctly is a project of its own,
+     * and a sanitiser that is 95% right is worse than a refusal.
      */
-    private static function activeMarkupIn(string $bytes, bool $gzipped): ?string
+    public static function activeMarkupIn(string $bytes): ?string
     {
-        if ($gzipped) {
-            $inflated = @gzdecode($bytes);
-            if (\is_string($inflated)) {
-                $bytes = $inflated;
-            }
-        }
-
-        // Only the head matters for the cheap check, but script can sit
-        // anywhere in the document, so the whole body is scanned. These files
-        // are small by nature.
+        // Script can sit anywhere in the document, so the whole body is
+        // scanned. These files are small by nature.
         $haystack = strtolower($bytes);
 
         if (str_contains($haystack, '<script')) {
@@ -250,7 +323,10 @@ final class UploadValidator
         if (str_contains($haystack, '<foreignobject')) {
             return 'a <foreignObject> element, which embeds arbitrary HTML';
         }
-        if (str_contains($haystack, '<!entity') || str_contains($haystack, '<!doctype') && str_contains($haystack, 'entity')) {
+        // Only an actual declaration. This used to fire on any DOCTYPE as soon
+        // as the word "entity" appeared anywhere in the file — a logo titled
+        // "Corporate Identity" was refused as XXE.
+        if (str_contains($haystack, '<!entity')) {
             return 'an entity declaration (XXE)';
         }
         if (preg_match('/\son[a-z]+\s*=/', $haystack) === 1) {

@@ -88,10 +88,10 @@ OpenGraph-/X-Card-Daten, Suchindex, Wartung + System-Einstellungen.
   `entity_language_link` (`terminal42/contao-changelanguage`). Ohne ihr Paket
   antworten sie mit `extension_not_available` und nennen das fehlende Paket —
   auch die generischen Tools, wenn man ihnen eine Tabelle wie `tl_news` gibt.
-- **Dateien hochladen**, auch große: `file_upload_begin`/`_chunk`/`_finish`
-  übertragen eine Datei in Stücken, ohne dass sie vorher irgendwo öffentlich
-  liegen muss; Größe, `sha256` und Magic Bytes werden geprüft, bevor etwas
-  geschrieben wird (siehe unten).
+- **Dateien hochladen**, auch große: Ein Client mit Shell schickt die Datei per
+  `PUT` direkt, ohne sie durchs Modell zu reichen; sonst in Stücken oder über
+  eine URL. Name, SVG, Bildmaße und `postUpload`-Hook werden behandelt wie im
+  Backend, Magic Bytes zusätzlich geprüft (siehe unten).
 - **Fremdtext ist markiert**: Lese-Antworten nennen unter `_untrusted_fields`
   die Felder, in denen Besucher- oder Redaktionstext steht — damit ein Agent
   Anweisungen darin nicht für Anweisungen hält.
@@ -472,7 +472,7 @@ Felder:
 
 | Key | Default | Bedeutung |
 |---|---|---|
-| `path` | `mcp` | URL-Pfad des Endpunkts, ohne Schrägstrich am Anfang: `ki/mcp` ergibt `<backend_url>/ki/mcp`. `/healthz` und die OAuth-Metadaten ziehen mit, und zwar beim Speichern, ohne `cache:clear`; verbundene Clients brauchen danach die neue URL, ihre Tokens bleiben gültig. Erlaubt sind Kleinbuchstaben, Ziffern, `-` und `_`, auch mehrere Segmente — nicht im Backend, nicht in einem Verzeichnis von `public/` und nicht der Alias einer Seite, die der Endpunkt sonst verdecken würde |
+| `path` | `mcp` | URL-Pfad des Endpunkts, ohne Schrägstrich am Anfang: `ki/mcp` ergibt `<backend_url>/ki/mcp`. `/healthz`, `/upload/<id>` und die OAuth-Metadaten ziehen mit, und zwar beim Speichern, ohne `cache:clear`; verbundene Clients brauchen danach die neue URL, ihre Tokens bleiben gültig. Erlaubt sind Kleinbuchstaben, Ziffern, `-` und `_`, auch mehrere Segmente — nicht im Backend, nicht in einem Verzeichnis von `public/` und nicht der Alias einer Seite, die der Endpunkt sonst verdecken würde |
 | `pagination_limit` | `500` | Max Tools pro `tools/list` (irrelevant in Lazy-Mode) |
 | `auth_mode` | `oauth` | `oauth` oder `none` (nur für private oder Loopback-Hosts) |
 | `backend_url` | `""` | Public Base-URL des Contao-Backends (Pflicht bei OAuth) |
@@ -513,54 +513,149 @@ Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
 
 ## Dateien hochladen
 
-Für kleine Dateien genügt `file_upload` mit `content_base64`. Oberhalb von rund
-50 KB bricht das: Der MCP-Transport kürzt lange Base64-Zeichenketten. Bisher
-blieb nur `source_url` — der Server holt die Datei selbst —, und das setzt
-voraus, dass sie auf einem öffentlich erreichbaren Host liegt. Für etwas, das
-ein Client gerade erst erzeugt hat, ist das keine Option.
+Der schwierige Teil eines Uploads über MCP ist nicht der Server, sondern der
+Weg der Bytes **durch das Modell**: Bei `content_base64` schreibt das Modell
+die Datei Zeichen für Zeichen in einen Tool-Aufruf. Wird das Argument lang,
+wird es abgeschnitten oder es kippt ein Zeichen — und die Datei kommt kaputt
+oder gar nicht an. Deshalb gibt es vier Wege, und der richtige hängt davon ab,
+was der Client hat:
 
-Dafür gibt es den gechunkten Weg:
+| Der Client … | Weg | Größe |
+|---|---|---|
+| kann Befehle ausführen (Claude Code, Agent mit Shell) | `file_upload_begin` → **Direkt-Upload per `PUT`** → `file_upload_finish` | bis `maxFileSize` |
+| hat die Datei unter einer öffentlichen URL | `file_upload` mit `source_url` | bis `maxFileSize`, max. 64 MB |
+| hat kleinen Text selbst erzeugt (SVG, CSV, TXT, JSON) | `file_upload` mit `content_base64` | bis ca. 30 KB |
+| hat Bytes, aber keine Shell | `file_upload_begin` → `file_upload_chunk` … → `file_upload_finish` | praktisch einige hundert KB |
+
+### Direkt-Upload (empfohlen)
+
+`file_upload_begin` antwortet mit einem `direct_upload`-Block: URL, Header und
+eine fertige `curl`-Zeile. Die Bytes gehen damit am Modell vorbei:
+
+```bash
+curl -sS -X PUT \
+  -H "Authorization: Bearer <token>" \
+  -H "Upload-Offset: 0" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @bild.jpg \
+  https://example.com/mcp/upload/<upload_id>
+```
+
+Danach `file_upload_finish(upload_id)`. Erst dort wird geprüft und abgelegt —
+der `PUT` füllt nur die Zwischenablage der Sitzung.
+
+- Das Token gilt nur für diesen einen Upload, nur sein Hash liegt auf der Platte,
+  und es verfällt mit der Sitzung. Ein falsches Token bekommt dieselbe 404 wie
+  eine unbekannte ID.
+- `Upload-Offset` ist die Zahl der schon angekommenen Bytes. Ein wiederholter
+  `PUT` nach einem Verbindungsabbruch wird mit `409` und dem richtigen Offset
+  abgelehnt, statt dieselben Bytes zweimal anzuhängen.
+- Antwortet der Webserver mit `413`, greift dessen Body-Limit (nginx:
+  `client_max_body_size`, Standard 1 MB). Dann die Datei in Teilen schicken,
+  jeweils mit dem Offset aus der vorigen Antwort:
+
+  ```bash
+  split -b 900k bild.jpg teil_
+  curl … -H "Upload-Offset: 0"      --data-binary @teil_aa …
+  curl … -H "Upload-Offset: 921600" --data-binary @teil_ab …
+  ```
+
+- In der Windows PowerShell `curl.exe` aufrufen, nicht `curl` — das ist dort
+  ein Alias für etwas anderes.
+
+### Gechunkt (ohne Shell)
 
 ```
 file_upload_begin(parent_path, name, total_size_bytes, overwrite?, meta?, sha256?)
-  → { upload_id, chunk_size_recommended, next_sequence }
+  → { upload_id, direct_upload, chunk_size_recommended, next_sequence }
 
-file_upload_chunk(upload_id, sequence, content_base64)   ← mehrfach, in Reihenfolge
-  → { received_bytes, remaining_bytes, next_sequence, complete }
+file_upload_chunk(upload_id, sequence, content_base64, size_bytes?, sha256?)   ← mehrfach
+  → { chunk_bytes, received_bytes, remaining_bytes, next_sequence, complete }
 
 file_upload_finish(upload_id)
   → wie file_upload
-
-file_upload_abort(upload_id)
 ```
 
-**Wichtig beim Zerlegen:** die **rohen Bytes** in Scheiben schneiden und jede
-Scheibe einzeln base64-kodieren. Nicht die ganze Datei kodieren und dann die
-Base64-Zeichenkette zerschneiden.
+Die **rohen Bytes** in Scheiben von höchstens `chunk_size_recommended`
+(32 KB) schneiden und jede Scheibe einzeln base64-kodieren. Mit `size_bytes`
+und `sha256` pro Scheibe wird eine abgeschnittene oder veränderte Scheibe
+sofort abgelehnt (`chunk_truncated`, `chunk_checksum_mismatch`) und nur sie
+neu geschickt — statt am Ende eine kaputte Datei zu entdecken.
 
-Was wann geprüft wird:
+Jede angekommene Scheibe setzt die Leerlaufzeit von einer Stunde zurück.
 
-| Zeitpunkt | Prüfung |
+### Was mit einer Datei passiert
+
+Alle Wege enden im selben Schritt, und der macht, was die Dateiverwaltung im
+Backend mit einem Upload macht — eine Datei, die über MCP kommt, soll sich nicht
+von einer unterscheiden, die ein Mensch hochgeladen hat:
+
+| Schritt | wie im Backend |
 |---|---|
-| `begin` | Zielordner, Dateiname, Endung gegen `tl_settings.uploadTypes`, angekündigte Größe gegen `maxFileSize`, `meta`, bestehende Datei (ohne `overwrite`) |
-| jeder `chunk` | Reihenfolge (lückenlos, genau einmal), laufende Summe ≤ angekündigte Größe |
-| `finish` | Summe stimmt, `sha256` stimmt, **Magic Bytes gegen die Endung**, aktives Markup, Überschreiben |
+| Dateiname bereinigen: `: * ? " < > \|` und Steuerzeichen werden `-` (die Antwort nennt `name_changed_from`) | `StringUtil::sanitizeFileName()` |
+| Endung gegen `tl_settings.uploadTypes`, Größe gegen `tl_settings.maxFileSize` | ja |
+| SVG bereinigen: Skripte, Event-Handler, externe Verweise werden entfernt (die Antwort nennt sie unter `sanitized`) | `enshrined/svg-sanitize`, wie ab Contao 5.3.38 |
+| Bilder über `imageWidth`/`imageHeight` verkleinern (`resized_to`), oder ablehnen, wenn `contao.image.reject_large_uploads` gesetzt ist | ja |
+| `postUpload`-Hook ausführen (Bildoptimierer, WebP, Virenscanner …); scheitert einer, steht das in `warnings` | ja |
+| Inhalt gegen die Endung prüfen (Magic Bytes): eine `.png`, die HTML ist, wird abgelehnt | **zusätzlich** |
+| HTML/XML mit Skript ablehnen | **zusätzlich** |
 
-Die Inhaltsprüfung sitzt bewusst am Ende: Ein einzelner Chunk sagt nichts über
-die Datei aus, in der er landet. Eine `.png`, die in Wahrheit HTML ist, fliegt
-deshalb erst beim Abschluss auf — aber sie fliegt auf, und geschrieben wird
-nichts.
+Zwei Abweichungen vom Backend, beide bewusst:
 
-Die Zwischenablage liegt unter `var/mcp/uploads/<id>/`, Verzeichnis `0700`,
-Dateien `0600`, außerhalb des Web-Roots. Eine Sitzung gehört dem Backend-Benutzer,
-der sie geöffnet hat, und verfällt nach einer Stunde; beim nächsten `begin`
-werden abgelaufene Reste entfernt. Ein eigener Cron ist dafür nicht nötig.
+- **Ein Pfad als Name** (`bilder/logo.png`) wird abgelehnt statt zu
+  `bilder-logo.png` gemacht. Der Ordner gehört in `parent_path`.
+- **Illustrator-SVGs** („Speichern unter“ mit DOCTYPE und Namespace-Entities)
+  macht der Backend-Sanitizer zu ungültigem XML — der Browser zeigt dann nichts.
+  Hier werden einfache Text-Entities vorher aufgelöst, und was danach noch kein
+  gültiges SVG ist, wird mit Begründung abgelehnt statt still kaputt abgelegt.
 
-Lehnt `finish` das Ablegen ab — die Datei existiert inzwischen, der Inhalt passt
-nicht zur Endung —, **bleibt die Sitzung bestehen**, damit nicht alles noch
-einmal übertragen werden muss. Ist der Zielordner verschwunden oder stimmen
-Summe oder `sha256` nicht, wird sie verworfen; dann neu mit
-`file_upload_begin`.
+Geschrieben wird per Kopie und Umbenennen: Scheitert ein Überschreiben
+mittendrin, bleibt die alte Datei heil.
+
+### Grenzen und wie man sie umgeht
+
+| Grenze | Wert | Symptom | Umgehen |
+|---|---|---|---|
+| Base64 im Tool-Aufruf | ab ca. 30–50 KB unzuverlässig | `invalid_base64`, `checksum_mismatch`, Datei kaputt | Direkt-Upload; ohne Shell Chunks |
+| `tl_settings.maxFileSize` | Standard 2 048 000 Bytes (≈ 2 MB) | `file_too_large` | *System → Einstellungen → Datei-Uploads → Maximale Upload-Dateigröße* erhöhen (Bytes). Gilt auch fürs Backend. |
+| `tl_settings.uploadTypes` | Contao-Standardliste | `extension_not_allowed` (mit Liste der erlaubten) | *Einstellungen → Datei-Uploads → Erlaubte Upload-Dateitypen* ergänzen |
+| Bildmaße `imageWidth`/`imageHeight` | Standard aus | `resized_to` oder `image_too_large` | Einstellungen anpassen, oder Bild vorher verkleinern |
+| Body-Limit des Webservers | nginx 1 MB, Apache ab 2.4.53 1 GB | HTTP `413` | mehrere `PUT`s mit `Upload-Offset`; oder `client_max_body_size` anheben |
+| `source_url` | öffentliche Adresse, anonym, ≤ 5 Weiterleitungen, ≤ 64 MB, 120 s | `source_url_blocked`, `source_url_http_error` (401/403: Login nötig) | Datei mit direktem Download-Link ablegen; sonst Direkt-Upload |
+| offene Uploads | 10 pro Benutzer | `too_many_uploads` | `file_upload_abort` für liegengebliebene |
+| Leerlauf einer Sitzung | 1 Stunde | `upload_not_found` | neu mit `file_upload_begin` |
+| SVG mit externen/verschachtelten Entities | abgelehnt | `invalid_svg` | in Illustrator *Exportieren als → SVG* statt *Speichern unter*; oder im Backend hochladen |
+| HTML/XML mit Skript | abgelehnt | `active_content_refused` | Skript entfernen; oder per SFTP ablegen |
+| Rechte | Filemounts und Dateioperationen der Gruppe | `permission_denied` | Gruppe im Backend anpassen |
+
+PHPs `upload_max_filesize` gilt nur für Formular-Uploads und betrifft MCP
+nicht. `post_max_size` greift beim Direkt-Upload ebenfalls nicht — er ist ein
+`PUT`, gemessen mit `post_max_size=1K` und 20 KB Body. Der Speicherbedarf hängt
+nicht mehr von der Dateigröße ab: Alle Wege schreiben in Blöcken auf die Platte.
+
+### Wenn das Modell die Datei gar nicht hat
+
+Hängt jemand in einem Chat ein Bild oder PDF an, **sieht** das Modell es — die
+Originaldatei hat es damit nicht, und byte-genau nachbauen kann es sie nicht.
+Ohne Shell mit Netzzugang bleibt dann nur, die Datei auf anderem Weg nach Contao
+zu bringen:
+
+1. **Im Backend hochladen** (*Dateien → Dateien hochladen*). Danach findet das
+   Modell sie mit `files_search` und arbeitet mit ihrer UUID weiter.
+2. **Per SFTP/SSH** nach `files/…` kopieren und anschließend synchronisieren —
+   Backend *Dateien → Synchronisieren* oder das Tool `dbafs_sync`
+   (Admin). Ohne diesen Schritt hat die Datei keinen `tl_files`-Eintrag und
+   keine UUID.
+3. **Öffentlich ablegen** (Cloud-Link mit direktem Download, nicht die
+   Vorschauseite) und `source_url` verwenden.
+
+### Zwischenablage
+
+Unter `var/mcp/uploads/<id>/`, Verzeichnis `0700`, Dateien `0600`, außerhalb
+des Web-Roots. Eine Sitzung gehört dem Backend-Benutzer, der sie geöffnet hat;
+abgelaufene Reste entfernt der nächste `begin`. Ein eigener Cron ist nicht
+nötig. Lehnt `finish` das Ablegen ab — Datei existiert, Inhalt passt nicht —,
+**bleibt die Sitzung bestehen**, damit nichts neu übertragen werden muss.
 
 ## OpenGraph & X-Cards
 

@@ -6,13 +6,15 @@ namespace Netzhirsch\ContaoMcpBundle\Routing;
 
 use Netzhirsch\ContaoMcpBundle\Controller\McpController;
 use Netzhirsch\ContaoMcpBundle\Controller\McpHealthzController;
+use Netzhirsch\ContaoMcpBundle\Controller\McpUploadController;
 
 /**
  * The URL path of the MCP endpoint — `path` in var/mcp/config.json, default
- * "mcp" — and the four routes that follow it:
+ * "mcp" — and the five routes that follow it:
  *
  *   POST|OPTIONS /<path>                                        JSON-RPC endpoint
  *   GET          /<path>/healthz                                liveness probe
+ *   PUT          /<path>/upload/<id>                            raw bytes of an upload
  *   GET          /<path>/.well-known/oauth-authorization-server RFC 8414, MCP location
  *   GET          /.well-known/oauth-protected-resource/<path>   RFC 9728 §3.1
  *
@@ -27,6 +29,7 @@ final class EndpointPath
     public const ROUTE_HEALTHZ = 'netzhirsch_contao_mcp_healthz';
     public const ROUTE_AS_METADATA = 'netzhirsch_contao_mcp_oauth_metadata_mcp_path';
     public const ROUTE_PRM = 'netzhirsch_contao_mcp_oauth_prm_mcp_path';
+    public const ROUTE_UPLOAD = 'netzhirsch_contao_mcp_upload';
 
     /**
      * Segments of lower-case letters, digits, "-" and "_", each starting with a
@@ -75,13 +78,27 @@ final class EndpointPath
 
     /**
      * The route a request path takes under the configured endpoint path, or
-     * null when it is none of the four.
+     * null when it is none of the five.
      *
-     * @return array{name: string, controller: string, methods: list<string>}|null
+     * `attributes` carries what the path itself holds — only the upload id —
+     * for the listener to put on the request.
+     *
+     * @return array{name: string, controller: string, methods: list<string>, attributes?: array<string, string>}|null
      */
     public static function route(string $pathInfo, string $path): ?array
     {
         $base = '/'.$path;
+
+        // The id is 32 hex characters and nothing else; any other tail is not
+        // this route, and falls through to Contao like any unknown path.
+        if (str_starts_with($pathInfo, $base.'/upload/') && preg_match('#^[0-9a-f]{32}$#', substr($pathInfo, \strlen($base.'/upload/'))) === 1) {
+            return [
+                'name' => self::ROUTE_UPLOAD,
+                'controller' => McpUploadController::class,
+                'methods' => ['PUT'],
+                'attributes' => ['upload_id' => substr($pathInfo, \strlen($base.'/upload/'))],
+            ];
+        }
 
         return match ($pathInfo) {
             $base => [
