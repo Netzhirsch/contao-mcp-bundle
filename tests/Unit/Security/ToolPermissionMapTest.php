@@ -275,6 +275,80 @@ final class ToolPermissionMapTest extends TestCase
         };
     }
 
+    /**
+     * The voters read columns: a parent passed as `archive_id` has to reach
+     * them as `pid`, an author as `author`. {@see ParentScopedWriteTest} shows
+     * what happened when it did not.
+     */
+    public function testArgumentsArriveUnderTheirColumnName(): void
+    {
+        $req = $this->map->requirement('news_create', ['archive_id' => 4, 'headline' => 'X', 'author_id' => 3]);
+        self::assertSame(['pid' => 4, 'headline' => 'X', 'author' => 3], $req['fields'] ?? null);
+
+        $req = $this->map->requirement('article_update', ['id' => 5, 'page_id' => 8]);
+        self::assertSame(['pid' => 8], $req['fields'] ?? null);
+
+        $req = $this->map->requirement('form_field_create', ['form_id' => 2, 'type' => 'text']);
+        self::assertSame(['pid' => 2, 'type' => 'text'], $req['fields'] ?? null);
+
+        // The translation is per table: tl_content takes `pid` as it is.
+        $req = $this->map->requirement('content_create', ['ptable' => 'tl_article', 'pid' => 3, 'type' => 'text']);
+        self::assertSame(['ptable' => 'tl_article', 'pid' => 3, 'type' => 'text'], $req['fields'] ?? null);
+    }
+
+    /**
+     * Most write tools take their fields as an object, and the snake_case
+     * keys in it are translated just like flat arguments.
+     */
+    public function testKeysInsideAFieldsObjectArriveUnderTheirColumnName(): void
+    {
+        $req = $this->map->requirement('layout_update', ['id' => 1, 'fields' => ['css_class' => 'x', 'add_jquery' => true, 'name' => 'L']]);
+        self::assertSame(['cssClass' => 'x', 'addJQuery' => true, 'name' => 'L'], $req['fields'] ?? null);
+
+        $req = $this->map->requirement('member_update', ['id' => 1, 'fields' => ['home_dir' => 'files/m', 'date_of_birth' => '1990-01-01']]);
+        self::assertSame(['homeDir' => 'files/m', 'dateOfBirth' => '1990-01-01'], $req['fields'] ?? null);
+
+        // `form_id` means a different column on each side of the form.
+        self::assertSame(['formID' => 'kontakt'], $this->map->requirement('form_update', ['id' => 1, 'fields' => ['form_id' => 'kontakt']])['fields'] ?? null);
+        self::assertSame(['pid' => 2, 'type' => 'text'], $this->map->requirement('form_field_create', ['form_id' => 2, 'type' => 'text'])['fields'] ?? null);
+    }
+
+    /**
+     * `extras` reaches the same mapper as the flat arguments, so its keys are
+     * written fields. A flat argument wins over the same key in an object, as
+     * it does in the tools.
+     */
+    public function testExtrasAreWrittenFieldsAndAFlatArgumentWins(): void
+    {
+        $req = $this->map->requirement('news_update', ['id' => 5, 'headline' => 'Flat', 'extras' => ['published' => true, 'headline' => 'Nested', 'author_id' => 3]]);
+
+        self::assertSame(['published' => true, 'headline' => 'Flat', 'author' => 3], $req['fields'] ?? null);
+    }
+
+    /**
+     * @return iterable<string, array{string, string, bool, string, bool}>
+     */
+    public static function negatedArguments(): iterable
+    {
+        yield 'member, deactivate' => ['member_update', 'fields', false, 'disable', true];
+        yield 'member, activate' => ['member_update', 'fields', true, 'disable', false];
+        yield 'member group' => ['member_group_update', 'fields', false, 'disable', true];
+        yield 'image size item' => ['image_size_item_update', 'fields', false, 'invisible', true];
+        yield 'url rewrite' => ['url_rewrite_update', 'flat', true, 'inactive', false];
+    }
+
+    /**
+     * `active` writes the opposite column; the value is negated with it, or a
+     * deactivation would compare as unchanged against the stored row.
+     */
+    #[DataProvider('negatedArguments')]
+    public function testActiveArrivesAsItsNegatedColumn(string $tool, string $shape, bool $active, string $column, bool $expected): void
+    {
+        $args = $shape === 'fields' ? ['id' => 1, 'fields' => ['active' => $active]] : ['id' => 1, 'active' => $active];
+
+        self::assertSame([$column => $expected], $this->map->requirement($tool, $args)['fields'] ?? null);
+    }
+
     public function testControlArgsAreNotTreatedAsFields(): void
     {
         $req = $this->map->requirement('news_update', ['id' => 5, 'confirm_destructive' => true, 'cascade' => true, 'headline' => 'X']);

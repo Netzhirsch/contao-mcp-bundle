@@ -272,6 +272,82 @@ final class ToolPermissionMap
     private const CONTROL_ARGS = ['confirm_destructive', 'cascade', 'id', 'limit', 'offset', 'q', 'filters'];
 
     /**
+     * Arguments named for the caller, not for the column they write.
+     *
+     * The voters read columns. NewsAccessVoter looks for the archive in `pid`.
+     * Handed `archive_id`, it found no parent, asked about archive 0 and said
+     * no. That happened to every restricted editor on every news_create,
+     * whatever their rights (reported from a live site). An update that moved
+     * a record was the other way round and worse: the voter saw no new parent,
+     * checked only the old one, and the record went into a container the
+     * editor may not touch.
+     *
+     * Everything else here is the field rights' half of the same mistake. The
+     * field check skips a name the DCA does not know, so `author_id`,
+     * `home_dir` or `css_class` were written without the field right on
+     * `author`, `homeDir` or `cssClass`. The renames are the FieldMappers'
+     * (and, for the tools without one, the tool's own) — keep them in step.
+     * A key in a `fields` or `extras` object is translated the same way.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const ARG_COLUMNS = [
+        'tl_news' => ['archive_id' => 'pid', 'author_id' => 'author'],
+        'tl_calendar_events' => ['calendar_id' => 'pid', 'author_id' => 'author'],
+        'tl_faq' => ['category_id' => 'pid', 'author_id' => 'author'],
+        'tl_article' => ['page_id' => 'pid', 'author_id' => 'author'],
+        'tl_newsletter' => [
+            'channel_id' => 'pid', 'mailer_transport' => 'mailerTransport', 'sender_name' => 'senderName',
+            'send_text' => 'sendText', 'external_images' => 'externalImages', 'add_file' => 'addFile',
+        ],
+        'tl_newsletter_recipients' => ['channel_id' => 'pid'],
+        'tl_newsletter_channel' => ['jump_to' => 'jumpTo', 'mailer_transport' => 'mailerTransport', 'sender_name' => 'senderName'],
+        'tl_form' => [
+            'jump_to' => 'jumpTo', 'mailer_transport' => 'mailerTransport', 'target_table' => 'targetTable',
+            'custom_tpl' => 'customTpl', 'form_id' => 'formID', 'allow_tags' => 'allowTags',
+            'send_via_email' => 'sendViaEmail', 'skip_empty' => 'skipEmpty', 'store_values' => 'storeValues',
+        ],
+        'tl_form_field' => ['form_id' => 'pid'],
+        'tl_image_size' => [
+            'theme_id' => 'pid', 'resize_mode' => 'resizeMode', 'css_class' => 'cssClass',
+            'preserve_metadata' => 'preserveMetadata', 'preserve_metadata_fields' => 'preserveMetadataFields',
+            'skip_if_dimensions_match' => 'skipIfDimensionsMatch', 'lazy_loading' => 'lazyLoading',
+        ],
+        'tl_image_size_item' => ['image_size_id' => 'pid', 'resize_mode' => 'resizeMode'],
+        'tl_layout' => [
+            'theme_id' => 'pid', 'header_height' => 'headerHeight', 'footer_height' => 'footerHeight',
+            'width_left' => 'widthLeft', 'width_right' => 'widthRight', 'lightbox_size' => 'lightboxSize',
+            'default_image_densities' => 'defaultImageDensities', 'title_tag' => 'titleTag', 'css_class' => 'cssClass',
+            'combine_scripts' => 'combineScripts', 'minify_markup' => 'minifyMarkup', 'add_jquery' => 'addJQuery',
+            'add_mootools' => 'addMooTools', 'external_js' => 'externalJs',
+        ],
+        'tl_module' => ['theme_id' => 'pid'],
+        'tl_member' => ['date_of_birth' => 'dateOfBirth', 'assign_dir' => 'assignDir', 'home_dir' => 'homeDir'],
+        'tl_member_group' => ['jump_to' => 'jumpTo'],
+        'tl_comments' => ['reply_author' => 'author', 'add_reply' => 'addReply', 'notified_reply' => 'notifiedReply'],
+    ];
+
+    /**
+     * Arguments that say the opposite of the column they write: `active`
+     * lands in `disable`, `invisible` or `inactive`. Renaming alone is not
+     * enough. `active: false` against a stored `disable = ''` would compare
+     * as unchanged, and an unchanged field needs no right, so the switch
+     * that disables an account would pass unchecked. The value is negated as
+     * the tools negate it, `(bool)` first: a null `active` disables too.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const NEGATED_ARGS = [
+        'tl_member' => ['active' => 'disable'],
+        'tl_member_group' => ['active' => 'disable'],
+        'tl_image_size_item' => ['active' => 'invisible'],
+        'tl_url_rewrite' => ['active' => 'inactive'],
+    ];
+
+    /** Arguments that carry more fields as an object; their keys count as written fields. */
+    private const NESTED_FIELD_ARGS = ['fields', 'extras'];
+
+    /**
      * Defaulted so the unit tests (and any container without extension tools)
      * can `new ToolPermissionMap()` unchanged; the real container injects the
      * tagged-iterator-backed instance via autowiring.
@@ -376,9 +452,10 @@ final class ToolPermissionMap
             $req['id'] = $this->extractId($args);
         }
 
-        // Written fields for create/update (drives field-level alexf checks).
+        // Written fields for create/update (drives the voter and the field-level
+        // alexf checks), keyed by column.
         if (\in_array($op, ['create', 'update'], true)) {
-            $req['fields'] = $this->extractFields($args);
+            $req['fields'] = $this->extractFields($args, (string) $req['table']);
         }
 
         return $req;
@@ -424,23 +501,43 @@ final class ToolPermissionMap
     }
 
     /**
-     * Field map for alexf checks: the args minus control args + a possible
-     * nested "fields" map (the bundle's update tools accept either flat args
-     * or a `fields` object).
+     * Field map for alexf checks: the args minus control args, plus the keys
+     * of a `fields` or `extras` object (the bundle's write tools accept either
+     * flat args or such an object; a flat arg wins, as it does in the tools).
+     * Every key arrives under its column name — see {@see ARG_COLUMNS} and
+     * {@see NEGATED_ARGS}.
      *
      * @param array<string, mixed> $args
      *
      * @return array<string, mixed>
      */
-    private function extractFields(array $args): array
+    private function extractFields(array $args, string $table): array
     {
-        $fields = [];
-        if (isset($args['fields']) && \is_array($args['fields'])) {
-            $fields = $args['fields'];
+        $raw = [];
+        foreach (self::NESTED_FIELD_ARGS as $nested) {
+            $inner = \is_object($args[$nested] ?? null) ? (array) $args[$nested] : ($args[$nested] ?? null);
+            if (!\is_array($inner)) {
+                continue;
+            }
+            unset($args[$nested]);
+            foreach ($inner as $key => $value) {
+                if (\is_string($key)) {
+                    $raw[$key] = $value;
+                }
+            }
         }
         foreach ($args as $key => $value) {
             if (!\in_array($key, self::CONTROL_ARGS, true)) {
-                $fields[$key] = $value;
+                $raw[$key] = $value;
+            }
+        }
+
+        $fields = [];
+        foreach ($raw as $key => $value) {
+            if (isset(self::NEGATED_ARGS[$table][$key])) {
+                $fields[self::NEGATED_ARGS[$table][$key]] = !(bool) $value;
+            } else {
+                $fields[self::ARG_COLUMNS[$table][$key] ?? $key] = $value;
             }
         }
 

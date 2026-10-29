@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Command;
 
+use Contao\CoreBundle\Security\Voter\DataContainer\DcaPermissionVoter;
 use Contao\Search;
 use Contao\Model\Registry;
 use Contao\StringUtil;
@@ -2190,6 +2191,23 @@ final class McpSmokeTestCommand extends Command
         $adminId = (int) $this->connection->fetchOne('SELECT id FROM tl_user WHERE admin = 1 ORDER BY id ASC LIMIT 1');
         if ($adminId > 0) {
             $tempUserId = 0;
+
+            // Contao lets its record voters decide only inside its own
+            // firewalls (ContaoStrategy picks the priority strategy there).
+            // Anywhere else Symfony's default applies, and the catch-all
+            // DefaultDataContainerVoter grants every record: a denial from
+            // NewsAccessVoter never shows. /mcp runs in the frontend firewall,
+            // so this block does too — on a request of its own, because the
+            // strategy remembers its answer per request.
+            $outerRequests = [];
+            while (($outer = $this->requestStack->pop()) !== null) {
+                $outerRequests[] = $outer;
+            }
+            $scoped = Request::create('/mcp', 'POST');
+            $scoped->server->set('QUERY_STRING', '');
+            $scoped->attributes->set('_scope', 'frontend');
+            $this->requestStack->push($scoped);
+
             try {
                 $row = $this->connection->fetchAssociative('SELECT * FROM tl_user WHERE id = ?', [$adminId]);
                 unset($row['id']);
@@ -2285,6 +2303,12 @@ final class McpSmokeTestCommand extends Command
                 // guard read `exclude ?? false` and so checked no core field.
                 // An editor with the article module, a page of their own and
                 // the field right to `text` only; Contao's real voters decide.
+                //
+                // Contao 5.7 adds table rights (create/update/delete per table,
+                // `cud`), asked by DcaPermissionVoter. 5.3 has neither the
+                // column nor the voter. ::class does not autoload.
+                $tableRights = static fn (array $rights): array => class_exists(DcaPermissionVoter::class) ? ['cud' => serialize($rights)] : [];
+
                 $parentPageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type = 'regular' ORDER BY id LIMIT 1");
                 if ($parentPageId > 0) {
                     $this->connection->insert('tl_user_group', [
@@ -2292,10 +2316,11 @@ final class McpSmokeTestCommand extends Command
                         'name' => $stamp.'_fieldgroup',
                         'modules' => serialize(['article']),
                         'pagemounts' => serialize([$parentPageId]),
+                        'alpty' => serialize(['regular']),
                         'alexf' => serialize(['tl_content::text']),
                         'elements' => serialize(['text', 'headline']),
                         'netzhirschMcpAccess' => 1,
-                    ]);
+                    ] + $tableRights(['tl_content::create']));
                     $fieldGroupId = (int) $this->connection->lastInsertId();
 
                     $row['username'] = $stamp.'_fielduser';
@@ -2342,8 +2367,73 @@ final class McpSmokeTestCommand extends Command
                             ['type' => 'text', 'fields' => ['text' => '<p>x</p>', 'headline' => 'x']],
                         ]),
                         fn ($r) => ($r['error'] ?? '') === 'permission_denied' && ($r['problems'][0]['path'] ?? '') === '2');
+
+                    // An update that moves the article was checked against the
+                    // page it comes from only. The mount's own parent is the
+                    // nearest page outside it.
+                    $outsidePageId = (int) $this->connection->fetchOne('SELECT pid FROM tl_page WHERE id = ?', [$parentPageId]);
+                    if ($outsidePageId > 0) {
+                        $expect('article_update cannot move the article onto a page outside the mounts',
+                            $this->permissionEnforcer->check('article_update', ['id' => $fieldArticleId, 'page_id' => $outsidePageId]),
+                            fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), 'new parent'));
+                    }
                 } else {
                     $output->writeln('  <fg=yellow>⊝ no regular page — skipping the field-rights checks</>');
+                }
+
+                // (d4b) A news editor, reported by a customer on 27.10.2026: every
+                // news_create was refused for a non-admin, whatever their rights.
+                // NewsAccessVoter looks for the archive in `pid` and was handed
+                // `archive_id`. One archive is theirs, one is not.
+                if ($installed['contao/news-bundle']) {
+                    foreach (['own', 'foreign'] as $which) {
+                        $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.'_news_'.$which]);
+                        $newsArchives[$which] = (int) $this->connection->lastInsertId();
+                    }
+                    $this->connection->insert('tl_news', [
+                        'pid' => $newsArchives['own'], 'tstamp' => time(), 'headline' => $stamp.'_news',
+                        'alias' => $stamp.'-news', 'date' => time(), 'time' => time(),
+                    ]);
+                    $newsId = (int) $this->connection->lastInsertId();
+
+                    $this->connection->insert('tl_user_group', [
+                        'tstamp' => time(),
+                        'name' => $stamp.'_newsgroup',
+                        'modules' => serialize(['news']),
+                        'news' => serialize([$newsArchives['own']]),
+                        'alexf' => serialize(['tl_news::headline']),
+                        'netzhirschMcpAccess' => 1,
+                    ] + $tableRights(['tl_news::create', 'tl_news::update']));
+                    $newsGroupId = (int) $this->connection->lastInsertId();
+
+                    $row['username'] = $stamp.'_newsuser';
+                    $row['email'] = $stamp.'_news@example.invalid';
+                    $row['disable'] = 0;
+                    $row['inherit'] = 'group';
+                    $row['groups'] = serialize([$newsGroupId]);
+                    $quotedNews = [];
+                    foreach ($row as $col => $val) {
+                        $quotedNews[$this->connection->quoteIdentifier((string) $col)] = $val;
+                    }
+                    $this->connection->insert('tl_user', $quotedNews);
+                    $newsUserId = (int) $this->connection->lastInsertId();
+
+                    $this->mcpCallContext->setIdentity($newsUserId, 'smoke-news', null, null);
+                    $expect('a news editor may news_create in their archive',
+                        $this->permissionEnforcer->check('news_create', ['archive_id' => $newsArchives['own'], 'headline' => 'x']),
+                        fn ($r) => $r === null);
+                    $expect('but not in an archive that is not theirs',
+                        $this->permissionEnforcer->check('news_create', ['archive_id' => $newsArchives['foreign'], 'headline' => 'x']),
+                        fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
+                    $expect('nor move their news into it with news_update',
+                        $this->permissionEnforcer->check('news_update', ['id' => $newsId, 'archive_id' => $newsArchives['foreign']]),
+                        fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'permission_denied');
+                    $expect('nor name an author without the right to the author field',
+                        $this->permissionEnforcer->check('news_create', ['archive_id' => $newsArchives['own'], 'headline' => 'x', 'author_id' => $adminId]),
+                        fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), '"author"'));
+                    $expect('nor publish through extras without the right to the published field',
+                        $this->permissionEnforcer->check('news_update', ['id' => $newsId, 'extras' => ['published' => true]]),
+                        fn ($r) => \is_array($r) && str_contains((string) ($r['message'] ?? ''), '"published"'));
                 }
 
                 // (d5) File mounts, reported by a customer on 16.10.2026: the
@@ -2463,6 +2553,18 @@ final class McpSmokeTestCommand extends Command
                 if (($fileGroupId ?? 0) > 0) {
                     $this->connection->delete('tl_user_group', ['id' => $fileGroupId]);
                 }
+                if (($newsUserId ?? 0) > 0) {
+                    $this->connection->delete('tl_user', ['id' => $newsUserId]);
+                }
+                if (($newsGroupId ?? 0) > 0) {
+                    $this->connection->delete('tl_user_group', ['id' => $newsGroupId]);
+                }
+                if (($newsId ?? 0) > 0) {
+                    $this->connection->delete('tl_news', ['id' => $newsId]);
+                }
+                foreach ($newsArchives ?? [] as $archiveId) {
+                    $this->connection->delete('tl_news_archive', ['id' => $archiveId]);
+                }
                 // Folders last and in trusted mode — the identity above may not
                 // delete them, which is the whole point of the block.
                 $this->mcpCallContext->clear();
@@ -2470,6 +2572,11 @@ final class McpSmokeTestCommand extends Command
                     if ($dir !== '' && $dir !== '/inner') {
                         $this->fileTool->folderDelete($dir, true, true);
                     }
+                }
+
+                $this->requestStack->pop();
+                foreach (array_reverse($outerRequests) as $outer) {
+                    $this->requestStack->push($outer);
                 }
             }
         } else {

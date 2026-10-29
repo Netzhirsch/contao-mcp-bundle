@@ -45,7 +45,8 @@ final class McpPermissionGuard
     /** @var array<string, true> tables whose DCA has been loaded */
     private array $loadedTables = [];
 
-    private bool $accessiblePagesResolved = false;
+    /** The caller {@see $accessiblePages} was resolved for: user id, 0 = trusted, -1 = none yet. */
+    private int $accessiblePagesFor = -1;
 
     /** @var list<int>|null memoised accessible tl_page ids (null = unrestricted) */
     private ?array $accessiblePages = null;
@@ -230,9 +231,8 @@ final class McpPermissionGuard
             $mountRow = $record;
 
             // On create there is no record yet — the mount that matters is the
-            // one the new row would land in. The enforcer hands over the
-            // ARGUMENT names, so an article arrives with `page_id` where the
-            // column is `pid`.
+            // one the new row would land in. The map translates `page_id` to
+            // `pid`; a direct caller may still hand over the argument name.
             if ($mountRow === null && $operation === 'create' && \is_array($newData)) {
                 $mountRow = $table === 'tl_article'
                     ? ['pid' => (int) ($newData['pid'] ?? $newData['page_id'] ?? 0)]
@@ -254,6 +254,25 @@ final class McpPermissionGuard
                     sprintf('This record in %s is outside your page mounts.', $table),
                     ['table' => $table, 'operation' => $operation, 'id' => $id],
                 );
+            }
+
+            // An update that moves the record asks a second question: may it
+            // land there? The record only answers where it comes from, so an
+            // article on a mounted page could be moved onto any page by id.
+            // The target is the new parent, judged the way a create is.
+            $newPid = \is_array($newData) && isset($newData['pid']) && is_numeric($newData['pid']) ? (int) $newData['pid'] : null;
+            if ($operation === 'update' && $record !== null && $newPid !== null && $newPid !== (int) ($record['pid'] ?? 0)) {
+                $target = $table === 'tl_article' ? ['pid' => $newPid] : ['id' => $newPid];
+
+                // A page moved to the top level has no parent mount; the
+                // voter decides, as it does for a new root page.
+                if (($table === 'tl_article' || $newPid !== 0) && !$this->mayAccessRecord($table, $target)) {
+                    return $this->deny(
+                        'permission_denied',
+                        sprintf('The new parent of this record in %s is outside your page mounts.', $table),
+                        ['table' => $table, 'operation' => $operation, 'id' => $id, 'pid' => $newPid],
+                    );
+                }
             }
         }
 
@@ -354,7 +373,7 @@ final class McpPermissionGuard
      * The set of tl_page ids the current OAuth user may access: their
      * (group-merged) pagemounts plus all recursive descendants. Returns null
      * for admins / trusted mode (= no restriction), [] for a user without
-     * pagemounts. Memoised per request.
+     * pagemounts. Memoised per caller.
      *
      * Pages/articles have no record-level read voter that honours pagemounts
      * (Contao's tl_page voter only checks the page TYPE), so list tools scope
@@ -364,17 +383,23 @@ final class McpPermissionGuard
      */
     public function accessiblePageIds(): ?array
     {
-        if ($this->accessiblePagesResolved) {
+        $userId = $this->callContext->getUserId();
+        $caller = $userId !== null && $userId > 0 ? $userId : 0;
+
+        // Per caller, not per instance. The guard is a shared service, and a
+        // process that serves more than one identity (the smoke test switches
+        // between several, a long-running server between requests) was handed
+        // the first caller's answer — an admin's "everything" for an editor.
+        if ($this->accessiblePagesFor === $caller) {
             return $this->accessiblePages;
         }
-        $this->accessiblePagesResolved = true;
+        $this->accessiblePagesFor = $caller;
 
-        $userId = $this->callContext->getUserId();
-        if ($userId === null || $userId <= 0 || $this->userContext->isAdmin($userId)) {
+        if ($caller === 0 || $this->userContext->isAdmin($caller)) {
             return $this->accessiblePages = null; // trusted mode / admin → all pages
         }
 
-        $token = $this->userContext->tokenFor($userId);
+        $token = $this->userContext->tokenFor($caller);
         $user = $token?->getUser();
         if ($user === null) {
             return $this->accessiblePages = [];

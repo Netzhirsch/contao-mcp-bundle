@@ -6,6 +6,83 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.39.1] – 2026-10-29
+
+> Sicherheitsrelease. Betrifft Backend-Benutzer ohne Admin-Rechte mit
+> `auth_mode: oauth`. Admins und `auth_mode: none` sind unverändert. **Update
+> empfohlen.** Nach dem Update kann ein Redakteur „You are not allowed to edit
+> the field …" sehen, wo ein Aufruf bisher still durchging. Dann fehlt seiner
+> Gruppe das Feldrecht, und im Backend wäre es genauso.
+
+### Fixed
+- **`news_create` war für Redakteure ohne Admin-Rechte immer gesperrt.**
+  Gemeldet von Mueller & Feh (wisst-international.com, Contao 5.7.8) am
+  27.10.2026: „You are not allowed to create this record in tl_news", obwohl
+  Modul, Archiv, Tabellen- und Feldrechte stimmten und derselbe Benutzer den
+  Beitrag im Backend anlegen konnte.
+
+  Contaos `NewsAccessVoter` sucht das Archiv in der Spalte `pid`. Das Tool
+  nimmt es als `archive_id`, und so kam es auch beim Voter an. Der fand kein
+  Archiv, prüfte Archiv 0 und lehnte ab. Dasselbe galt für jedes Tool, dessen
+  Container ein Voter prüft: `calendar_event_create` (`calendar_id`),
+  `faq_create` (`category_id`), `newsletter_create` und
+  `newsletter_recipient_create` (`channel_id`), `form_field_create`
+  (`form_id`). Vorhanden seit 1.0.6. Die Rechte-Prüfung übersetzt die
+  Argumente jetzt in die Spalten, die Contao liest.
+
+### Security
+- **Verschieben in einen fremden Container wurde nicht geprüft.** Dieselbe
+  Ursache, andere Richtung: `news_update` mit neuer `archive_id` (ebenso
+  `calendar_event_update`, `faq_update`) kam beim Voter ohne neues Ziel an. Er
+  prüfte nur das Archiv, in dem die Meldung lag. Ein Redakteur konnte eine
+  Meldung aus seinem Archiv in eines verschieben, das er im Backend nicht
+  einmal sieht. Jetzt prüft der Voter auch das Ziel.
+
+  `article_update` mit neuer `page_id` prüft der Guard zusätzlich gegen die
+  Pagemounts, wie schon beim Anlegen.
+
+- **Umbenannte Argumente umgingen die Feldrechte.** Die Feldrechte-Kontrolle
+  fragt Contao nach den Namen, die sie bekommt. Einen Namen, den die DCA nicht
+  kennt, überspringt sie. Viele Tools nehmen ihre Felder aber in snake_case
+  entgegen, und die Mapper schreiben sie in die camelCase-Spalte. So schrieb
+  ein Redakteur ohne Admin-Rechte zum Beispiel
+  - `home_dir`, `assign_dir`, `date_of_birth` am Mitglied,
+  - `css_class`, `add_jquery`, `external_js` am Layout,
+  - `jump_to`, `mailer_transport`, `store_values` am Formular,
+  - die snake_case-Felder an Bildgrößen, Newslettern, Verteilern und
+    Kommentaren
+  - und `author_id` an News, Events, FAQ und Artikeln,
+
+  ohne das Feldrecht auf die Spalte zu haben. Betroffen waren 51 Argumente in
+  14 Tabellen, jedes gegen die Contao-5.7-DCA geprüft. Sie kommen jetzt unter
+  ihrem Spaltennamen an, auch als Schlüssel in einem `fields`-Objekt.
+
+  Zwei Sonderfälle:
+  - Die Schlüssel in **`extras`** (News, Events, FAQ, Artikel, Seiten) wurden
+    gar nicht geprüft. Sie landen im selben Mapper wie die übrigen Argumente,
+    `extras: {"published": true}` hat also ohne Feldrecht veröffentlicht.
+  - **`active`** schreibt das Gegenteil seiner Spalte: `disable` am Mitglied
+    und an der Mitgliedergruppe, `invisible` am Bildgrößen-Eintrag, `inactive`
+    am URL-Rewrite. Nur umbenennen hätte nicht gereicht. `active: false` sähe
+    neben einem gespeicherten `disable = ''` unverändert aus, und für ein
+    unverändertes Feld braucht es kein Recht. Der Wert wird deshalb mit
+    umgedreht, wie es die Tools tun.
+
+- **Die erreichbaren Seiten wurden pro Prozess gemerkt, nicht pro Benutzer.**
+  Wer im selben Prozess als Zweiter fragte, bekam die Antwort des Ersten. Unter
+  PHP-FPM ist das ein Request, also ein Benutzer. Ein lange laufender Prozess
+  hätte einem Redakteur die Pagemounts eines Admins gegeben, also alle Seiten.
+
+### Notes
+- **Der Smoke-Test hat Contaos Voter bisher nie entscheiden lassen.** Contao
+  wertet sie nur innerhalb seiner eigenen Firewalls nach Priorität aus
+  (`ContaoStrategy`). Außerhalb gilt Symfonys Vorgabe, und dort erlaubt der
+  `DefaultDataContainerVoter` jeden Datensatz. Im CLI-Lauf des Smoke-Tests war
+  das immer der Fall, unter `/mcp` (Frontend-Firewall) nie. Deshalb ist der
+  Fehler oben dort nicht aufgefallen. Der Rechte-Block läuft jetzt in derselben
+  Firewall wie `/mcp`. Seine Testbenutzer haben die Rechte, die Contao 5.7
+  zusätzlich verlangt: Tabellenrechte (`cud`) und Seitentypen (`alpty`).
+
 ## [1.39.0] – 2026-10-28
 
 > Der Datei-Upload, einmal ganz durchgesehen. Die Tools behalten ihre Namen und
