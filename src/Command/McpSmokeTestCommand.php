@@ -2297,6 +2297,31 @@ final class McpSmokeTestCommand extends Command
                     ['denial' => $this->permissionGuard->ensureCan('tl_page', 'read', 1)],
                     fn ($r) => \is_array($r['denial']) && ($r['denial']['error'] ?? null) === 'permission_denied');
 
+                // (d3b) An administrator, once the operator excludes them. Own
+                // id for the same caching reason as (d3).
+                $row['username'] = $stamp.'_adminuser';
+                $row['email'] = $stamp.'_admin@example.invalid';
+                $row['disable'] = 0;
+                $row['admin'] = 1;
+                $quotedAdmin = [];
+                foreach ($row as $col => $val) {
+                    $quotedAdmin[$this->connection->quoteIdentifier((string) $col)] = $val;
+                }
+                $this->connection->insert('tl_user', $quotedAdmin);
+                $excludedAdminId = (int) $this->connection->lastInsertId();
+                $row['admin'] = 0;
+
+                $adminsAllowedBefore = $this->configStorage->load()['admins_allowed'];
+                $this->configStorage->save([...$this->configStorage->load(), 'admins_allowed' => false]);
+                try {
+                    $this->mcpCallContext->setIdentity($excludedAdminId, 'smoke-admin', null, null);
+                    $expect('an administrator is refused once administrators are excluded',
+                        $this->permissionGuard->ensureMcpAccess(),
+                        fn ($r) => \is_array($r) && ($r['error'] ?? null) === 'mcp_access_denied' && str_contains((string) ($r['message'] ?? ''), 'Administrator'));
+                } finally {
+                    $this->configStorage->save([...$this->configStorage->load(), 'admins_allowed' => $adminsAllowedBefore]);
+                }
+
                 // (d4) Field rights, decided the way Contao decides them. Since
                 // Contao 5.0 every field with an input is excluded unless the
                 // DCA opts out, and the core DCAs no longer set the key — the
@@ -2533,6 +2558,9 @@ final class McpSmokeTestCommand extends Command
                 }
                 if (($disabledUserId ?? 0) > 0) {
                     $this->connection->delete('tl_user', ['id' => $disabledUserId]);
+                }
+                if (($excludedAdminId ?? 0) > 0) {
+                    $this->connection->delete('tl_user', ['id' => $excludedAdminId]);
                 }
                 if (($fieldArticleId ?? 0) > 0) {
                     $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $fieldArticleId]);
@@ -3598,6 +3626,81 @@ final class McpSmokeTestCommand extends Command
         $expect('a batch within the ceiling still runs every item',
             json_decode((string) $accepted->getContent(), true),
             static fn ($d) => \is_array($d) && \count($d) === 3);
+
+        // ── Operator switches ─────────────────────────────────────────────
+        //
+        // Through contao_call, which runs the same enforcer, rewrite and
+        // redaction as a direct tools/call — the controller would stop at the
+        // licence gate on an unlicensed test instance. The catalogue pruning
+        // happened when this process built its dispatcher; what is checked
+        // here is the per-call refusal, which reads the configuration anew.
+        $callTool = function (string $tool, array $args): array {
+            $result = $this->discoveryTool->call($tool, $args);
+
+            return [
+                'isError' => \is_array($result) && isset($result['error']),
+                'data' => \is_array($result) ? $result : ['raw' => $result],
+            ];
+        };
+        $switchesBefore = $this->configStorage->load();
+
+        try {
+            $this->configStorage->save([...$switchesBefore, 'read_only' => true]);
+            $expect('read-only refuses a writing tool',
+                $callTool('page_update', ['id' => 999999999, 'title' => 'x']),
+                static fn ($r) => ($r['data']['error'] ?? null) === 'read_only');
+            $expect('...on a direct tools/call as well',
+                $this->permissionEnforcer->check('page_update', ['id' => 999999999, 'title' => 'x']),
+                static fn ($r) => ($r['error'] ?? null) === 'read_only');
+            $expect('...and still answers a reading one',
+                $callTool('pages_list', ['limit' => 1]),
+                static fn ($r) => !$r['isError'] && !isset($r['data']['error']));
+
+            $this->configStorage->save([...$switchesBefore, 'allow_delete' => false]);
+            $expect('no-delete refuses a deleting tool before it looks for the record',
+                $callTool('page_delete', ['id' => 999999999]),
+                static fn ($r) => ($r['data']['error'] ?? null) === 'delete_not_allowed');
+
+            $this->configStorage->save([...$switchesBefore, 'privacy_mode' => true]);
+            $expect('privacy mode keeps the member tools out',
+                $callTool('members_list', ['limit' => 1]),
+                static fn ($r) => ($r['data']['error'] ?? null) === 'privacy_mode');
+            $expect('...and a personal table named in the call',
+                $callTool('entity_field_patch', ['table' => 'tl_member', 'id' => 1, 'field' => 'city', 'old' => 'a', 'new' => 'b', 'dry_run' => true]),
+                static fn ($r) => ($r['data']['error'] ?? null) === 'privacy_mode');
+
+            if ($requires('contao/news-bundle', 'operator switches on news (create unpublished, no publishing)')) {
+                $this->connection->insert('tl_news_archive', ['tstamp' => time(), 'title' => $stamp.'_switch_archiv', 'jumpTo' => 0]);
+                $switchArchiveId = (int) $this->connection->lastInsertId();
+
+                $this->configStorage->save([...$switchesBefore, 'create_unpublished' => true]);
+                $createdNews = $callTool('news_create', ['archive_id' => $switchArchiveId, 'headline' => 'Switch '.$stamp]);
+                $switchNewsId = (int) ($createdNews['data']['id'] ?? 0);
+                $expect('create-unpublished creates a news entry hidden although the call did not say so',
+                    $switchNewsId > 0 ? $this->connection->fetchOne('SELECT published FROM tl_news WHERE id = ?', [$switchNewsId]) : 'not created',
+                    static fn ($v) => \in_array($v, ['', '0', 0], true));
+                $expect('...and refuses one that asks to be visible',
+                    $callTool('news_create', ['archive_id' => $switchArchiveId, 'headline' => 'x', 'published' => true]),
+                    static fn ($r) => ($r['data']['error'] ?? null) === 'create_unpublished');
+
+                $this->configStorage->save([...$switchesBefore, 'allow_publish' => false]);
+                $expect('no-publish refuses switching the entry visible',
+                    $callTool('news_update', ['id' => $switchNewsId, 'published' => true]),
+                    static fn ($r) => ($r['data']['error'] ?? null) === 'publish_not_allowed');
+                $expect('...while a text change goes through',
+                    $callTool('news_update', ['id' => $switchNewsId, 'headline' => 'Switch 2 '.$stamp]),
+                    static fn ($r) => !$r['isError'] && !isset($r['data']['error']));
+            }
+        } finally {
+            $this->configStorage->save($switchesBefore);
+            if (($switchNewsId ?? 0) > 0) {
+                $this->connection->delete('tl_news', ['id' => $switchNewsId]);
+            }
+            if (($switchArchiveId ?? 0) > 0) {
+                $this->connection->executeStatement('DELETE FROM tl_news WHERE pid = ?', [$switchArchiveId]);
+                $this->connection->delete('tl_news_archive', ['id' => $switchArchiveId]);
+            }
+        }
 
         $this->configStorage->save([...$this->configStorage->load(), 'auth_mode' => $authModeBefore]);
 

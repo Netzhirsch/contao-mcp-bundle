@@ -432,6 +432,13 @@ only YAML and environment settings.
 | `extension_tools_enabled` | `[]` | Tools of other bundles switched on, also in the tool panel ([EXTENDING.md](EXTENDING.md)) |
 | `registration_open_until` | `0` | End of the pairing window (Unix time), set by the button on the status page |
 | `license_server_url` | `""` | Development only: replaces the built-in license server |
+| `house_rules` | `""` | House rules every AI client receives when it connects, at most 4000 characters (see [What the AI may do](#what-the-ai-may-do-switches-and-house-rules)) |
+| `read_only` | `false` | Read only: every writing tool disappears |
+| `allow_publish` | `true` | `false`: nothing may be made visible, new content starts unpublished |
+| `create_unpublished` | `false` | Always create new content unpublished |
+| `allow_delete` | `true` | `false`: every deleting tool disappears |
+| `privacy_mode` | `false` | Privacy mode: members, newsletter recipients, comments, form submissions and backend users are out of reach, IBAN/BIC never leave |
+| `admins_allowed` | `true` | `false`: administrator accounts may not connect |
 
 Bundle configuration in `config/config.yaml` — the Contao Managed Edition does
 not read `config/packages/`:
@@ -458,6 +465,81 @@ MCP_PREVIEW_BASIC_AUTH="user:pass"
 
 The tool points this out itself on a 401/403. The credentials live only in
 `.env.local`, never in an answer or a log.
+
+## What the AI may do: switches and house rules
+
+**MCP-Server → Konfiguration** has six switches. They apply to every AI client
+and every account, **administrators included**, and in trusted mode as well.
+They narrow what the backend rights allow and never widen it:
+
+| Switch | Effect |
+|---|---|
+| Read only | Every writing tool disappears from the catalogue. |
+| Publishing | Off: pages, articles, content elements, news, events, FAQs and comments cannot be switched visible; new ones start unpublished. Hiding stays possible; start and stop dates are not covered. |
+| New content unpublished | New pages, articles, content elements, news, events and FAQs start hidden, copies too. Publishing stays a separate step. |
+| Deleting | Off: every deleting tool disappears. |
+| Privacy mode | Members, newsletter recipients, comments, form submissions and backend users are out of reach; IBAN and BIC are never read or written, in whatever table. |
+| Administrators | Off: administrator accounts are refused, already when connecting. The AI then always works with the rights of a regular account. |
+
+A tool a switch rules out disappears from `tools/list`, the search and
+`contao_call`. What only the arguments show — a table named in the call, a
+record about to become visible — the server refuses at call time with an error
+code (`read_only`, `delete_not_allowed`, `publish_not_allowed`,
+`create_unpublished`, `privacy_mode`). A call that leaves `published` out gets
+the hidden value filled in under "unpublished"; an explicitly visible value is
+refused, not quietly turned around.
+
+**House rules** are free text, at most 4000 characters. Every client receives
+them as the server instructions when it connects, together with the active
+switches; the `contao_guide` prompt repeats them. Room for terminology and
+spelling ("Write the company name in lower case", "Sicherheit is security,
+never safety") and for notes on what lives where.
+
+The status page shows which switches are in effect and whether house rules are
+set.
+
+### The Claude button
+
+Everyone with MCP access gets a **Claude** button in the backend header, before
+"Preview", and at the bottom right of the front-end preview. A click asks "What
+should Claude do?" and opens claude.ai with a request that already says which
+installation and which screen it is about: backend module, record being edited,
+address. A record's name goes in only when the user may read the record. The
+request is copied to the clipboard as well, because claude.ai does not document
+its `?q=` parameter. Visitors never see the button: in the preview it is added
+only to responses Contao has already marked private.
+
+## Web server: what has to get through
+
+The AI provider's servers talk to the endpoint directly, without a browser. For
+that to work:
+
+- **`/.well-known/oauth-authorization-server`** and
+  **`/.well-known/oauth-protected-resource`** (also with the endpoint path
+  behind it) must reach `public/index.php`. Some setups block paths that start
+  with a dot.
+- **The `Authorization` header must reach PHP.** Contao's own `.htaccess`
+  passes it on; a custom one needs
+  `RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`. Without it the
+  client asks for a new login on every call.
+- **Behind HTTP Basic Auth** (common on staging) the endpoint path,
+  `/_mcp_oauth/token`, `/_mcp_oauth/register` and `/.well-known/oauth-*` must be
+  exempt. `/_mcp_oauth/authorize` may stay protected; the browser opens it. For
+  Apache 2.4 (via `THE_REQUEST`, because Contao rewrites internally to
+  `index.php`):
+
+  ```apache
+  <If "%{THE_REQUEST} =~ m#^[A-Z]+ /(mcp(/.*)?|_mcp_oauth/(token|register)|\.well-known/oauth-[a-z-]+(/.*)?)[ ?]#">
+      Require all granted
+  </If>
+  ```
+
+  Adjust the expression if the endpoint path is not `mcp`.
+- **No IP block on the endpoint** unless you know which addresses the provider
+  uses. Local clients such as Claude Code connect from your own machine.
+
+What a client reports when it still fails, and what is behind it, is a table at
+the bottom of **MCP-Server → Status**.
 
 ## Uploading files
 

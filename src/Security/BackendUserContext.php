@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Security;
 
 use Doctrine\DBAL\Connection;
+use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
@@ -44,6 +45,7 @@ final class BackendUserContext
         private readonly Connection $connection,
         private readonly UserCheckerInterface $backendUserChecker,
         private readonly LoggerInterface $logger,
+        private readonly ?McpServerConfigStorage $configStorage = null,
     ) {
     }
 
@@ -106,9 +108,21 @@ final class BackendUserContext
     }
 
     /**
+     * True when the operator has shut administrator accounts out of the MCP
+     * server (`admins_allowed = false`) and this user is one.
+     */
+    public function isExcludedAdmin(int $userId): bool
+    {
+        return $this->configStorage !== null
+            && !$this->configStorage->load()['admins_allowed']
+            && $this->isAdmin($userId);
+    }
+
+    /**
      * The coarse "may this user use the MCP server at all" gate
      * (tl_user.netzhirschMcpAccess OR any of their groups'
-     * tl_user_group.netzhirschMcpAccess). Admins are always allowed.
+     * tl_user_group.netzhirschMcpAccess). Admins are allowed unless the
+     * operator excluded them.
      */
     public function hasMcpAccess(int $userId): bool
     {
@@ -123,8 +137,10 @@ final class BackendUserContext
             return $this->mcpAccessCache[$userId] = false;
         }
 
+        // An administrator bypasses every per-record check, so the only way to
+        // keep an AI inside limited rights is to keep administrators out.
         if ($this->isAdmin($userId)) {
-            return $this->mcpAccessCache[$userId] = true;
+            return $this->mcpAccessCache[$userId] = !$this->isExcludedAdmin($userId);
         }
 
         try {

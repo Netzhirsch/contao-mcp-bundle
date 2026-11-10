@@ -151,6 +151,14 @@ final class McpPermissionGuard
             return null;
         }
 
+        if ($this->userContext->isExcludedAdmin($userId)) {
+            return $this->deny(
+                'mcp_access_denied',
+                'Administrator accounts may not use the MCP server on this installation. Connect with a regular backend account that has MCP access.',
+                ['user_id' => $userId],
+            );
+        }
+
         return $this->deny(
             'mcp_access_denied',
             'Your backend account is not permitted to use the MCP server. An administrator must enable MCP access for your user or one of your groups.',

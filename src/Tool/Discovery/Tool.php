@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Discovery;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Monolog\ContaoContext;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionEnforcer;
+use Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Server\ToolGroups;
 use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
@@ -48,6 +49,7 @@ final class Tool
         private readonly UndoRecorder $undoRecorder,
         private readonly DeletionGuard $deletionGuard,
         private readonly ArgumentGuard $argumentGuard,
+        private readonly OperatorPolicy $operatorPolicy,
     ) {
     }
 
@@ -347,6 +349,10 @@ final class Tool
             return $unknownArgs;
         }
 
+        // The same create-unpublished default the controller applies to a
+        // direct call.
+        $arguments = $this->operatorPolicy->rewrite($name, $arguments);
+
         // Same reasoning as the permission check above: without these, deleting
         // through the lazy-mode proxy would skip the reference guard and the
         // undo snapshot that direct tools/call requests get.
@@ -385,7 +391,8 @@ final class Tool
             $this->undoRecorder->discard($undoId);
         }
 
-        return $result;
+        // Privacy mode: IBAN and BIC do not leave, through the proxy either.
+        return $this->operatorPolicy->redact($result);
     }
 
     // ─────────────────────────── helpers ────────────────────────────

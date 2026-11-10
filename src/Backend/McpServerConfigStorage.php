@@ -19,6 +19,14 @@ use Netzhirsch\ContaoMcpBundle\Service\AtomicFile;
 final class McpServerConfigStorage
 {
     /**
+     * Upper bound for the house rules. They go to the client with every
+     * `initialize`, so they cost context on every connection; a page of text is
+     * plenty for rules and terminology, and a pasted manual is not what the
+     * field is for.
+     */
+    public const HOUSE_RULES_MAX_LENGTH = 4000;
+
+    /**
      * @return array{
      *     path: string,
      *     pagination_limit: int,
@@ -31,7 +39,14 @@ final class McpServerConfigStorage
      *     registration_open_until: int,
      *     license_server_url: string,
      *     cimd_mode: string,
-     *     cimd_trusted_hosts: list<string>
+     *     cimd_trusted_hosts: list<string>,
+     *     house_rules: string,
+     *     read_only: bool,
+     *     allow_publish: bool,
+     *     allow_delete: bool,
+     *     create_unpublished: bool,
+     *     privacy_mode: bool,
+     *     admins_allowed: bool
      * }
      */
     public function defaults(): array
@@ -108,6 +123,24 @@ final class McpServerConfigStorage
             // URL is safe to expose/change: a rogue server cannot mint valid,
             // vendor-signed tokens. See License\RenewalClient + LicenseGate.
             'license_server_url' => '',
+            // Free text the operator wants every client to follow — terminology,
+            // spelling, what a custom table holds. Sent as the server
+            // instructions on `initialize` and repeated in contao_guide.
+            'house_rules' => '',
+            // Operator switches. They narrow what ANY caller may do, the
+            // administrator included, on top of the per-user rights; see
+            // Security\OperatorPolicy. The defaults keep an installation that
+            // updates exactly as it was.
+            'read_only' => false,
+            'allow_publish' => true,
+            'allow_delete' => true,
+            'create_unpublished' => false,
+            // Members, newsletter recipients, comments, form submissions and
+            // backend users stay out of reach, and IBAN/BIC never leave.
+            'privacy_mode' => false,
+            // false = administrator accounts are refused at the MCP endpoint,
+            // so the AI always works with an account whose rights are limited.
+            'admins_allowed' => true,
         ];
     }
 
@@ -131,6 +164,13 @@ final class McpServerConfigStorage
      *     license_server_url: string,
      *     cimd_mode: string,
      *     cimd_trusted_hosts: list<string>,
+     *     house_rules: string,
+     *     read_only: bool,
+     *     allow_publish: bool,
+     *     allow_delete: bool,
+     *     create_unpublished: bool,
+     *     privacy_mode: bool,
+     *     admins_allowed: bool,
      *     config_state?: string,
      *     config_error?: string
      * }
@@ -214,6 +254,13 @@ final class McpServerConfigStorage
             'license_server_url' => rtrim(self::trimString($decoded['license_server_url'] ?? null, ''), '/'),
             'cimd_mode' => self::clampEnum($decoded['cimd_mode'] ?? null, ['off', 'trusted', 'open'], $defaults['cimd_mode']),
             'cimd_trusted_hosts' => self::hostList($decoded['cimd_trusted_hosts'] ?? null, $defaults['cimd_trusted_hosts']),
+            'house_rules' => self::houseRules($decoded['house_rules'] ?? null),
+            'read_only' => self::toBool($decoded['read_only'] ?? null, $defaults['read_only']),
+            'allow_publish' => self::toBool($decoded['allow_publish'] ?? null, $defaults['allow_publish']),
+            'allow_delete' => self::toBool($decoded['allow_delete'] ?? null, $defaults['allow_delete']),
+            'create_unpublished' => self::toBool($decoded['create_unpublished'] ?? null, $defaults['create_unpublished']),
+            'privacy_mode' => self::toBool($decoded['privacy_mode'] ?? null, $defaults['privacy_mode']),
+            'admins_allowed' => self::toBool($decoded['admins_allowed'] ?? null, $defaults['admins_allowed']),
         ];
     }
 
@@ -223,7 +270,7 @@ final class McpServerConfigStorage
      * @return array{
      *     saved: bool,
      *     errors: list<string>,
-     *     values: array{path: string, pagination_limit: int, auth_mode: string, backend_url: string, oauth_registration_mode: string, lazy_mode: bool, extension_tools_enabled: list<string>, disabled_tools: list<string>, registration_open_until: int, license_server_url: string}
+     *     values: array{path: string, pagination_limit: int, auth_mode: string, backend_url: string, oauth_registration_mode: string, lazy_mode: bool, extension_tools_enabled: list<string>, disabled_tools: list<string>, registration_open_until: int, license_server_url: string, cimd_mode: string, cimd_trusted_hosts: list<string>, house_rules: string, read_only: bool, allow_publish: bool, allow_delete: bool, create_unpublished: bool, privacy_mode: bool, admins_allowed: bool}
      * }
      */
     public function save(array $input): array
@@ -275,6 +322,11 @@ final class McpServerConfigStorage
         // to nothing at all.
         $cimdTrustedHosts = self::hostList($input['cimd_trusted_hosts'] ?? null, $defaults['cimd_trusted_hosts']);
 
+        // Cut rather than refused: a rule that ends mid-sentence is visible in
+        // the form and gets fixed, while a refused save would throw away
+        // everything else the operator changed with it. The form says so.
+        $houseRules = self::houseRules($input['house_rules'] ?? null);
+
         $values = [
             'path' => $path,
             'pagination_limit' => $paginationLimit,
@@ -288,6 +340,13 @@ final class McpServerConfigStorage
             'license_server_url' => $licenseServerUrl,
             'cimd_mode' => $cimdMode,
             'cimd_trusted_hosts' => $cimdTrustedHosts,
+            'house_rules' => $houseRules,
+            'read_only' => self::toBool($input['read_only'] ?? null, $defaults['read_only']),
+            'allow_publish' => self::toBool($input['allow_publish'] ?? null, $defaults['allow_publish']),
+            'allow_delete' => self::toBool($input['allow_delete'] ?? null, $defaults['allow_delete']),
+            'create_unpublished' => self::toBool($input['create_unpublished'] ?? null, $defaults['create_unpublished']),
+            'privacy_mode' => self::toBool($input['privacy_mode'] ?? null, $defaults['privacy_mode']),
+            'admins_allowed' => self::toBool($input['admins_allowed'] ?? null, $defaults['admins_allowed']),
         ];
 
         if ($errors !== []) {
@@ -391,6 +450,28 @@ final class McpServerConfigStorage
         }
 
         return array_keys($out);
+    }
+
+    /**
+     * The house rules as they may be stored and sent: line breaks normalised,
+     * control characters other than line breaks and tabs removed, cut to
+     * {@see HOUSE_RULES_MAX_LENGTH}.
+     */
+    private static function houseRules(mixed $value): string
+    {
+        if (!\is_string($value)) {
+            return '';
+        }
+
+        return mb_substr(self::normaliseText($value), 0, self::HOUSE_RULES_MAX_LENGTH);
+    }
+
+    private static function normaliseText(string $value): string
+    {
+        $text = str_replace(["\r\n", "\r"], "\n", $value);
+        $text = (string) preg_replace('/[^\P{C}\n\t]/u', '', $text);
+
+        return trim($text);
     }
 
     private static function trimString(mixed $value, string $fallback): string

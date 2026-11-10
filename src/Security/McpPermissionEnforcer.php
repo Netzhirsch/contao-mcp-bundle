@@ -26,6 +26,7 @@ final class McpPermissionEnforcer
         private readonly ToolPermissionMap $map,
         private readonly McpPermissionGuard $guard,
         private readonly OptionalBundles $optionalBundles,
+        private readonly ?OperatorPolicy $operatorPolicy = null,
     ) {
     }
 
@@ -36,6 +37,13 @@ final class McpPermissionEnforcer
      */
     public function check(string $tool, array $args): ?array
     {
+        // The operator's switches first: they bind every caller, the
+        // administrator and trusted mode included, which the per-user checks
+        // below wave through.
+        if ($this->operatorPolicy !== null && ($refused = $this->operatorPolicy->check($tool, $args)) !== null) {
+            return $refused;
+        }
+
         $req = $this->map->requirement($tool, $args);
 
         if ($req === null) {

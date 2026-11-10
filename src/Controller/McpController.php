@@ -11,6 +11,7 @@ use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
+use Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy;
 use Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory;
 use Netzhirsch\ContaoMcpBundle\Service\McpOAuthValidator;
 use PhpMcp\Schema\Content\TextContent;
@@ -91,6 +92,7 @@ final class McpController
         private readonly CimdResolver $cimdResolver,
         private readonly LicenseGate $licenseGate,
         private readonly LoggerInterface $logger,
+        private readonly OperatorPolicy $operatorPolicy,
     ) {
     }
 
@@ -468,6 +470,14 @@ final class McpController
             $toolName = (string) ($params['name'] ?? '');
             $toolArgs = \is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
 
+            // New content starts unpublished when the operator says so; the
+            // tool must see the flag the caller left out.
+            $rewritten = $this->operatorPolicy->rewrite($toolName, $toolArgs);
+            if ($rewritten !== $toolArgs) {
+                $toolArgs = $rewritten;
+                $request = new JsonRpcRequest($request->jsonrpc, $request->id, $request->method, [...$params, 'arguments' => $toolArgs]);
+            }
+
             if ($inUse = $this->deletionGuard->check($toolName, $toolArgs)) {
                 return JsonRpcResponse::make($id, new CallToolResult(
                     [new TextContent((string) json_encode($inUse))],
@@ -484,7 +494,7 @@ final class McpController
         $lastError = null;
         for ($attempt = 1; $attempt <= self::DCA_CACHE_RACE_RETRIES; ++$attempt) {
             try {
-                $response = JsonRpcResponse::make($id, $result = $dispatcher->handleRequest($request, $session));
+                $result = $dispatcher->handleRequest($request, $session);
 
                 // The tool refused (not found, cascade guard, …) — the rows are
                 // still there, so the snapshot would be a lie.
@@ -492,7 +502,11 @@ final class McpController
                     $this->undoRecorder->discard($undoId);
                 }
 
-                return $response;
+                if ($result instanceof CallToolResult) {
+                    $result = $this->redacted($result);
+                }
+
+                return JsonRpcResponse::make($id, $result);
             } catch (McpServerException $mcpError) {
                 $this->undoRecorder->discard($undoId);
 
@@ -528,6 +542,37 @@ final class McpController
             'Transient filesystem error (DCA cache busy) persisted after '.self::DCA_CACHE_RACE_RETRIES.' attempts. '
             .$this->opaqueError($lastError, 'MCP dispatch failed after DCA-cache retries.'),
         )->toJsonRpcError($id);
+    }
+
+    /**
+     * The result without IBAN and BIC when privacy mode is on. Tools return
+     * their data as JSON text; it is only decoded and written again when there
+     * is something to take out, with the flags php-mcp encodes it with.
+     */
+    private function redacted(CallToolResult $result): CallToolResult
+    {
+        if (!$this->operatorPolicy->isPrivacyModeOn()) {
+            return $result;
+        }
+
+        $changed = false;
+        $content = [];
+
+        foreach ($result->content as $item) {
+            if ($item instanceof TextContent) {
+                $decoded = json_decode($item->text, true);
+                if (\is_array($decoded) && $this->operatorPolicy->wouldRedact($decoded)) {
+                    $item = new TextContent((string) json_encode(
+                        $this->operatorPolicy->redact($decoded),
+                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+                    ), $item->annotations);
+                    $changed = true;
+                }
+            }
+            $content[] = $item;
+        }
+
+        return $changed ? new CallToolResult($content, $result->isError) : $result;
     }
 
     /**

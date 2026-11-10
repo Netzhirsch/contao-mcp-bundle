@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Guide;
 use Composer\InstalledVersions;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
+use Netzhirsch\ContaoMcpBundle\Server\ServerInstructions;
 use PhpMcp\Server\Attributes\McpPrompt;
 
 /**
@@ -92,6 +93,7 @@ final class Prompt
     public function __construct(
         private readonly RegistryAccessor $registryAccessor,
         private readonly McpServerConfigStorage $configStorage,
+        private readonly ?ServerInstructions $serverInstructions = null,
     ) {
     }
 
@@ -104,9 +106,14 @@ final class Prompt
     #[McpPrompt(name: 'contao_guide')]
     public function guide(): array
     {
+        // A client may never read the server instructions it got on
+        // `initialize`; whoever asks for the guide gets them here as well.
+        $instructions = $this->serverInstructions?->text();
+
         return ['user' => implode("\n", [
             $this->instanceSection(),
             '',
+            ...($instructions !== null ? ['# This installation\'s rules', '', $instructions, ''] : []),
             $this->findingToolsSection(),
             '',
             $this->rulesSection(),

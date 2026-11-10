@@ -26,6 +26,7 @@ class ModuleMcpConfig extends AbstractMcpModule
     protected function compileModule(ContainerInterface $container, McpServerConfigStorage $configStorage, array $config): void
     {
         $this->Template->oauthIsHttp = self::isHttpInsecure($config);
+        $this->Template->houseRulesMaxLength = McpServerConfigStorage::HOUSE_RULES_MAX_LENGTH;
     }
 
     protected function handleAction(string $action, ContainerInterface $container, McpServerConfigStorage $configStorage): void
@@ -67,11 +68,25 @@ class ModuleMcpConfig extends AbstractMcpModule
             'extension_tools_enabled' => $configStorage->load()['extension_tools_enabled'],
             'disabled_tools' => $configStorage->load()['disabled_tools'],
             'registration_open_until' => $configStorage->load()['registration_open_until'],
+            // Operator switches: same hidden-'0' / checked-'1' pattern.
+            'read_only' => (bool) Input::post('read_only'),
+            'allow_publish' => (bool) Input::post('allow_publish'),
+            'create_unpublished' => (bool) Input::post('create_unpublished'),
+            'allow_delete' => (bool) Input::post('allow_delete'),
+            'privacy_mode' => (bool) Input::post('privacy_mode'),
+            'admins_allowed' => (bool) Input::post('admins_allowed'),
+            // Raw: Input::post() would encode the special characters a rule
+            // may legitimately contain (quotes, angle brackets, braces); the
+            // text is only ever printed escaped and sent as plain text.
+            'house_rules' => (string) Input::postUnsafeRaw('house_rules'),
         ];
         $result = $configStorage->save($input);
 
         if ($result['saved']) {
             Message::addConfirmation($this->translate('config_saved'));
+            if (mb_strlen(trim($input['house_rules'])) > McpServerConfigStorage::HOUSE_RULES_MAX_LENGTH) {
+                Message::addInfo(sprintf($this->translate('house_rules_cut'), McpServerConfigStorage::HOUSE_RULES_MAX_LENGTH));
+            }
         } else {
             $details = [];
             foreach ($result['errors'] as $code) {

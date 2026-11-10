@@ -6,6 +6,63 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.40.0] – 2026-11-10
+
+> Neue Schalter und Hausregeln. Wer nichts einschaltet, bemerkt nichts: Die
+> Voreinstellungen entsprechen dem bisherigen Verhalten.
+
+### Added
+- **Schalter dafür, was die KI darf** (MCP-Server → Konfiguration → „Was die
+  KI darf“): nur lesen, Veröffentlichen erlauben, neue Inhalte immer
+  unveröffentlicht anlegen, Löschen erlauben, Datenschutzmodus,
+  Administratoren zulassen. Sie gelten für jedes Konto, auch für
+  Administratoren, und im Trusted Mode. Rechte sagen, was ein Benutzer darf;
+  die Schalter sagen, was diese Installation einer KI überhaupt erlaubt.
+  Bisher ließ sich das nur über die Liste abgeschalteter Tools ungefähr
+  nachbauen, ein Häkchen pro Tool.
+  - Was ein Schalter am Toolnamen erkennt, verschwindet aus dem Katalog wie
+    ein abgeschaltetes Tool. Was erst die Argumente zeigen, lehnt der Server
+    beim Aufruf ab: `read_only`, `delete_not_allowed`, `publish_not_allowed`,
+    `create_unpublished`, `privacy_mode`.
+  - „Unveröffentlicht“ setzt bei Seiten, Artikeln, Inhaltselementen, News,
+    Terminen und FAQ den versteckten Wert ein, wenn der Aufruf ihn weglässt,
+    auch in `pages_create_tree`, `content_create_tree` und `entity_duplicate`.
+    Ein ausdrücklich sichtbarer Wert wird abgelehnt, nicht umgedreht — sonst
+    meldet die KI eine Seite als online, die es nicht ist.
+  - Ohne „Veröffentlichen“ lässt sich ein versteckter Datensatz nicht
+    sichtbar schalten. Verstecken bleibt möglich, ebenso das erneute Schreiben
+    des Werts, den er schon hat.
+  - Der Datenschutzmodus sperrt Mitglieder, Newsletter-Empfänger, Kommentare,
+    Formulareinsendungen und Backend-Benutzer, auch wenn die Tabelle erst im
+    Aufruf steht (`entity_*`), und nimmt IBAN und BIC aus jeder Antwort und
+    jedem Schreibzugriff.
+  - Sind Administratoren ausgeschlossen, lehnt schon die Zustimmungsseite ein
+    Administratorkonto ab, nicht erst der erste Tool-Aufruf.
+- **Hausregeln:** ein Freitext (höchstens 4000 Zeichen), den jeder Client beim
+  Verbinden als Server-Anweisung bekommt, zusammen mit den aktiven Schaltern.
+  `contao_guide` wiederholt ihn. Platz für Terminologie, Schreibweisen und
+  Hinweise auf eigene Inhalte — bei einer Übersetzung zum Beispiel, welcher
+  Fachbegriff wie heißt.
+- **Claude-Knopf** im Backend-Kopf (vor „Vorschau“) und in der
+  Frontend-Vorschau, für jeden Benutzer mit MCP-Zugriff. Er fragt „Was soll
+  Claude tun?“ und öffnet claude.ai mit einer Anfrage, die Installation,
+  Backend-Modul, bearbeiteten Datensatz und Adresse schon nennt. Den Namen
+  eines Datensatzes nur, wenn der Benutzer ihn lesen darf; das Request-Token
+  nie. In der Vorschau nur in Antworten, die Contao schon als privat markiert
+  hat — in den Seiten-Cache für Besucher kann er so nicht gelangen.
+- **Status-Seite:** zeigt die aktiven Schalter und ob Hausregeln gesetzt sind,
+  und unten eine Tabelle „Wenn die Verbindung nicht klappt“ mit den
+  Meldungen, die Clients tatsächlich zeigen, ihrer Ursache und der Abhilfe.
+- **README:** Abschnitt zum Webserver — was durchgelassen werden muss
+  (`/.well-known/oauth-*`, `Authorization`-Header) und eine fertige
+  Apache-Regel für Seiten hinter HTTP-Basic-Auth.
+
+### Fixed
+- **`template_cache_rebuild` stand in keiner Liste,** die sagt, ob ein Tool
+  schreibt. Für die Rechte war das gleichgültig (nicht eingetragen heißt nur
+  für Administratoren), für den Schalter „nur lesen“ nicht. Ein Test hält
+  jetzt fest, dass jedes registrierte Tool eine Einordnung hat.
+
 ## [1.39.1] – 2026-10-29
 
 > Sicherheitsrelease. Betrifft Backend-Benutzer ohne Admin-Rechte mit

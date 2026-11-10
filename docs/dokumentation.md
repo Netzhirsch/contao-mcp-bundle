@@ -480,6 +480,15 @@ Das Backend (Menüpunkt **MCP-Server → Konfiguration**) speichert die Werte in
 | `lazy_mode` | `false` | Wenn aktiv: `tools/list` exposed nur die 6 Discovery-Tools (siehe §6). Empfohlen für Claude Desktop / claude.ai. Aus für Inspector-Debugging und Scripts mit erwarteter flacher Tool-Liste. |
 | `extension_tools_enabled` | `[]` | Allowlist für Tools, die andere Bundles beisteuern (Services mit Tag `netzhirsch_mcp.tool`). Ein Fremd-Tool ist erst aufrufbar, wenn sein `#[McpTool]`-Name in dieser Liste steht — `composer require` allein schaltet nichts frei. Standard leer = nur die mitgelieferten Core-Tools sind aktiv. Core-Namen gewinnen jede Kollision. Komfortabel pflegbar über das Panel „Tools" (Badge EXT). Siehe `EXTENDING.md`. |
 | `disabled_tools` | `[]` | Opt-out-Liste für Core-Tools: Jeder Name hier verschwindet vollständig aus dem MCP-Katalog (`tools/list`, Discovery UND `tools/call`) — für alle Clients und Benutzer. Gepflegt über das Panel „Tools" mit Gruppen-Schaltern und Suche; gilt auch für die Tools der unterstützten Fremd-Plugins (url_rewrite, changelanguage). Die Discovery-/System-Tools (`contao_search_tools`, `contao_describe_tool`, `contao_call`, `ping`) sind geschützt und nicht deaktivierbar. Änderungen greifen ab dem nächsten MCP-Request; verbundene Clients sehen sie nach einem Reconnect. |
+| `house_rules` | `""` | Hausregeln, die jeder Client beim Verbinden als Server-Anweisung bekommt (höchstens 4000 Zeichen), samt der aktiven Schalter. `contao_guide` wiederholt sie. |
+| `read_only` | `false` | Nur lesen: Alle schreibenden Tools verschwinden aus dem Katalog, ein Schreibversuch endet mit `read_only`. |
+| `allow_publish` | `true` | Aus: Nichts darf sichtbar geschaltet werden (`publish_not_allowed`), neue Inhalte entstehen unveröffentlicht. |
+| `create_unpublished` | `false` | Neue Seiten, Artikel, Inhaltselemente, News, Termine und FAQ entstehen versteckt; ein ausdrücklich sichtbarer Wert endet mit `create_unpublished`. |
+| `allow_delete` | `true` | Aus: Alle löschenden Tools verschwinden (`delete_not_allowed`). |
+| `privacy_mode` | `false` | Mitglieder, Newsletter-Empfänger, Kommentare, Formulareinsendungen und Backend-Benutzer gesperrt (`privacy_mode`); IBAN/BIC werden in keiner Tabelle gelesen oder geschrieben. |
+| `admins_allowed` | `true` | Aus: Administratorkonten werden abgewiesen, schon auf der Zustimmungsseite. |
+
+Die sechs Schalter gelten für jeden Client und jedes Konto, auch für Administratoren und im Trusted Mode — sie schränken die Backend-Rechte ein, erweitern sie aber nie. Details in der README unter „Was die KI darf".
 
 ## 8. Fehlersuche
 

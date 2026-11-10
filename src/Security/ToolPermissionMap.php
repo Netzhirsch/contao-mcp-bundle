@@ -348,6 +348,41 @@ final class ToolPermissionMap
     private const NESTED_FIELD_ARGS = ['fields', 'extras'];
 
     /**
+     * What the file manager's rights mean for the installation: an upload adds
+     * something, a rename, move or new metadata changes it.
+     *
+     * @var array<string, string>
+     */
+    private const FILE_OPERATIONS = [
+        'read' => 'read',
+        'upload' => 'create',
+        'edit' => 'update',
+        'rename' => 'update',
+        'move' => 'update',
+        'delete' => 'delete',
+        'delete_recursive' => 'delete',
+    ];
+
+    /**
+     * Tools that change the installation without a write verb in their name and
+     * without an `op` in {@see SPECIAL}. The name heuristic would read every one
+     * of them as a lookup, and a read-only switch must not take that guess.
+     *
+     * @var array<string, string>
+     */
+    private const OPERATIONS = [
+        // Not in SPECIAL at all — admin-only by the enforcer's default — but
+        // it rewrites the compiled template cache, so it is no lookup either.
+        'template_cache_rebuild' => 'update',
+        'template_rename' => 'update',
+        'maintenance_run' => 'update',
+        'page_cache_invalidate' => 'update',
+        'dbafs_sync' => 'update',
+        'dca_cache_clear' => 'update',
+        'folder_set_public' => 'update',
+    ];
+
+    /**
      * Defaulted so the unit tests (and any container without extension tools)
      * can `new ToolPermissionMap()` unchanged; the real container injects the
      * tagged-iterator-backed instance via autowiring.
@@ -393,6 +428,53 @@ final class ToolPermissionMap
         }
 
         return null;
+    }
+
+    /**
+     * What a tool does to the installation, whatever its arguments: `read`,
+     * `create`, `update` or `delete`. The operator switches (read-only, no
+     * deletions) act on this. Null for a tool nothing here knows.
+     */
+    public function operationOf(string $tool): ?string
+    {
+        if (isset(self::LIST_TABLES[$tool])) {
+            return 'read';
+        }
+
+        $base = self::SPECIAL[$tool] ?? null;
+
+        if ($base === null) {
+            foreach (self::ENTITY_TABLES as $prefix => $table) {
+                if ($tool === $prefix || str_starts_with($tool, $prefix.'_')) {
+                    return $this->inferOperation($tool);
+                }
+            }
+
+            $base = $this->extensionMap->baseRequirement($tool);
+        }
+
+        if ($base === null) {
+            return self::OPERATIONS[$tool] ?? null;
+        }
+
+        $op = $base['op'] ?? null;
+        if (\is_string($op)) {
+            return ($base['kind'] ?? null) === 'file' ? (self::FILE_OPERATIONS[$op] ?? 'update') : $op;
+        }
+
+        return self::OPERATIONS[$tool] ?? $this->inferOperation($tool);
+    }
+
+    /**
+     * The table a tool works on when its name says so, without looking at the
+     * arguments. Null for tools that name the table in a call (`entity_*`) or
+     * have none.
+     */
+    public function tableOf(string $tool): ?string
+    {
+        $req = $this->requirement($tool, []);
+
+        return ($req['kind'] ?? null) === 'dc' && \is_string($req['table'] ?? null) ? $req['table'] : null;
     }
 
     /**

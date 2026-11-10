@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Server;
 
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\ContaoMcpBundle;
+use Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy;
 use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
 use PhpMcp\Server\Server;
 use PhpMcp\Server\Dispatcher;
@@ -57,6 +58,8 @@ final class HttpDispatcherFactory
         private readonly ArgumentGuard $argumentGuard,
         private readonly ExtensionToolRegistrar $extensionToolRegistrar,
         private readonly RequestStack $requestStack,
+        private readonly OperatorPolicy $operatorPolicy,
+        private readonly ServerInstructions $serverInstructions,
         private readonly string $serverName,
         private readonly string $serverVersion,
         private readonly array $scanDirs,
@@ -78,9 +81,16 @@ final class HttpDispatcherFactory
         // still render disabled tools with their descriptions. A pruned tool
         // is gone from tools/list, tools/call, search, describe and
         // contao_call alike.
-        $disabled = $this->configStorage->load()['disabled_tools'] ?? [];
+        //
+        // The operator switches (read-only, no deletions, privacy mode) take
+        // their tools out the same way: a tool that could only ever be refused
+        // should not be offered.
+        $disabled = [
+            ...($this->configStorage->load()['disabled_tools'] ?? []),
+            ...$this->operatorPolicy->blockedTools(array_keys($server->getRegistry()->getTools())),
+        ];
         if ($disabled !== []) {
-            $removed = (new ToolCatalog())->prune($server->getRegistry(), $disabled);
+            $removed = (new ToolCatalog())->prune($server->getRegistry(), array_values(array_unique($disabled)));
             if ($removed !== []) {
                 $this->logger->info('MCP tools disabled by operator config.', ['tools' => $removed]);
             }
@@ -158,7 +168,8 @@ final class HttpDispatcherFactory
             ->withServerInfo($this->serverName, $this->serverVersion)
             ->withLogger($this->logger)
             ->withContainer($this->container)
-            ->withPaginationLimit($paginationLimit);
+            ->withPaginationLimit($paginationLimit)
+            ->withInstructions($this->serverInstructions->text());
 
         // Tool-discovery cache: Symfony's cache.app pool wrapped as PSR-16.
         // First request: scans + writes cache. Subsequent requests: reads.

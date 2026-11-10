@@ -132,6 +132,28 @@
                 <td class="tl_file_list">{% if config.lazy_mode ?? false %}<strong class="tl_green">●</strong> {{ 'mcp_server.status_on'|trans }}{% else %}<span class="tl_gray">●</span> {{ 'mcp_server.status_off'|trans }}{% endif %}</td>
             </tr>
             <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.headline_protection'|trans }}</td>
+                <td class="tl_file_list">
+                    {% if (restrictions ?? []) is empty %}
+                        <span class="tl_gray">●</span> {{ 'mcp_server.status_no_restrictions'|trans }}
+                    {% else %}
+                        {% for code in restrictions ?? [] %}
+                            <strong class="tl_green">●</strong> {{ ('mcp_server.restriction_' ~ code)|trans }}{% if not loop.last %}<br>{% endif %}
+                        {% endfor %}
+                    {% endif %}
+                </td>
+            </tr>
+            <tr class="hover-row">
+                <td class="tl_file_list">{{ 'mcp_server.config_house_rules_label'|trans }}</td>
+                <td class="tl_file_list">
+                    {% if (houseRulesLength ?? 0) > 0 %}
+                        <strong class="tl_green">●</strong> {{ 'mcp_server.status_house_rules_set'|trans({'%d': houseRulesLength ?? 0}) }}
+                    {% else %}
+                        <span class="tl_gray">●</span> {{ 'mcp_server.status_off'|trans }}
+                    {% endif %}
+                </td>
+            </tr>
+            <tr class="hover-row">
                 <td class="tl_file_list">{{ 'mcp_server.status_bundle_version'|trans }}</td>
                 <td class="tl_file_list">{{ bundleVersion }}</td>
             </tr>
@@ -236,3 +258,27 @@
 {% endif %}
 
 {% endif %}
+
+{# What a client reports when the connection fails, and what is behind it. The
+   messages are the ones this server and Claude actually produce. #}
+<h2 class="sub_headline" style="margin-top:1.5em;">{{ 'mcp_server.troubleshooting_title'|trans }}</h2>
+<div class="tl_listing_container list_view">
+    <table class="tl_listing showColumns">
+        <thead>
+            <tr>
+                <th class="tl_folder_tlist">{{ 'mcp_server.troubleshooting_symptom'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.troubleshooting_cause'|trans }}</th>
+                <th class="tl_folder_tlist">{{ 'mcp_server.troubleshooting_fix'|trans }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in ['registration', 'basic_auth', 'well_known', 'login_loop', 'not_configured', 'access_denied', 'license'] %}
+                <tr class="hover-row">
+                    <td class="tl_file_list">{{ ('mcp_server.troubleshooting_' ~ entry ~ '_symptom')|trans }}</td>
+                    <td class="tl_file_list">{{ ('mcp_server.troubleshooting_' ~ entry ~ '_cause')|trans }}</td>
+                    <td class="tl_file_list">{{ ('mcp_server.troubleshooting_' ~ entry ~ '_fix')|trans }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

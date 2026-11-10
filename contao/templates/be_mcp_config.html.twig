@@ -96,6 +96,44 @@
         </div>
     </fieldset>
 
+    <fieldset class="tl_tbox">
+        <legend>{{ 'mcp_server.headline_protection'|trans }}</legend>
+        <div class="widget-group">
+            <p class="tl_help">{{ 'mcp_server.protection_intro'|trans }}</p>
+
+            {# Checkboxes: the hidden field carries '0', a ticked box overrides it with '1'. #}
+            {% for item in [
+                {name: 'read_only', default: false},
+                {name: 'allow_publish', default: true},
+                {name: 'create_unpublished', default: false},
+                {name: 'allow_delete', default: true},
+                {name: 'privacy_mode', default: false},
+                {name: 'admins_allowed', default: true}
+            ] %}
+                <div class="widget widget-checkbox w50{% if loop.index is odd %} clr{% endif %}">
+                    <h3>{{ ('mcp_server.config_' ~ item.name ~ '_label')|trans }}</h3>
+                    <input type="hidden" name="{{ item.name }}" value="0">
+                    <label for="ctrl_{{ item.name }}" class="tl_checkbox_label">
+                        <input type="checkbox" name="{{ item.name }}" id="ctrl_{{ item.name }}" value="1"{% if attribute(config, item.name) ?? item.default %} checked{% endif %}>
+                        {{ ('mcp_server.config_' ~ item.name ~ '_inline')|trans }}
+                    </label>
+                    <p class="tl_help tl_tip">{{ ('mcp_server.config_' ~ item.name ~ '_help')|trans }}</p>
+                </div>
+            {% endfor %}
+        </div>
+    </fieldset>
+
+    <fieldset class="tl_tbox">
+        <legend>{{ 'mcp_server.headline_house_rules'|trans }}</legend>
+        <div class="widget-group">
+            <div class="widget widget-textarea clr">
+                <h3><label for="ctrl_house_rules">{{ 'mcp_server.config_house_rules_label'|trans }}</label></h3>
+                <textarea name="house_rules" id="ctrl_house_rules" class="tl_textarea" rows="10" maxlength="{{ houseRulesMaxLength ?? 4000 }}">{{ config.house_rules ?? '' }}</textarea>
+                <p class="tl_help tl_tip">{{ 'mcp_server.config_house_rules_help'|trans({'%d': houseRulesMaxLength ?? 4000}) }}</p>
+            </div>
+        </div>
+    </fieldset>
+
 </div>
 
 <div class="tl_formbody_submit">

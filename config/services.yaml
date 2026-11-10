@@ -87,6 +87,11 @@ services:
     Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor:
         public: true
 
+    # Public so the Backend status panel (no constructor injection) can show
+    # which operator switches are narrowing the AI right now.
+    Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy:
+        public: true
+
     # Lazy-Mode tool filter. Installed under the well-known service id
     # `netzhirsch.mcp.tool_filter` the patched php-mcp Dispatcher looks for.
     # Active globally — when lazy_mode=false in the config, ToolFilter

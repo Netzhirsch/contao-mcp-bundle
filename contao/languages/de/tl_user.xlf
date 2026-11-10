@@ -11,8 +11,8 @@
         <target>MCP-Server-Zugriff erlauben</target>
       </trans-unit>
       <trans-unit id="tl_user.netzhirschMcpAccess.1">
-        <source>Lets this user operate the site through an AI assistant via the MCP server. Inside MCP the user only gets the same rights they have in the backend. Admins are always allowed. Off by default.</source>
-        <target>Erlaubt diesem Benutzer, die Website über einen KI-Assistenten am MCP-Server zu bedienen. Innerhalb von MCP hat der Benutzer nur dieselben Rechte wie im Backend. Administratoren sind immer erlaubt. Standardmäßig aus.</target>
+        <source>Lets this user operate the site through an AI assistant via the MCP server. Inside MCP the user only gets the same rights they have in the backend. Admins are allowed unless MCP-Server → Configuration excludes them. Off by default.</source>
+        <target>Erlaubt diesem Benutzer, die Website über einen KI-Assistenten am MCP-Server zu bedienen. Innerhalb von MCP hat der Benutzer nur dieselben Rechte wie im Backend. Administratoren sind erlaubt, solange MCP-Server → Konfiguration sie nicht ausschließt. Standardmäßig aus.</target>
       </trans-unit>
     </body>
   </file>

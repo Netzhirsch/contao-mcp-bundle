@@ -9,7 +9,7 @@
         <source>Allow MCP server access</source>
       </trans-unit>
       <trans-unit id="tl_user.netzhirschMcpAccess.1">
-        <source>Lets this user operate the site through an AI assistant via the MCP server. Inside MCP the user only gets the same rights they have in the backend. Admins are always allowed. Off by default.</source>
+        <source>Lets this user operate the site through an AI assistant via the MCP server. Inside MCP the user only gets the same rights they have in the backend. Admins are allowed unless MCP-Server → Configuration excludes them. Off by default.</source>
       </trans-unit>
     </body>
   </file>

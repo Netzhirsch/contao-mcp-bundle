@@ -16,6 +16,7 @@ use Netzhirsch\ContaoMcpBundle\License\RenewalClient;
 use Netzhirsch\ContaoMcpBundle\License\UpdateNotice;
 use Netzhirsch\ContaoMcpBundle\OAuth\InitialAccessTokenManager;
 use Netzhirsch\ContaoMcpBundle\OAuth\OAuthClientAdministration;
+use Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -60,6 +61,11 @@ class ModuleMcpStatus extends AbstractMcpModule
         }
 
         $this->Template->oauthIsHttp = self::isHttpInsecure($config);
+
+        // Which operator switches are narrowing the AI right now — the same
+        // codes the server instructions are built from.
+        $this->Template->restrictions = $container->get(OperatorPolicy::class)->activeRestrictions();
+        $this->Template->houseRulesLength = mb_strlen((string) ($config['house_rules'] ?? ''));
 
         // The pairing window, decided against the clock here rather than in the
         // template: PHP's date() and Twig's |date need not use the same zone.

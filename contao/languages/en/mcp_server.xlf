@@ -76,6 +76,84 @@
       <trans-unit id="mcp_server.config_license_server_help"><source>Base URL of the Netzhirsch license server (used for trial / renewal / Stripe checkout + portal). Only relevant in the commercial edition; the free edition never enforces. A wrong URL cannot mint valid tokens (they are signed), so this field is safe to expose.</source></trans-unit>
       <trans-unit id="mcp_server.config_lazy_mode_help"><source>Claude doesn't paginate tools/list and loads every tool schema into context (~12 KB / turn at 150+ tools). When enabled, tools/list returns only three generic tools — contao_search_tools, contao_describe_tool, contao_call — and the LLM uses them to discover + invoke the real ones on demand. Recommended for Claude Desktop / claude.ai. Disable when debugging with MCP Inspector or driving the server from scripts that expect a flat tool list.</source></trans-unit>
 
+      <!-- Operator switches + house rules -->
+      <trans-unit id="mcp_server.headline_protection"><source>What the AI may do</source></trans-unit>
+      <trans-unit id="mcp_server.protection_intro"><source>These switches apply to every AI client and every account, administrators included. They narrow what the backend rights allow; they never widen it.</source></trans-unit>
+      <trans-unit id="mcp_server.config_read_only_label"><source>Read only</source></trans-unit>
+      <trans-unit id="mcp_server.config_read_only_inline"><source>The AI may read, but not create, change or delete anything</source></trans-unit>
+      <trans-unit id="mcp_server.config_read_only_help"><source>Every tool that writes is taken out of the catalogue. Good for a first trial or for an installation where the AI only answers questions and drafts text.</source></trans-unit>
+      <trans-unit id="mcp_server.config_allow_publish_label"><source>Publishing</source></trans-unit>
+      <trans-unit id="mcp_server.config_allow_publish_inline"><source>The AI may make content visible</source></trans-unit>
+      <trans-unit id="mcp_server.config_allow_publish_help"><source>Off: pages, articles, content elements, news, events, FAQs and comments cannot be switched visible, and new ones are created unpublished. A person publishes them in the backend. Hiding stays possible. Start and stop dates are not covered.</source></trans-unit>
+      <trans-unit id="mcp_server.config_create_unpublished_label"><source>New content</source></trans-unit>
+      <trans-unit id="mcp_server.config_create_unpublished_inline"><source>Always create new content unpublished</source></trans-unit>
+      <trans-unit id="mcp_server.config_create_unpublished_help"><source>New pages, articles, content elements, news, events and FAQs start hidden, copies too. Publishing stays possible as a separate step if the switch above allows it. Implied when publishing is off.</source></trans-unit>
+      <trans-unit id="mcp_server.config_allow_delete_label"><source>Deleting</source></trans-unit>
+      <trans-unit id="mcp_server.config_allow_delete_inline"><source>The AI may delete</source></trans-unit>
+      <trans-unit id="mcp_server.config_allow_delete_help"><source>Off: every deleting tool is taken out of the catalogue. Deletions over MCP can be restored in the backend either way.</source></trans-unit>
+      <trans-unit id="mcp_server.config_privacy_mode_label"><source>Privacy mode</source></trans-unit>
+      <trans-unit id="mcp_server.config_privacy_mode_inline"><source>Keep personal data away from the AI</source></trans-unit>
+      <trans-unit id="mcp_server.config_privacy_mode_help"><source>Members, newsletter recipients, comments, form submissions and backend users are out of reach, for administrators as well. IBAN and BIC are never read or written, in whatever table they are. Personal data inside normal content (a contact person on a page) is not covered.</source></trans-unit>
+      <trans-unit id="mcp_server.config_admins_allowed_label"><source>Administrators</source></trans-unit>
+      <trans-unit id="mcp_server.config_admins_allowed_inline"><source>Administrator accounts may connect</source></trans-unit>
+      <trans-unit id="mcp_server.config_admins_allowed_help"><source>An administrator passes every permission check, so the AI then works without limits. Off: only regular accounts with MCP access connect, and the AI keeps to their rights.</source></trans-unit>
+      <trans-unit id="mcp_server.headline_house_rules"><source>House rules for the AI</source></trans-unit>
+      <trans-unit id="mcp_server.config_house_rules_label"><source>House rules</source></trans-unit>
+      <trans-unit id="mcp_server.config_house_rules_help"><source>Sent to every AI client when it connects. Room for terminology, spelling and conventions, e.g. "Write the company name in lower case.", "Sicherheit in the sense of IT security is security, never safety." or "Email addresses always as an email insert tag". At most %d characters.</source></trans-unit>
+      <trans-unit id="mcp_server.house_rules_cut"><source>The house rules were longer than %d characters and have been cut.</source></trans-unit>
+      <trans-unit id="mcp_server.status_no_restrictions"><source>no restrictions beyond the backend rights</source></trans-unit>
+      <trans-unit id="mcp_server.status_house_rules_set"><source>set (%d characters)</source></trans-unit>
+      <trans-unit id="mcp_server.restriction_read_only"><source>read only</source></trans-unit>
+      <trans-unit id="mcp_server.restriction_no_delete"><source>no deleting</source></trans-unit>
+      <trans-unit id="mcp_server.restriction_no_publish"><source>no publishing, new content unpublished</source></trans-unit>
+      <trans-unit id="mcp_server.restriction_create_unpublished"><source>new content unpublished</source></trans-unit>
+      <trans-unit id="mcp_server.restriction_privacy_mode"><source>privacy mode</source></trans-unit>
+      <trans-unit id="mcp_server.restriction_no_admins"><source>administrators excluded</source></trans-unit>
+
+      <!-- Claude button (backend header + front-end preview) -->
+      <trans-unit id="mcp_server.claude_button_label"><source>Claude</source></trans-unit>
+      <trans-unit id="mcp_server.claude_button_title"><source>Ask Claude about this screen</source></trans-unit>
+      <trans-unit id="mcp_server.claude_dialog_question"><source>What should Claude do?</source></trans-unit>
+      <trans-unit id="mcp_server.claude_dialog_context"><source>Sent along:</source></trans-unit>
+      <trans-unit id="mcp_server.claude_dialog_send"><source>Open in Claude</source></trans-unit>
+      <trans-unit id="mcp_server.claude_dialog_cancel"><source>Cancel</source></trans-unit>
+      <trans-unit id="mcp_server.claude_dialog_hint"><source>Opens claude.ai in a new window. The request is also copied to the clipboard, in case it does not appear in the input field there. Ctrl+Enter sends.</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_intro"><source>Use the Contao connector of the installation %s.</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_module"><source>Backend module: %s</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_record"><source>Record: %s</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_editing"><source>being edited</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_list"><source>List: %s</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_parent"><source>in parent record %s</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_page"><source>Page: %s</source></trans-unit>
+      <trans-unit id="mcp_server.claude_prompt_url"><source>Address: %s</source></trans-unit>
+
+      <!-- Troubleshooting -->
+      <trans-unit id="mcp_server.troubleshooting_title"><source>When the connection fails</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_symptom"><source>What you see</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_cause"><source>Cause</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_fix"><source>Fix</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_registration_symptom"><source>The client cannot register ("Client registration is closed").</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_registration_cause"><source>Registration is restricted and the pairing window is closed. Claude itself identifies through its metadata document and needs no pairing while CIMD is on "trusted hosts".</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_registration_fix"><source>Open the registration for 15 minutes above and connect the client in that time.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_basic_auth_symptom"><source>Connecting fails although the site works; in a browser the site asks for a user name and password.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_basic_auth_cause"><source>An HTTP Basic login sits in front of the site. The AI provider's servers cannot answer it and get a 401 from the web server instead of the OAuth metadata.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_basic_auth_fix"><source>Exempt the endpoint path, /_mcp_oauth/token, /_mcp_oauth/register and /.well-known/oauth-* from the Basic login. /_mcp_oauth/authorize may stay protected, the browser opens it.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_well_known_symptom"><source>The client finds no login; /.well-known/oauth-authorization-server does not answer with JSON.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_well_known_cause"><source>The web server blocks paths that start with a dot, or does not hand them to Contao.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_well_known_fix"><source>Pass /.well-known/oauth-authorization-server and /.well-known/oauth-protected-resource (with and without the endpoint path behind it) through to public/index.php.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_login_loop_symptom"><source>The client asks you to log in again and again; every call ends in 401.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_login_loop_cause"><source>The Authorization header does not reach PHP. Apache drops it under FastCGI unless the .htaccess passes it on.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_login_loop_fix"><source>Keep Contao's own .htaccess, or add: RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_not_configured_symptom"><source>The endpoint answers 503 "has not been configured yet", or the metadata answers "backend_url_missing".</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_not_configured_cause"><source>The configuration has never been saved, or the backend URL is empty.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_not_configured_fix"><source>Open MCP-Server → Configuration, enter the backend URL and save.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_access_denied_symptom"><source>Every call answers "mcp_access_denied".</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_access_denied_cause"><source>The account has no MCP access, or it is an administrator while administrators are excluded.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_access_denied_fix"><source>Tick "Allow MCP server access" on the user or one of its groups, or connect with a regular account.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_license_symptom"><source>Every tool answers "license_inactive"; ping still works.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_license_cause"><source>The trial or the subscription has run out, or the licence could not be renewed.</source></trans-unit>
+      <trans-unit id="mcp_server.troubleshooting_license_fix"><source>See the licence line above; start a trial or a subscription there.</source></trans-unit>
+
       <!-- OAuth administration / Initial Access Tokens / Clients -->
       <trans-unit id="mcp_server.open_reg_warning"><source>Client registration is set to "Open" — any MCP client can register without a token. Change this to "Restricted" in the Configuration page unless you are on a private/localhost setup.</source></trans-unit>
       <trans-unit id="mcp_server.http_warning"><source>OAuth is active but the Backend URL is plain http:// on a non-loopback host — access tokens travel in clear text. Use HTTPS in production.</source></trans-unit>

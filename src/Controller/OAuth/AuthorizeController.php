@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Controller\OAuth;
 
 use Contao\BackendUser;
 use League\OAuth2\Server\Exception\OAuthServerException;
+use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\OAuth\AuthorizationServerFactory;
 use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdClientProvider;
 use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdException;
@@ -57,6 +58,7 @@ final class AuthorizeController
         private readonly CsrfTokenManagerInterface $csrf,
         private readonly OAuthClientAdministration $clientAdministration,
         private readonly CimdClientProvider $cimdClientProvider,
+        private readonly McpServerConfigStorage $configStorage,
     ) {
     }
 
@@ -138,6 +140,19 @@ final class AuthorizeController
             $loginUrl = '/contao/login?_target_path='.$targetPath.'&_always_use_target_path=1';
 
             return new RedirectResponse($loginUrl);
+        }
+
+        // The endpoint would refuse every call of this connection anyway; say
+        // so before the consent, not after the first tool call.
+        if (!$this->configStorage->load()['admins_allowed'] && $this->security->isGranted('ROLE_ADMIN')) {
+            // Built directly: accessDenied() keeps its fixed text as the message
+            // and files ours as a hint, which renderOAuthError() does not show.
+            return $this->renderOAuthError(new OAuthServerException(
+                'Administrator accounts may not connect to the MCP server on this installation. Log in with a regular backend account that has MCP access.',
+                9,
+                'access_denied',
+                403,
+            ));
         }
 
         // POST = user clicked Approve/Deny.

@@ -484,6 +484,13 @@ Felder:
 | `extension_tools_enabled` | `[]` | freigeschaltete Tools anderer Bundles, ebenfalls im Tool-Panel ([EXTENDING.md](EXTENDING.md)) |
 | `registration_open_until` | `0` | Ende des Pairing-Fensters (Unix-Zeit), gesetzt vom Button auf der Status-Seite |
 | `license_server_url` | `""` | nur für die Entwicklung: ersetzt den eingebauten Lizenzserver |
+| `house_rules` | `""` | Hausregeln, die jeder KI-Client beim Verbinden bekommt, höchstens 4000 Zeichen (siehe [Was die KI darf](#was-die-ki-darf-schalter-und-hausregeln)) |
+| `read_only` | `false` | Nur lesen: alle schreibenden Tools verschwinden |
+| `allow_publish` | `true` | `false`: nichts darf sichtbar geschaltet werden, Neues entsteht unveröffentlicht |
+| `create_unpublished` | `false` | Neue Inhalte immer unveröffentlicht anlegen |
+| `allow_delete` | `true` | `false`: alle löschenden Tools verschwinden |
+| `privacy_mode` | `false` | Datenschutzmodus: Mitglieder, Newsletter-Empfänger, Kommentare, Formulareinsendungen und Backend-Benutzer gesperrt, IBAN/BIC nie |
+| `admins_allowed` | `true` | `false`: Administratorkonten dürfen sich nicht verbinden |
 
 Bundle-eigene Konfig in `config/config.yaml` — die Contao Managed Edition liest
 `config/packages/` nicht:
@@ -510,6 +517,83 @@ MCP_PREVIEW_BASIC_AUTH="user:pass"
 
 Das Tool weist bei 401/403 selbst darauf hin. Die Zugangsdaten stehen nur in der
 `.env.local`, nie in der Antwort oder im Log.
+
+## Was die KI darf: Schalter und Hausregeln
+
+Unter **MCP-Server → Konfiguration** liegen sechs Schalter. Sie gelten für jeden
+KI-Client und jedes Konto, **auch für Administratoren** und im Trusted Mode. Sie
+schränken ein, was die Backend-Rechte erlauben, und erweitern es nie:
+
+| Schalter | Wirkung |
+|---|---|
+| Nur lesen | Alle schreibenden Tools verschwinden aus dem Katalog. |
+| Veröffentlichen | Aus: Seiten, Artikel, Inhaltselemente, News, Termine, FAQ und Kommentare lassen sich nicht sichtbar schalten; neue entstehen unveröffentlicht. Verstecken bleibt möglich, Start- und Stoppdatum sind nicht erfasst. |
+| Neue Inhalte unveröffentlicht | Neue Seiten, Artikel, Inhaltselemente, News, Termine und FAQ entstehen versteckt, Kopien ebenso. Veröffentlichen bleibt ein eigener Schritt. |
+| Löschen | Aus: Alle löschenden Tools verschwinden. |
+| Datenschutzmodus | Mitglieder, Newsletter-Empfänger, Kommentare, Formulareinsendungen und Backend-Benutzer sind gesperrt; IBAN und BIC werden in keiner Tabelle gelesen oder geschrieben. |
+| Administratoren | Aus: Administratorkonten werden abgewiesen, schon beim Verbinden. Die KI arbeitet dann immer mit den Rechten eines normalen Kontos. |
+
+Ein Tool, das ein Schalter ausschließt, verschwindet aus `tools/list`, der Suche
+und `contao_call`. Was sich erst an den Argumenten zeigt — eine Tabelle im Aufruf,
+ein Datensatz, der sichtbar werden soll —, lehnt der Server beim Aufruf ab, mit
+einem Fehlercode (`read_only`, `delete_not_allowed`, `publish_not_allowed`,
+`create_unpublished`, `privacy_mode`). Ein Aufruf, der ein `published` weglässt,
+bekommt bei „unveröffentlicht“ den versteckten Wert eingesetzt; ein ausdrücklich
+sichtbarer Wert wird abgelehnt, nicht stillschweigend umgedreht.
+
+**Hausregeln** sind freier Text, höchstens 4000 Zeichen. Jeder Client bekommt sie
+beim Verbinden als Server-Anweisung, zusammen mit den aktiven Schaltern; der
+Leitfaden `contao_guide` wiederholt sie. Platz für Terminologie und
+Schreibweisen („Den Firmennamen immer kleinschreiben“, „Sicherheit heißt
+security, nie safety“) und für Hinweise, welche Inhalte wo stehen.
+
+Die Status-Seite zeigt, welche Schalter gerade greifen und ob Hausregeln gesetzt
+sind.
+
+### Der Claude-Knopf
+
+Wer MCP-Zugriff hat, sieht im Backend-Kopf vor „Vorschau“ einen Knopf **Claude**,
+in der Frontend-Vorschau unten rechts ebenfalls. Ein Klick fragt „Was soll Claude
+tun?“ und öffnet claude.ai mit einer Anfrage, die schon sagt, um welche
+Installation und welche Ansicht es geht: Backend-Modul, bearbeiteter Datensatz,
+Adresse. Den Namen eines Datensatzes schreibt der Knopf nur hinein, wenn der
+Benutzer ihn lesen darf. Die Anfrage liegt zusätzlich in der Zwischenablage, weil
+claude.ai den Parameter `?q=` nicht offiziell dokumentiert. Besucher sehen den
+Knopf nie: In der Vorschau erscheint er nur in Antworten, die Contao bereits als
+privat markiert hat.
+
+## Webserver: was durchgelassen werden muss
+
+Die Server des KI-Anbieters sprechen den Endpunkt direkt an, ohne Browser.
+Damit das klappt:
+
+- **`/.well-known/oauth-authorization-server`** und
+  **`/.well-known/oauth-protected-resource`** (auch mit dem Endpunkt-Pfad
+  dahinter) müssen bei `public/index.php` ankommen. Manche Konfigurationen sperren
+  Pfade, die mit einem Punkt beginnen.
+- **Der `Authorization`-Header muss PHP erreichen.** Contaos eigene `.htaccess`
+  reicht ihn weiter; eine eigene braucht
+  `RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`. Fehlt das,
+  verlangt der Client bei jedem Aufruf eine neue Anmeldung.
+- **Hinter HTTP-Basic-Auth** (typisch auf Staging) müssen der Endpunkt-Pfad,
+  `/_mcp_oauth/token`, `/_mcp_oauth/register` und `/.well-known/oauth-*`
+  ausgenommen sein. `/_mcp_oauth/authorize` darf geschützt bleiben, das öffnet
+  der Browser. Für Apache 2.4 (über `THE_REQUEST`, weil Contao intern auf
+  `index.php` umleitet):
+
+  ```apache
+  <If "%{THE_REQUEST} =~ m#^[A-Z]+ /(mcp(/.*)?|_mcp_oauth/(token|register)|\.well-known/oauth-[a-z-]+(/.*)?)[ ?]#">
+      Require all granted
+  </If>
+  ```
+
+  Bei einem anderen Endpunkt-Pfad als `mcp` den Ausdruck anpassen.
+- **Keine IP-Sperre auf den Endpunkt**, solange nicht feststeht, von welchen
+  Adressen der Anbieter kommt. Lokale Clients wie Claude Code verbinden sich vom
+  eigenen Rechner.
+
+Was ein Client meldet, wenn es trotzdem hakt, und was dahintersteckt, steht als
+Tabelle unten auf **MCP-Server → Status**.
 
 ## Dateien hochladen
 

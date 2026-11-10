@@ -1,0 +1,113 @@
+/*
+ * The "Claude" button and its dialog — backend header and front-end preview.
+ * Colours are set explicitly instead of inherited: on a customer's front end
+ * the dialog must stay readable whatever the site's own styles do. Text
+ * contrast is at least 4.5:1 throughout.
+ */
+
+.netzhirsch-mcp-claude-dialog {
+    box-sizing: border-box;
+    width: calc(100% - 2rem);
+    max-width: 34rem;
+    padding: 1.25rem;
+    border: 1px solid #c9c9c9;
+    border-radius: 8px;
+    background: #fff;
+    color: #1f1f1f;
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.netzhirsch-mcp-claude-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.netzhirsch-mcp-claude-dialog form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+}
+
+.netzhirsch-mcp-claude-question {
+    font-size: 1.05em;
+    font-weight: 600;
+}
+
+.netzhirsch-mcp-claude-dialog textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 6rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid #8a8a8a;
+    border-radius: 4px;
+    background: #fff;
+    color: #1f1f1f;
+    font: inherit;
+    resize: vertical;
+}
+
+.netzhirsch-mcp-claude-context {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 4px;
+    background: #f3f3f3;
+    color: #3d3d3d;
+    font-size: 0.85em;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+
+.netzhirsch-mcp-claude-hint {
+    margin: 0;
+    color: #4d4d4d;
+    font-size: 0.8em;
+}
+
+.netzhirsch-mcp-claude-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.netzhirsch-mcp-claude-buttons button {
+    padding: 0.45rem 1rem;
+    border: 1px solid #6b6b6b;
+    border-radius: 4px;
+    background: #f3f3f3;
+    color: #1f1f1f;
+    font: inherit;
+    cursor: pointer;
+}
+
+.netzhirsch-mcp-claude-buttons .netzhirsch-mcp-claude-send {
+    border-color: #9c4325;
+    background: #9c4325;
+    color: #fff;
+    font-weight: 600;
+}
+
+.netzhirsch-mcp-claude-dialog button:focus-visible,
+.netzhirsch-mcp-claude-dialog textarea:focus-visible,
+.netzhirsch-mcp-claude--floating:focus-visible {
+    outline: 3px solid #1a5fb4;
+    outline-offset: 2px;
+}
+
+/* Front-end preview: floating, bottom right. */
+.netzhirsch-mcp-claude--floating {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 2147483000;
+    padding: 0.6rem 1.1rem;
+    border: 0;
+    border-radius: 999px;
+    background: #9c4325;
+    color: #fff;
+    font: 600 14px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+}
