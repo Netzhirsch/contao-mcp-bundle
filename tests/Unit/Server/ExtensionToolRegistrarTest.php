@@ -58,6 +58,39 @@ final class ExtensionToolRegistrarTest extends TestCase
         self::assertSame([SdkGreetingTool::class, 'shout'], $registry->getTool('acme_shout')->handler);
     }
 
+    /**
+     * contao-mia-bundle writes `annotations: new ToolAnnotations(…)` with the
+     * php-mcp class. Without php-mcp that class is an alias; the hints must
+     * arrive in the registered tool.
+     */
+    public function testLegacyAnnotationsSurviveTheMove(): void
+    {
+        $registry = new Registry();
+
+        $registered = $this->registrar()->register($registry, ['acme_vehicles'], [LegacyAnnotatedTool::class]);
+
+        self::assertSame(['acme_vehicles'], $registered);
+        $annotations = $registry->getTool('acme_vehicles')->tool->annotations;
+        self::assertNotNull($annotations);
+        self::assertTrue($annotations->readOnlyHint);
+        self::assertFalse($annotations->openWorldHint);
+    }
+
+    /**
+     * An attribute naming a class that is not installed must cost its own
+     * tool, not the server: the other tool of the same class still registers.
+     */
+    public function testAnUnreadableAttributeSkipsOnlyItsTool(): void
+    {
+        $registry = new Registry();
+        $registrar = $this->registrar();
+
+        $registered = $registrar->register($registry, ['acme_broken', 'acme_fine'], [HalfBrokenTool::class]);
+
+        self::assertSame(['acme_fine'], $registered);
+        self::assertSame(['acme_fine'], array_column($registrar->candidates([HalfBrokenTool::class]), 'name'));
+    }
+
     public function testCandidatesListBothAttributeNamespaces(): void
     {
         $candidates = $this->registrar()->candidates([GreetingTool::class, SdkGreetingTool::class]);
@@ -125,6 +158,50 @@ final class ExtensionToolRegistrarTest extends TestCase
         );
 
         self::assertSame([], $registered);
+    }
+}
+
+/**
+ * Written the way contao-mia-bundle writes its tools: php-mcp attribute and
+ * php-mcp annotations class.
+ */
+final class LegacyAnnotatedTool
+{
+    /**
+     * @return list<string>
+     */
+    #[\PhpMcp\Server\Attributes\McpTool(
+        name: 'acme_vehicles',
+        description: 'Lists vehicles.',
+        annotations: new \PhpMcp\Schema\ToolAnnotations(readOnlyHint: true, idempotentHint: true, openWorldHint: false),
+    )]
+    public function list(): array
+    {
+        return [];
+    }
+}
+
+/**
+ * One tool whose attribute cannot be evaluated, one that is fine.
+ */
+final class HalfBrokenTool
+{
+    /**
+     * @return list<string>
+     */
+    #[McpTool(name: 'acme_broken', description: 'Broken.', annotations: new \Acme\NotInstalled\Annotations())]
+    public function broken(): array
+    {
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     */
+    #[McpTool(name: 'acme_fine', description: 'Fine.')]
+    public function fine(): array
+    {
+        return [];
     }
 }
 

@@ -70,7 +70,7 @@ final class ExtensionToolRegistrar
             }
 
             foreach ((new \ReflectionClass($class))->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
-                $attribute = self::toolAttribute($method);
+                $attribute = $this->readToolAttribute($method, $class);
                 if ($attribute === null) {
                     continue;
                 }
@@ -117,7 +117,7 @@ final class ExtensionToolRegistrar
             }
 
             foreach ((new \ReflectionClass($class))->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
-                $attribute = self::toolAttribute($method);
+                $attribute = $this->readToolAttribute($method, $class);
                 if ($attribute === null) {
                     continue;
                 }
@@ -164,6 +164,30 @@ final class ExtensionToolRegistrar
         }
 
         return $registered;
+    }
+
+    /**
+     * {@see toolAttribute()}, but an attribute that cannot be read costs only
+     * its own tool. Reading evaluates the arguments, and an expression in them
+     * can name a class that is not there — `new ToolAnnotations(…)` from a
+     * package no longer installed. Uncaught, that took the whole server down
+     * on every request, core tools included.
+     *
+     * @return array{name: ?string, title: ?string, description: ?string, annotations: ?ToolAnnotations}|null
+     */
+    private function readToolAttribute(\ReflectionMethod $method, string $class): ?array
+    {
+        try {
+            return self::toolAttribute($method);
+        } catch (\Throwable $e) {
+            $this->logger->error('MCP extension tool attribute could not be read — skipped.', [
+                'class' => $class,
+                'method' => $method->getName(),
+                'reason' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**

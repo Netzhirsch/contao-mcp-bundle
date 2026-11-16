@@ -7,6 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Server;
 use Mcp\Capability\Attribute\McpPrompt;
 use Mcp\Capability\Attribute\McpTool;
 use Mcp\Capability\Attribute\Schema;
+use Mcp\Schema\ToolAnnotations;
 
 /**
  * Keeps extension tools written against php-mcp/server working.
@@ -28,6 +29,12 @@ use Mcp\Capability\Attribute\Schema;
  * Nothing is aliased when the old class exists after all — some other package
  * still requires php-mcp/server. {@see ExtensionToolRegistrar} then reads the
  * old attribute by name instead.
+ *
+ * `ToolAnnotations` is not an attribute but appears inside one —
+ * `annotations: new ToolAnnotations(readOnlyHint: true)`, as contao-mia-bundle
+ * writes it. Reading the attribute evaluates that expression, so without the
+ * alias the class is missing and the read fails. The constructor parameters
+ * have the same names in both packages.
  */
 final class PhpMcpAttributeAliases
 {
@@ -35,6 +42,7 @@ final class PhpMcpAttributeAliases
         'PhpMcp\\Server\\Attributes\\McpTool' => McpTool::class,
         'PhpMcp\\Server\\Attributes\\Schema' => Schema::class,
         'PhpMcp\\Server\\Attributes\\McpPrompt' => McpPrompt::class,
+        'PhpMcp\\Schema\\ToolAnnotations' => ToolAnnotations::class,
     ];
 
     private static bool $registered = false;
