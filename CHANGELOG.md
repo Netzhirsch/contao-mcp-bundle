@@ -29,6 +29,15 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 - `singleSRC` bei News, Terminen und FAQ und `favicon` bei Root-Seiten nehmen
   jetzt ebenfalls einen Pfad statt nur einer UUID.
 
+### Notes
+- Contaos Sicherheitsreleases vom November 2026 (ab 5.3.54) haben die
+  Voreinstellung der erlaubten HTML-Attribute verschärft: `id` und `data-*`
+  stehen nicht mehr auf der globalen Liste, nur noch `data-lightbox`. Der
+  Smoke-Test hatte die alte Voreinstellung fest eingebaut und prüft jetzt
+  gegen das, was `html_filter_info` für die Installation meldet. Am Bundle
+  ändert das nichts: `html_filter_preview` zeigt schon immer, was die
+  jeweilige Installation durchlässt.
+
 ## [1.40.0] – 2026-11-10
 
 > Neue Schalter und Hausregeln. Wer nichts einschaltet, bemerkt nichts: Die

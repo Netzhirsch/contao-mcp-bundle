@@ -4972,10 +4972,16 @@ final class McpSmokeTestCommand extends Command
                 && ($r['removed_tags'] ?? ['x']) === []
                 && \in_array(['tag' => 'a', 'attribute' => 'role'], $r['removed_attributes'] ?? [], true)
                 && \in_array(['tag' => 'img', 'attribute' => 'fetchpriority'], $r['removed_attributes'] ?? [], true));
+        // Whether `id` survives is the installation's own setting, and Contao's
+        // default changed under us: the security releases of November 2026
+        // (5.3.54 and later) dropped `id` and `data-*` from the global list.
+        // So the output is checked against what html_filter_info reports, the
+        // same source the tool itself reads.
+        $idAllowed = \in_array('id', [...($filterInfo['allowed_attributes']['*'] ?? []), ...($filterInfo['allowed_attributes']['a'] ?? [])], true);
         $expect('and the output shows what actually renders', $dropped,
             static fn ($r) => !str_contains((string) $r['output'], 'role=')
                 && !str_contains((string) $r['output'], 'fetchpriority=')
-                && str_contains((string) $r['output'], 'id=')
+                && str_contains((string) $r['output'], 'id=') === $idAllowed
                 && str_contains((string) $r['output'], 'href='));
 
         $expect('a dropped tag is reported as a tag, not as its attributes',
@@ -4991,9 +4997,10 @@ final class McpSmokeTestCommand extends Command
                 && ($r['removed_tags'] ?? ['x']) === []
                 && ($r['removed_attributes'] ?? ['x']) === []);
 
-        // Prefix rules: data-* and aria-* pass, an event handler does not.
+        // Prefix rules: aria-* passes, an event handler does not. aria-* is on
+        // the default list of every supported version; data-* no longer is.
         $expect('wildcard attribute rules are honoured, event handlers are not',
-            $this->htmlTool->filterPreview('<div data-controller="x" aria-label="y" onclick="evil()">z</div>'),
+            $this->htmlTool->filterPreview('<div aria-label="y" onclick="evil()">z</div>'),
             static fn ($r) => ($r['removed_attributes'] ?? []) === [['tag' => 'div', 'attribute' => 'onclick']]);
 
         $expect('an empty preview is refused', $this->htmlTool->filterPreview(''),
