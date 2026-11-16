@@ -6,6 +6,29 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.40.1] – 2026-11-16
+
+### Fixed
+- **Dateifelder von Inhaltselementen scheiterten mit „Data too long for
+  column“.** Das Content-Tool kannte `singleSRC` und `multiSRC` beim Namen und
+  schrieb jedes andere Dateifeld so in die `binary(16)`-Spalte, wie es ankam:
+  `posterSRC` des Video-Elements und jedes Bildfeld einer Erweiterung
+  (`nh_image`). MySQL lehnte ab, das Tool meldete `save_failed` ohne Hinweis
+  auf das Feld. Gemeldet von bruhn-streichautomaten.de (AAT-1958) und
+  akquinet.com (AK-390). Jetzt erkennt es Dateifelder wie das Modul-Tool am
+  DCA (`fileTree` mit binärer Spalte) und nimmt eine UUID oder einen Pfad;
+  einen unbekannten Pfad lehnt es mit Feldnamen und Hinweis auf
+  `files_search` ab. Gelesen kommen diese Felder als Hex-UUID zurück statt als
+  Binärsalat.
+- **Eine UUID ohne Bindestriche wurde als Pfad gelesen.** Contaos
+  `isStringUuid()` kennt nur die Schreibweise mit Bindestrichen in
+  Kleinbuchstaben; die Lese-Tools geben Dateifelder aber als 32 Hex-Zeichen
+  aus. Was man gerade gelesen hatte, ließ sich so nicht zurückschreiben.
+- **Pfade gehen mit und ohne Upload-Verzeichnis.** `files_search` gibt `path`
+  ohne `files/` aus; Dateifelder nahmen bisher nur die Form mit.
+- `singleSRC` bei News, Terminen und FAQ und `favicon` bei Root-Seiten nehmen
+  jetzt ebenfalls einen Pfad statt nur einer UUID.
+
 ## [1.40.0] – 2026-11-10
 
 > Neue Schalter und Hausregeln. Wer nichts einschaltet, bemerkt nichts: Die

@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\CalendarEvent;
 
 use Contao\CalendarEventsModel;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
 
 /**
  * Maps MCP input onto a CalendarEventsModel (tl_calendar_events). Same
@@ -188,8 +189,8 @@ final class FieldMapper
 
         // singleSRC binary(16) UUID
         if (\array_key_exists('singleSRC', $input) && $input['singleSRC'] !== null) {
-            $raw = (string) $input['singleSRC'];
-            $bin = $raw === '' ? null : self::hexToBin($raw, 'singleSRC');
+            // A UUID or a path below the upload directory, like every fileTree.
+            $bin = FileUuid::toBinary($input['singleSRC'], 'singleSRC');
             if (!$detectChanges || $event->singleSRC !== $bin) {
                 $event->singleSRC = $bin;
                 $touch('singleSRC');
@@ -248,17 +249,5 @@ final class FieldMapper
             throw new \InvalidArgumentException(sprintf('Invalid datetime "%s".', $iso));
         }
         return $ts;
-    }
-
-    /**
-     * @throws \InvalidArgumentException
-     */
-    private static function hexToBin(string $raw, string $field): string
-    {
-        $hex = str_replace('-', '', $raw);
-        if (\strlen($hex) !== 32 || preg_match('/^[0-9a-fA-F]+$/', $hex) !== 1) {
-            throw new \InvalidArgumentException(sprintf('"%s" must be a 32-char hex UUID (got "%s").', $field, $raw));
-        }
-        return hex2bin($hex);
     }
 }

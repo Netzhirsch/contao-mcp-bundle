@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Service;
 
 use Contao\FilesModel;
 use Contao\StringUtil;
+use Contao\System;
 use Contao\Validator;
 
 /**
@@ -21,7 +22,8 @@ use Contao\Validator;
  *
  * Accepted, matching what the backend picker itself produces:
  *   - string UUID, with or without dashes
- *   - a path below the upload directory (`files/layout/logo.png`)
+ *   - a path below the upload directory, with or without it in front
+ *     (`files/layout/logo.png` or `layout/logo.png`)
  *   - an already-binary UUID (idempotent, so re-writing a read value works)
  *   - empty string or null → null, i.e. "no file"
  */
@@ -50,12 +52,15 @@ final class FileUuid
             return $value;
         }
 
-        if (Validator::isStringUuid($value)) {
-            return StringUtil::uuidToBin($value);
+        // Contao's Validator::isStringUuid() knows only the dashed lowercase
+        // form. The read side of several tools hands out 32 hex characters
+        // without dashes — reading a field and writing it back must work.
+        if (preg_match('/^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i', $value) === 1) {
+            return StringUtil::uuidToBin(strtolower($value));
         }
 
         // A path, the form a human (and an LLM reading files_list) actually has.
-        $file = FilesModel::findByPath($value);
+        $file = self::findByPath($value);
         if ($file !== null && $file->uuid !== null) {
             return (string) $file->uuid;
         }
@@ -65,6 +70,33 @@ final class FileUuid
             $field,
             $value,
         ));
+    }
+
+    /**
+     * Both spellings of a path: with the upload directory in front, as
+     * tl_files stores it (`files/media/a.jpg`), and without it, as the file
+     * tools return it in `path` (`media/a.jpg`). Taking the one form the
+     * tools hand out and refusing it here would be a trap.
+     */
+    private static function findByPath(string $path): ?FilesModel
+    {
+        $path = ltrim($path, '/');
+
+        if (($file = FilesModel::findByPath($path)) !== null) {
+            return $file;
+        }
+
+        try {
+            $uploadPath = trim((string) System::getContainer()->getParameter('contao.upload_path'), '/');
+        } catch (\Throwable) {
+            $uploadPath = 'files';
+        }
+
+        if ($uploadPath === '' || str_starts_with($path, $uploadPath.'/')) {
+            return null;
+        }
+
+        return FilesModel::findByPath($uploadPath.'/'.$path);
     }
 
     /**

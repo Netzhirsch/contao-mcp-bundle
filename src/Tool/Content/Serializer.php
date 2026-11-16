@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tool\Content;
 
 use Contao\ContentModel;
+use Contao\Controller;
+use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\StringUtil;
+use Contao\Validator;
 use Netzhirsch\ContaoMcpBundle\Security\UntrustedContent;
 use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 
@@ -85,6 +88,7 @@ final class Serializer
      */
     public function __construct(
         private readonly ProviderFields $providerFields,
+        private readonly ?ContaoFramework $framework = null,
     ) {
     }
 
@@ -93,13 +97,15 @@ final class Serializer
         /** @var array<string, mixed> $row */
         $row = $c->row();
 
-        foreach (self::UUID_FIELDS as $f) {
+        [$singleFiles, $multipleFiles] = $this->fileTreeFields();
+
+        foreach ([...self::UUID_FIELDS, ...$singleFiles] as $f) {
             if (\array_key_exists($f, $row)) {
-                $row[$f] = $row[$f] ? bin2hex((string) $row[$f]) : null;
+                $row[$f] = self::decodeUuid($row[$f]);
             }
         }
 
-        foreach (self::UUID_LIST_FIELDS as $f) {
+        foreach ([...self::UUID_LIST_FIELDS, ...$multipleFiles] as $f) {
             if (\array_key_exists($f, $row)) {
                 $row[$f] = self::decodeUuidList($row[$f]);
             }
@@ -205,6 +211,44 @@ final class Serializer
     }
 
     /**
+     * Every fileTree column of tl_content that holds binary UUIDs, split into
+     * single and multiple. Raw binary is no valid UTF-8 and comes out of the
+     * JSON encoder as replacement characters — a posterSRC or an extension's
+     * image field read back as garbage the caller could not even send again.
+     *
+     * @return array{0: list<string>, 1: list<string>}
+     */
+    private function fileTreeFields(): array
+    {
+        $this->framework?->getAdapter(Controller::class)->loadDataContainer('tl_content');
+
+        $single = [];
+        $multiple = [];
+        foreach ($GLOBALS['TL_DCA']['tl_content']['fields'] ?? [] as $field => $definition) {
+            match (FieldMapper::fileTreeKindOf($definition)) {
+                'single' => $single[] = (string) $field,
+                'multiple' => $multiple[] = (string) $field,
+                default => null,
+            };
+        }
+
+        return [$single, $multiple];
+    }
+
+    /**
+     * Hex, as singleSRC has always been returned. A value that is no binary
+     * UUID is passed through rather than mangled.
+     */
+    private static function decodeUuid(mixed $value): mixed
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return \is_string($value) && Validator::isBinaryUuid($value) ? bin2hex($value) : $value;
+    }
+
+    /**
      * @return list<string>
      */
     private static function decodeUuidList(mixed $value): array
@@ -220,7 +264,7 @@ final class Serializer
         $out = [];
         foreach ($arr as $bin) {
             if (\is_string($bin) && $bin !== '') {
-                $out[] = bin2hex($bin);
+                $out[] = Validator::isBinaryUuid($bin) ? bin2hex($bin) : $bin;
             }
         }
 

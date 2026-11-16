@@ -4089,6 +4089,60 @@ final class McpSmokeTestCommand extends Command
             $output->writeln('  <comment>~ fileTree-Test übersprungen — keine Datei in tl_files oder kein Theme</comment>');
         }
 
+        // The same for content elements, which knew singleSRC and multiSRC by
+        // name and wrote every other file column raw: posterSRC of the video
+        // element, and every image field an extension adds. "Data too long for
+        // column 'posterSRC'" on bruhn-streichautomaten.de, the same with
+        // nh_image on akquinet.com (AAT-1958, AK-390).
+        $ftArticleId = (int) $this->connection->fetchOne('SELECT id FROM tl_article ORDER BY id LIMIT 1');
+        if (\is_array($ftFile) && $ftArticleId > 0) {
+            $ftHex = bin2hex((string) $ftFile['uuid']);
+            $ftDbafsPath = (string) $ftFile['path'];
+            // tl_files paths start with the upload directory; the file tools
+            // hand them out without it.
+            $ftRelativePath = explode('/', $ftDbafsPath, 2)[1] ?? $ftDbafsPath;
+
+            $ftPlayer = $this->contentTool->create(ptable: 'tl_article', pid: $ftArticleId, type: 'player', sorting: 999999, fields: [
+                'playerSRC' => [$ftDbafsPath],
+                'posterSRC' => $ftDbafsPath,
+                'invisible' => true,
+            ]);
+            $ftPlayerId = (int) ($ftPlayer['id'] ?? 0);
+
+            try {
+                $expect('a content element takes a path for posterSRC and stores a binary uuid',
+                    [$ftPlayer, $ftPlayerId > 0 ? $this->connection->fetchAssociative('SELECT posterSRC, playerSRC FROM tl_content WHERE id = ?', [$ftPlayerId]) : null],
+                    static fn (array $r) => !isset($r[0]['error'])
+                        && \is_array($r[1])
+                        && $r[1]['posterSRC'] === (string) $ftFile['uuid']
+                        && StringUtil::deserialize((string) $r[1]['playerSRC'], true) === [(string) $ftFile['uuid']]);
+
+                $expect('...and reads both back as hex, not as binary',
+                    $ftPlayerId > 0 ? $this->contentTool->get($ftPlayerId) : null,
+                    static fn ($r) => \is_array($r)
+                        && ($r['posterSRC'] ?? null) === $ftHex
+                        && ($r['playerSRC'] ?? null) === [$ftHex]
+                        && json_encode($r) !== false);
+
+                $expect('the path without the upload directory, as files_search prints it, is the same file',
+                    $this->contentTool->update($ftPlayerId, ['posterSRC' => $ftRelativePath]),
+                    static fn ($r) => !isset($r['error']) && !\in_array('posterSRC', $r['changed_fields'] ?? ['posterSRC'], true));
+
+                $expect('so is the hex the read side handed out',
+                    $this->contentTool->update($ftPlayerId, ['posterSRC' => strtoupper($ftHex)]),
+                    static fn ($r) => !isset($r['error']) && !\in_array('posterSRC', $r['changed_fields'] ?? ['posterSRC'], true));
+
+                $expect('an unknown path is refused with a message naming the field, not a database error',
+                    $this->contentTool->update($ftPlayerId, ['posterSRC' => 'files/gibt-es-nicht-'.$stamp.'.jpg']),
+                    static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                        && str_contains((string) ($r['message'] ?? ''), 'posterSRC'));
+            } finally {
+                if ($ftPlayerId > 0) {
+                    $this->connection->delete('tl_content', ['id' => $ftPlayerId]);
+                }
+            }
+        }
+
         // ═══════════════════ Content-Baum (Batch) ═══════════════════
         //
         // pages_create_tree's counterpart for the inside of a page. Twelve

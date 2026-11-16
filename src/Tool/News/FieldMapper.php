@@ -6,6 +6,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\News;
 
 use Contao\NewsModel;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
 
 /**
  * Central mapping layer between MCP tool input (already JSON-validated by php-mcp's auto schema)
@@ -199,20 +200,10 @@ final class FieldMapper
             $setString($field, $new);
         }
 
-        // singleSRC: binary(16). Accept hex-32 or hyphenated UUID, normalise to binary.
+        // singleSRC: binary(16). A UUID (hex or with dashes) or a path below
+        // the upload directory, like every fileTree.
         if (\array_key_exists('singleSRC', $input) && $input['singleSRC'] !== null) {
-            $raw = (string) $input['singleSRC'];
-            if ($raw === '') {
-                $bin = null;
-            } else {
-                $hex = str_replace('-', '', $raw);
-                if (\strlen($hex) !== 32 || preg_match('/^[0-9a-fA-F]+$/', $hex) !== 1) {
-                    throw new \InvalidArgumentException(
-                        sprintf('singleSRC must be a 32-character hex UUID or a UUID with dashes (got "%s").', $raw),
-                    );
-                }
-                $bin = hex2bin($hex);
-            }
+            $bin = FileUuid::toBinary($input['singleSRC'], 'singleSRC');
             if (!$detectChanges || $news->singleSRC !== $bin) {
                 $news->singleSRC = $bin;
                 $touch('singleSRC');

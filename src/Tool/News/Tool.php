@@ -236,7 +236,7 @@ final class Tool
               - floating: one of "above", "left", "right", "below" (image floating).
               - robots: one of "index,follow", "index,nofollow", "noindex,follow", "noindex,nofollow".
               - searchIndexer: "always_index" or "never_index".
-              - singleSRC: 32-char hex UUID or UUID-with-dashes referencing a tl_files entry.
+              - singleSRC: a file UUID (hex or with dashes) or a path below the upload directory.
               - All booleans (featured, addImage, overwriteMeta, fullsize, addEnclosure, target,
                 published) take true/false.
 

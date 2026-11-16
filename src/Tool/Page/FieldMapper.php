@@ -11,6 +11,7 @@ use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
 use Netzhirsch\ContaoMcpBundle\Service\DcaScalarWriter;
 use Netzhirsch\ContaoMcpBundle\Service\ExtensionFieldOwnerMap;
 use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
+use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
 
 /**
  * Field mapper for tl_page. Enforces strict per-type whitelisting: every input field
@@ -319,21 +320,10 @@ final class FieldMapper
             }
         }
 
-        // favicon: binary(16) UUID — accept hex or hyphenated UUID, clear with ''.
+        // favicon: binary(16). A UUID (hex or with dashes) or a path below the
+        // upload directory, like every fileTree; '' clears.
         if (\array_key_exists('favicon', $input) && $input['favicon'] !== null) {
-            $raw = (string) $input['favicon'];
-            if ($raw === '') {
-                $bin = null;
-            } else {
-                $hex = str_replace('-', '', $raw);
-                if (\strlen($hex) !== 32 || preg_match('/^[0-9a-fA-F]+$/', $hex) !== 1) {
-                    throw new \InvalidArgumentException(sprintf(
-                        'favicon must be a 32-char hex UUID or a UUID with dashes (got "%s").',
-                        $raw,
-                    ));
-                }
-                $bin = hex2bin($hex);
-            }
+            $bin = FileUuid::toBinary($input['favicon'], 'favicon');
             if (!$detectChanges || $page->favicon !== $bin) {
                 $page->favicon = $bin;
                 $touch('favicon');

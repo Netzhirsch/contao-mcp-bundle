@@ -228,8 +228,10 @@ final class Tool
             in content_palette_get(type). Common conventions:
               - headline:   either a plain string (defaults to <h2>) or {value, unit:"h1..h6"}
               - text/html:  HTML/plaintext as a string
-              - singleSRC:  32-char hex UUID of a tl_files row (see filesystem APIs)
-              - multiSRC / orderSRC: list of hex UUIDs
+              - file fields (singleSRC, posterSRC and any fileTree field of the type, also
+                those of extensions): a file UUID (hex or with dashes) or a path below the
+                upload directory, e.g. "files/media/poster.jpg". They read back as hex UUIDs.
+              - multiSRC / orderSRC and other multiple file fields: a list of the same
               - groups:     list of tl_member_group.id (when protected=true)
               - cssID:  object {id, class} (or a plain string for the raw value)
               - space:  object {top, bottom}

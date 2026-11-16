@@ -281,7 +281,7 @@ final class Tool
             Conventions:
               - alias: auto-generated from title via Contao's Slug service if omitted.
               - start, stop: full ISO 8601 datetime, or empty to clear.
-              - favicon: 32-char hex UUID or UUID with dashes.
+              - favicon: a file UUID (hex or with dashes) or a path below the upload directory.
               - groups, newsArchives, eventCalendars: list of integer ids.
               - chmod: list of permission flags (u1..u6, g1..g6, w1..w6).
               - useSSL stores as 1/0 — pass true for HTTPS.

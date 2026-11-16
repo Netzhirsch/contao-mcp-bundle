@@ -8,6 +8,7 @@ use Contao\Controller;
 use Contao\ContentModel;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Netzhirsch\ContaoMcpBundle\Service\DcaPalette;
+use Netzhirsch\ContaoMcpBundle\Service\FileUuid;
 use Netzhirsch\ContaoMcpBundle\Service\SerializedTuple;
 use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Netzhirsch\ContaoMcpBundle\Tool\Extension\Rsce\RsceElements;
@@ -40,14 +41,18 @@ final class FieldMapper
     ];
 
     /**
-     * Binary(16) UUID fields — accept hex/UUID strings, store as binary, '' clears.
+     * Binary(16) UUID fields — accept a UUID (hex or with dashes) or a path
+     * below the upload directory, store as binary, '' clears. Every other
+     * single fileTree column of the live DCA is treated the same way; see
+     * {@see fileTreeKind()}.
      *
      * @var list<string>
      */
     private const UUID_FIELDS = ['singleSRC'];
 
     /**
-     * Serialised list<UUID> fields — accept list<hex>, store as serialised blob.
+     * Serialised list<UUID> fields — accept a list of UUIDs or paths, store as
+     * serialised blob. Like above, any multiple fileTree column counts too.
      *
      * @var list<string>
      */
@@ -533,23 +538,23 @@ final class FieldMapper
             return $value ? 1 : 0;
         }
 
-        if (\in_array($field, self::UUID_FIELDS, true)) {
-            $raw = (string) $value;
-            if ($raw === '') {
-                return null;
-            }
-            return self::hexToBin($raw, $field);
+        // File references are binary(16), and which columns hold them cannot
+        // be a list in here: the video element's posterSRC and every image
+        // field an extension adds (nh_image) went into the column as the raw
+        // string the caller sent, and MySQL answered "Data too long for column"
+        // — a save_failed that named nothing the caller could fix. Reported
+        // from bruhn-streichautomaten.de and akquinet.com. The live DCA knows,
+        // as it does for tl_module.
+        $fileTree = \in_array($field, self::UUID_FIELDS, true)
+            ? 'single'
+            : (\in_array($field, self::UUID_LIST_FIELDS, true) ? 'multiple' : $this->fileTreeKind($field));
+
+        if ($fileTree === 'single') {
+            return FileUuid::toBinary($value, $field);
         }
 
-        if (\in_array($field, self::UUID_LIST_FIELDS, true)) {
-            if (!\is_array($value)) {
-                throw new \InvalidArgumentException(sprintf('"%s" must be a list of UUID-hex strings.', $field));
-            }
-            $bins = [];
-            foreach ($value as $hex) {
-                $bins[] = self::hexToBin((string) $hex, $field);
-            }
-            return $bins === [] ? '' : serialize($bins);
+        if ($fileTree === 'multiple') {
+            return FileUuid::toBinaryList($value, $field);
         }
 
         if (\in_array($field, self::INT_LIST_FIELDS, true)) {
@@ -640,18 +645,37 @@ final class FieldMapper
         return $value;
     }
 
-    private static function hexToBin(string $raw, string $field): string
+    /**
+     * "single" | "multiple" for a fileTree column of tl_content that holds
+     * binary UUIDs, null for anything else.
+     */
+    public function fileTreeKind(string $field): ?string
     {
-        $hex = str_replace('-', '', $raw);
-        if (\strlen($hex) !== 32 || preg_match('/^[0-9a-fA-F]+$/', $hex) !== 1) {
-            throw new \InvalidArgumentException(sprintf(
-                '"%s" must be a 32-char hex UUID or a UUID with dashes (got "%s").',
-                $field,
-                $raw,
-            ));
+        $this->framework->getAdapter(Controller::class)->loadDataContainer('tl_content');
+
+        return self::fileTreeKindOf($GLOBALS['TL_DCA']['tl_content']['fields'][$field] ?? null);
+    }
+
+    /**
+     * The same decision for a field definition. The column type counts as well
+     * as the widget: an extension that declares a fileTree but keeps the path
+     * as text must get the text, not 16 bytes it cannot read.
+     */
+    public static function fileTreeKindOf(mixed $definition): ?string
+    {
+        if (!\is_array($definition) || ($definition['inputType'] ?? null) !== 'fileTree') {
+            return null;
         }
 
-        return hex2bin($hex);
+        $sql = $definition['sql'] ?? null;
+        $sqlType = strtolower(\is_array($sql) ? (string) ($sql['type'] ?? '') : (string) $sql);
+        if (!str_contains($sqlType, 'binary') && !str_contains($sqlType, 'blob')) {
+            return null;
+        }
+
+        $eval = \is_array($definition['eval'] ?? null) ? $definition['eval'] : [];
+
+        return !empty($eval['multiple']) ? 'multiple' : 'single';
     }
 
     private static function isDifferent(mixed $a, mixed $b): bool
