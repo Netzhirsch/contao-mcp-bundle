@@ -6,6 +6,8 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.41.0] – 2026-11-16
+
 ### Changed
 - **Der Server läuft auf dem offiziellen PHP-SDK `mcp/sdk` statt auf
   `php-mcp/server`.** php-mcp kam nicht über Protokollrevision 2025-03-26
@@ -42,6 +44,10 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   alten Namen auf die neuen ab. Benannte Argumente verwenden — das zweite
   positionale Argument war bei php-mcp die Beschreibung, beim SDK ist es der
   Titel. Siehe EXTENDING.md.
+- Auch `annotations: new \PhpMcp\Schema\ToolAnnotations(…)` im Attribut läuft
+  weiter (so schreibt es contao-mia-bundle). Ein Attribut, das sich trotzdem
+  nicht auswerten lässt, legt nur sein eigenes Tool still und steht im Log —
+  vorher hätte es den ganzen Server mitgerissen.
 
 ### Webserver
 - `DELETE` auf den Endpunkt und der Header `Mcp-Session-Id` müssen
