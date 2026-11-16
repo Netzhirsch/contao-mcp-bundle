@@ -20,6 +20,7 @@ use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\TranslationMaster;
 use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -135,7 +136,10 @@ final class Tool
     public function entityLanguageLink(
         string $table,
         int $default_id,
-        mixed $translations,
+        // An object, and only that: a JSON list is refused below. Without the
+        // attribute `mixed` becomes a three-type union that fragile clients
+        // drop entirely (see NullableUnionFlattener).
+        #[Schema(type: 'object')] mixed $translations,
         bool $reset_first = false,
     ): array {
         $this->framework->initialize();

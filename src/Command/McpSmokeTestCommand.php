@@ -3683,18 +3683,22 @@ final class McpSmokeTestCommand extends Command
         $expect('tools/list over HTTP answers with the catalogue',
             array_column($httpList['body']['result']['tools'] ?? [], 'name'),
             static fn (array $n) => \in_array('contao_call', $n, true) && \in_array('ping', $n, true));
+        // Over the whole registry, not the tools/list answer: under lazy mode
+        // that lists six tools, and a union on any of the hidden ones went
+        // unnoticed on exactly such an instance.
         $expect('optional parameters keep a single type (no ["null", T] unions)',
-            $httpList['body']['result']['tools'] ?? [],
+            $this->registryAccessor->getToolsCached(),
             static function (array $tools): bool {
-                foreach ($tools as $tool) {
-                    foreach ((array) ($tool['inputSchema']['properties'] ?? []) as $property) {
+                $unions = [];
+                foreach ($tools as $name => $tool) {
+                    foreach ((array) ($tool->inputSchema['properties'] ?? []) as $param => $property) {
                         if (\is_array($property) && \is_array($property['type'] ?? null) && \in_array('null', $property['type'], true)) {
-                            return false;
+                            $unions[] = $name.'.'.$param;
                         }
                     }
                 }
 
-                return $tools !== [];
+                return $unions === [] && $tools !== [];
             });
 
         $httpPing = $mcpHttp($rpc(5, 'tools/call', ['name' => 'ping', 'arguments' => (object) []]), $sessionId);

@@ -817,7 +817,7 @@ final class Tool
             Returns {linked: int, default_id, translations: {<lang>: <id>}, warnings: list<string>}.
         DESC,
     )]
-    public function languageLinkPages(int $default_id, mixed $translations, bool $reset_first = false): array
+    public function languageLinkPages(int $default_id, #[Schema(type: 'object')] mixed $translations, bool $reset_first = false): array
     {
         $this->framework->initialize();
 

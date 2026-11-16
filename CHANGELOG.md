@@ -31,6 +31,9 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   Undo-Schnappschuss, nicht nur `contao_call`.
 - Der Wiederholversuch beim kalten DCA-Cache unter Windows greift jetzt: php-mcp
   hatte die Ausnahme abgefangen, bevor er sie zu sehen bekam.
+- `translations` bei `entity_language_link` und `language_link_pages` ist im
+  Schema jetzt ein Objekt, wie es das Tool verlangt; bisher stand dort `array`,
+  und eine JSON-Liste wird abgelehnt.
 
 ### Für Erweiterungen
 - Die Attribute heißen jetzt `Mcp\Capability\Attribute\McpTool` und
