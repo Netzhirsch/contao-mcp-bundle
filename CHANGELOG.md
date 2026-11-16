@@ -6,6 +6,32 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.41.1] – 2026-11-16
+
+> Fehlerbehebung aus dem laufenden Betrieb, alles in `entity_duplicate`.
+> Gemeldet von akquinet.com (AK-400), jeweils als `duplicate_failed` mit einer
+> Log-Referenz.
+
+### Fixed
+- **Eine Root-Seite ließ sich nicht kopieren.** Die Kopie leert den
+  Sprach-Fallback, damit sie nicht mit dem Original kollidiert, und schrieb
+  dafür `''` in `tl_page.fallback`. Die Spalte ist seit Contao 5 `boolean`;
+  ein Server im Strict Mode antwortete mit „Incorrect integer value“. Jetzt
+  steht dort `0`.
+- **Dateifelder in den Overrides gingen roh in die Datenbank.** Ein Pfad oder
+  eine UUID als Text für `singleSRC` endete in „Data too long for column“.
+  Die Overrides nehmen jetzt, was `content_update` seit 1.40.1 nimmt: eine
+  UUID mit oder ohne Bindestriche oder einen Pfad mit oder ohne
+  Upload-Verzeichnis, bei Feldern mit mehreren Dateien eine Liste davon. Ein
+  unbekannter Pfad wird mit Feldnamen abgelehnt, bevor etwas kopiert ist.
+- **`null` in einer Spalte, die nicht NULL sein darf,** endete in „Column
+  'cssID' cannot be null“. `null` heißt jetzt „leeren“: Wo die Spalte NULL
+  halten kann, wird sie NULL, sonst bekommt sie ihren Standardwert (`''` bei
+  `cssID`). Eine Spalte ohne Standardwert wird mit Namen abgelehnt.
+- `''` auf einer Checkbox-Spalte heißt jetzt „aus“ (`0`), wie es Contao bis 4.13
+  selbst geschrieben hat; bisher scheiterte es am Strict Mode.
+  Was weder Zahl noch leer ist, wird mit Feldnamen abgelehnt.
+
 ## [1.41.0] – 2026-11-16
 
 ### Changed

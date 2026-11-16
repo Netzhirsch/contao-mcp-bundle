@@ -30,6 +30,31 @@ use Contao\Validator;
 final class FileUuid
 {
     /**
+     * "single" | "multiple" when a DCA field definition is a fileTree that
+     * stores binary UUIDs, null for anything else.
+     *
+     * The column type counts as well as the widget: an extension that declares
+     * a fileTree but keeps the path as text must get the text, not 16 bytes it
+     * cannot read.
+     */
+    public static function kindOf(mixed $definition): ?string
+    {
+        if (!\is_array($definition) || ($definition['inputType'] ?? null) !== 'fileTree') {
+            return null;
+        }
+
+        $sql = $definition['sql'] ?? null;
+        $sqlType = strtolower(\is_array($sql) ? (string) ($sql['type'] ?? '') : (string) $sql);
+        if (!str_contains($sqlType, 'binary') && !str_contains($sqlType, 'blob')) {
+            return null;
+        }
+
+        $eval = \is_array($definition['eval'] ?? null) ? $definition['eval'] : [];
+
+        return !empty($eval['multiple']) ? 'multiple' : 'single';
+    }
+
+    /**
      * @throws \InvalidArgumentException when the value is neither a UUID nor a known path
      */
     public static function toBinary(mixed $value, string $field): ?string

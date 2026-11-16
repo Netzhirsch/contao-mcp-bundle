@@ -141,6 +141,11 @@ final class Tool
               - overrides:     object of fields to set on the TOP-LEVEL copy (e.g. {"title": "…"}).
                                Values are strings, numbers, booleans or null — `published: false`
                                is written as 0, so an unpublished copy needs no follow-up call.
+                               null empties a field; where the column cannot be NULL it gets
+                               the column's default instead ('' for cssID). File fields
+                               (singleSRC, multiSRC, posterSRC, image fields of extensions)
+                               take a file UUID or a path, as on content_update — a list of
+                               them where the field holds several.
                                A column the table does not have is rejected before anything
                                is copied, and so are id, pid and ptable (the parent is
                                into_pid / into_ptable). On tl_content, tl_module and

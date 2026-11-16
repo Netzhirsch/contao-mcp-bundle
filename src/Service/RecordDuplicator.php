@@ -108,6 +108,15 @@ final class RecordDuplicator
                 ));
             }
 
+            // File fields first: a list of files is an array, which the
+            // scalar check below would refuse.
+            $fileTree = FileUuid::kindOf($this->fieldDefinition($table, $column));
+            if ($fileTree !== null) {
+                $out[$column] = $this->fileOverride($table, $column, $fileTree, $value);
+
+                continue;
+            }
+
             $value = match (true) {
                 \is_bool($value) => $value ? 1 : 0,
                 $value === null, \is_scalar($value) => $value,
@@ -154,8 +163,17 @@ final class RecordDuplicator
             return $value;
         }
 
+        if ($doctrineType === 'boolean') {
+            return $this->booleanOverride($table, $column, $value);
+        }
+
         $isTimestamp = \in_array($this->rgxpOf($table, $column), ['date', 'time', 'datim'], true);
         $isInteger = \in_array($doctrineType, ['integer', 'smallint', 'bigint'], true);
+
+        // Integer columns answer null below, with their own message.
+        if ($value === null && !$isInteger) {
+            return $this->emptyValue($table, $column);
+        }
 
         if (!$isTimestamp && !$isInteger) {
             return $value;
@@ -220,6 +238,95 @@ final class RecordDuplicator
         }
 
         return $timestamp;
+    }
+
+    /**
+     * A file field takes what content_update takes: a UUID with or without
+     * dashes, or a path with or without the upload directory — a list of them
+     * where the field holds several.
+     *
+     * Reported from akquinet.com (AK-400) as `duplicate_failed`: the override
+     * went into the INSERT as it came, and a binary(16) column answered "Data
+     * too long for column 'singleSRC'". content_update had learned the same
+     * lesson in 1.40.1; the copy had not.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function fileOverride(string $table, string $column, string $kind, mixed $value): mixed
+    {
+        try {
+            $binary = $kind === 'multiple'
+                ? FileUuid::toBinaryList($value, $column)
+                : FileUuid::toBinary($value, $column);
+        } catch (\InvalidArgumentException $e) {
+            throw new \InvalidArgumentException('overrides: '.rtrim($e->getMessage(), '. ').'. Nothing was copied.', 0, $e);
+        }
+
+        return $binary ?? $this->emptyValue($table, $column);
+    }
+
+    /**
+     * Contao 5 keeps checkboxes in `boolean` columns, a TINYINT that a
+     * strict-mode server will not fill with ''. But '' is what Contao itself
+     * wrote for "unchecked" for years, and what a caller copying a Contao 4
+     * habit sends — so it means 0 here. JSON booleans arrive as 1/0 already.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function booleanOverride(string $table, string $column, mixed $value): mixed
+    {
+        if ($value === null) {
+            return $this->emptyValue($table, $column);
+        }
+
+        if ($value === '') {
+            return 0;
+        }
+
+        if (\is_int($value) || (\is_string($value) && preg_match('/^-?\d+$/', $value) === 1)) {
+            return (int) $value;
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            'overrides["%s"]: %s.%s is a checkbox — pass true or false (or 1 / 0), got "%s".',
+            $column,
+            $table,
+            $column,
+            \is_scalar($value) ? (string) $value : get_debug_type($value),
+        ));
+    }
+
+    /**
+     * What "empty" means for a column: NULL where it can hold NULL, otherwise
+     * its own default.
+     *
+     * Reported from akquinet.com (AK-400) as `duplicate_failed`: `cssID: null`
+     * went into the INSERT, and "Column 'cssID' cannot be null". null is how a
+     * caller says "clear this"; on a NOT NULL column that is the default the
+     * table itself would put there ('' for cssID). Only a column without any
+     * default is refused, by name.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function emptyValue(string $table, string $column): mixed
+    {
+        if (!$this->columnIsNotNull($table, $column)) {
+            return null;
+        }
+
+        $default = $this->columnsOf($table)[strtolower($column)]->getDefault();
+
+        if ($default !== null) {
+            return $default;
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            'overrides["%s"]: %s.%s cannot be empty — the column is NOT NULL and has no default. '
+            .'Pass a value, or leave the override out to keep the source record\'s.',
+            $column,
+            $table,
+            $column,
+        ));
     }
 
     /**
@@ -380,9 +487,11 @@ final class RecordDuplicator
 
         // A duplicated root page must not clash on the fallback/dns uniqueness
         // (one language-fallback root per dns). Drop both so the operator sets
-        // them explicitly on the copy.
+        // them explicitly on the copy. `fallback` is a boolean column since
+        // Contao 5: '' there was "Incorrect integer value" on every strict-mode
+        // server — every root page copy failed (akquinet.com, AK-400).
         if ($table === 'tl_page' && ($source['type'] ?? '') === 'root') {
-            $row['fallback'] = '';
+            $row['fallback'] = 0;
             $row['dns'] = '';
         }
 
@@ -573,11 +682,20 @@ final class RecordDuplicator
      */
     private function rgxpOf(string $table, string $column): string
     {
+        $definition = $this->fieldDefinition($table, $column);
+        $rgxp = \is_array($definition) ? ($definition['eval']['rgxp'] ?? '') : '';
+
+        return \is_string($rgxp) ? $rgxp : '';
+    }
+
+    /**
+     * The live DCA definition of a field, or null when the DCA does not know it.
+     */
+    private function fieldDefinition(string $table, string $column): mixed
+    {
         $this->framework->getAdapter(Controller::class)->loadDataContainer($table);
 
-        $definition = $GLOBALS['TL_DCA'][$table]['fields'][$column]['eval']['rgxp'] ?? '';
-
-        return \is_string($definition) ? $definition : '';
+        return $GLOBALS['TL_DCA'][$table]['fields'][$column] ?? null;
     }
 
     /**

@@ -657,25 +657,11 @@ final class FieldMapper
     }
 
     /**
-     * The same decision for a field definition. The column type counts as well
-     * as the widget: an extension that declares a fileTree but keeps the path
-     * as text must get the text, not 16 bytes it cannot read.
+     * The same decision for a field definition; see {@see FileUuid::kindOf()}.
      */
     public static function fileTreeKindOf(mixed $definition): ?string
     {
-        if (!\is_array($definition) || ($definition['inputType'] ?? null) !== 'fileTree') {
-            return null;
-        }
-
-        $sql = $definition['sql'] ?? null;
-        $sqlType = strtolower(\is_array($sql) ? (string) ($sql['type'] ?? '') : (string) $sql);
-        if (!str_contains($sqlType, 'binary') && !str_contains($sqlType, 'blob')) {
-            return null;
-        }
-
-        $eval = \is_array($definition['eval'] ?? null) ? $definition['eval'] : [];
-
-        return !empty($eval['multiple']) ? 'multiple' : 'single';
+        return FileUuid::kindOf($definition);
     }
 
     private static function isDifferent(mixed $a, mixed $b): bool

@@ -3477,6 +3477,28 @@ final class McpSmokeTestCommand extends Command
             'SELECT COUNT(*) FROM tl_page WHERE title LIKE ?', [$delStamp.'%']),
             static fn (int $n) => $n === 0);
 
+        // Reported from akquinet.com (AK-400) as `duplicate_failed`: "Incorrect
+        // integer value: '' for column tl_page.fallback". A copied root page
+        // has its language fallback cleared so it cannot clash with the
+        // source — and the copy wrote '' into what has been a boolean column
+        // since Contao 5. Every root page copy failed on a strict-mode server.
+        $treeRootId = (int) ($byPath['1']['id'] ?? 0);
+        if ($treeRootId > 0) {
+            $rootCopy = $this->duplicateTool->duplicate('tl_page', $treeRootId,
+                overrides: (object) ['title' => $treeStamp.'_root_kopie']);
+            $rootCopyId = (int) ($rootCopy['new_id'] ?? 0);
+
+            try {
+                $expect('a root page can be copied, with its language fallback cleared',
+                    [$rootCopy, $rootCopyId > 0 ? $this->connection->fetchOne('SELECT fallback FROM tl_page WHERE id = ?', [$rootCopyId]) : null],
+                    static fn (array $r) => ($r[0]['duplicated'] ?? false) === true && (int) $r[1] === 0);
+            } finally {
+                if ($rootCopyId > 0) {
+                    $this->connection->delete('tl_page', ['id' => $rootCopyId]);
+                }
+            }
+        }
+
         foreach (array_reverse($treeResult['pages'] ?? []) as $p) {
             if (isset($p['id'])) {
                 $this->connection->delete('tl_page', ['id' => (int) $p['id']]);
@@ -4248,9 +4270,32 @@ final class McpSmokeTestCommand extends Command
                     $this->contentTool->update($ftPlayerId, ['posterSRC' => 'files/gibt-es-nicht-'.$stamp.'.jpg']),
                     static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
                         && str_contains((string) ($r['message'] ?? ''), 'posterSRC'));
+
+                // entity_duplicate wrote its overrides raw into the same
+                // columns: "Data too long for column 'singleSRC'" on
+                // akquinet.com (AK-400). The copy takes what content_update
+                // takes — a path for one file, a list for several.
+                $ftCopy = $ftPlayerId > 0 ? $this->duplicateTool->duplicate('tl_content', $ftPlayerId,
+                    overrides: (object) ['posterSRC' => $ftRelativePath, 'playerSRC' => [$ftHex]]) : [];
+                $ftCopyId = (int) ($ftCopy['new_id'] ?? 0);
+                $expect('entity_duplicate takes a path and a list of uuids for file overrides',
+                    [$ftCopy, $ftCopyId > 0 ? $this->connection->fetchAssociative('SELECT posterSRC, playerSRC FROM tl_content WHERE id = ?', [$ftCopyId]) : null],
+                    static fn (array $r) => ($r[0]['duplicated'] ?? false) === true
+                        && \is_array($r[1])
+                        && $r[1]['posterSRC'] === (string) $ftFile['uuid']
+                        && StringUtil::deserialize((string) $r[1]['playerSRC'], true) === [(string) $ftFile['uuid']]);
+
+                $expect('and refuses an unknown path by naming the field',
+                    $ftPlayerId > 0 ? $this->duplicateTool->duplicate('tl_content', $ftPlayerId,
+                        overrides: (object) ['posterSRC' => 'files/gibt-es-nicht-'.$stamp.'.jpg']) : [],
+                    static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                        && str_contains((string) ($r['message'] ?? ''), 'posterSRC'));
             } finally {
                 if ($ftPlayerId > 0) {
                     $this->connection->delete('tl_content', ['id' => $ftPlayerId]);
+                }
+                if (($ftCopyId ?? 0) > 0) {
+                    $this->connection->delete('tl_content', ['id' => $ftCopyId]);
                 }
             }
         }
@@ -4385,6 +4430,37 @@ final class McpSmokeTestCommand extends Command
                 $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
                     overrides: (object) ['title' => $stamp.'_dup_leer', 'start' => '']),
                 static fn ($r) => ($r['duplicated'] ?? false) === true);
+
+            // Reported from akquinet.com (AK-400) as `duplicate_failed`:
+            // "Column 'cssID' cannot be null". null is how a caller says
+            // "clear this"; where the column cannot hold NULL it is the
+            // column's default. And '' on a checkbox — Contao's own word for
+            // "unchecked" until 5.0 — hit the same strict-mode wall as false.
+            $dupEmpty = $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
+                overrides: (object) ['title' => $stamp.'_dup_null', 'cssID' => null, 'published' => '']);
+            $dupEmptyId = (int) ($dupEmpty['new_id'] ?? 0);
+            $expect('null clears a NOT NULL column to its default, and \'\' unchecks a checkbox',
+                [$dupEmpty, $dupEmptyId > 0 ? $this->connection->fetchAssociative('SELECT cssID, published FROM tl_article WHERE id = ?', [$dupEmptyId]) : null],
+                static fn (array $r) => ($r[0]['duplicated'] ?? false) === true
+                    && \is_array($r[1])
+                    && (string) $r[1]['cssID'] === ''
+                    && (int) $r[1]['published'] === 0);
+            if ($dupEmptyId > 0) {
+                $emptyTop = array_map('intval', $this->connection->fetchFirstColumn(
+                    'SELECT id FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $dupEmptyId]));
+                if ($emptyTop !== []) {
+                    $this->connection->executeStatement(
+                        'DELETE FROM tl_content WHERE ptable = ? AND pid IN ('.implode(',', $emptyTop).')', ['tl_content']);
+                }
+                $this->connection->executeStatement('DELETE FROM tl_content WHERE ptable = ? AND pid = ?', ['tl_article', $dupEmptyId]);
+                $this->connection->executeStatement('DELETE FROM tl_article WHERE id = ?', [$dupEmptyId]);
+            }
+
+            $expect('a checkbox refuses a word it cannot read, by name',
+                $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
+                    overrides: (object) ['published' => 'vielleicht']),
+                static fn ($r) => ($r['error'] ?? '') === 'invalid_input'
+                    && str_contains((string) ($r['message'] ?? ''), 'checkbox'));
 
             $expect('a date the tool cannot read is refused by name, not by the database',
                 $this->duplicateTool->duplicate('tl_article', $ctreeArticleId, into_pid: $ctreePageId,
