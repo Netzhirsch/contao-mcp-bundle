@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
-use PhpMcp\Schema\Tool;
-use PhpMcp\Server\Registry;
+use Mcp\Capability\Registry;
+use Mcp\Schema\Tool;
 
 /**
  * Rewrites every registered tool's input schema so that nullable-optional
  * parameters carry a SINGLE-STRING `type` instead of the `["null", T]` union
- * php-mcp's SchemaGenerator derives from `?bool $x = null` & friends.
+ * the SDK's SchemaGenerator derives from `?bool $x = null` & friends.
  *
  * Why: several MCP bridges/clients (mcp-remote, the Claude Code deferred-tool
  * loader) only keep simple scalar `type` values and DROP every array/union
@@ -41,7 +41,7 @@ use PhpMcp\Server\Registry;
  * AFTER discovery + extension registration, so it covers core tools, cached
  * discoveries and third-party tools alike. Idempotent — a single-string type
  * passes through untouched, so re-running on an already-flattened registry
- * (or a future php-mcp that emits single types itself) is a no-op.
+ * (or a future SDK that emits single types itself) is a no-op.
  */
 final class NullableUnionFlattener
 {
@@ -52,22 +52,28 @@ final class NullableUnionFlattener
      */
     public function flattenRegistry(Registry $registry): void
     {
-        foreach (array_keys($registry->getTools()) as $name) {
-            $registered = $registry->getTool($name);
-            if ($registered === null) {
-                continue;
-            }
+        foreach (array_keys($registry->getTools()->references) as $name) {
+            $registered = $registry->getTool((string) $name);
+            $tool = $registered->tool;
 
-            $schema = $registered->schema;
-            $flattened = $this->flattenSchema($schema->inputSchema);
-            if ($flattened === $schema->inputSchema) {
+            $flattened = $this->flattenSchema($tool->inputSchema);
+            if ($flattened === $tool->inputSchema) {
                 continue;
             }
 
             $registry->registerTool(
-                Tool::make($schema->name, $flattened, $schema->description, $schema->annotations),
+                new Tool(
+                    name: $tool->name,
+                    title: $tool->title,
+                    inputSchema: $flattened,
+                    description: $tool->description,
+                    annotations: $tool->annotations,
+                    icons: $tool->icons,
+                    meta: $tool->meta,
+                    outputSchema: $tool->outputSchema,
+                    execution: $tool->execution,
+                ),
                 $registered->handler,
-                $registered->isManual,
             );
         }
     }

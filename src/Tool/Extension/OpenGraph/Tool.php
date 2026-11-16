@@ -12,8 +12,8 @@ use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use numero2\Opengraph3Bundle\Opengraph3Bundle;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Attributes\Schema as InputSchema;
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema as InputSchema;
 use Psr\Log\LoggerInterface;
 
 /**

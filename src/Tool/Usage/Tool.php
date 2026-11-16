@@ -10,7 +10,7 @@ use Netzhirsch\ContaoMcpBundle\Service\DeletionScope;
 use Netzhirsch\ContaoMcpBundle\Service\Usage\TargetResolver;
 use Netzhirsch\ContaoMcpBundle\Service\Usage\UsageScanner;
 use Netzhirsch\ContaoMcpBundle\Service\Usage\UsageTarget;
-use PhpMcp\Server\Attributes\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 
 /**
  * "Where is this actually used?" — the question to answer BEFORE deleting.

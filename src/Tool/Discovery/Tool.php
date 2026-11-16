@@ -15,7 +15,7 @@ use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\DeletionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\NameTokens;
 use Netzhirsch\ContaoMcpBundle\Service\UndoRecorder;
-use PhpMcp\Server\Attributes\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 
@@ -280,8 +280,7 @@ final class Tool
     )]
     public function describeTool(string $name): array
     {
-        $registry = $this->registryAccessor->get();
-        $tool = $registry->getTool($name);
+        $tool = $this->registryAccessor->find($name);
         // Hide tools the caller may not use behind the same "not found" answer
         // as a genuinely missing tool — no capability disclosure.
         if ($tool === null || !$this->permissionEnforcer->isToolVisible($name)) {
@@ -294,8 +293,8 @@ final class Tool
         return [
             'name' => $name,
             'group' => ToolGroups::groupOf($name),
-            'description' => (string) ($tool->schema->description ?? ''),
-            'input_schema' => $tool->schema->inputSchema,
+            'description' => (string) ($tool->tool->description ?? ''),
+            'input_schema' => $tool->tool->inputSchema,
         ];
     }
 
@@ -323,8 +322,7 @@ final class Tool
      */
     public function call(string $name, mixed $args = null): mixed
     {
-        $registry = $this->registryAccessor->get();
-        $tool = $registry->getTool($name);
+        $tool = $this->registryAccessor->find($name);
         if ($tool === null) {
             return [
                 'error' => 'not_found',
@@ -341,7 +339,7 @@ final class Tool
             return $denial;
         }
 
-        // This proxy calls $tool->call() itself, so the dispatcher's schema
+        // This proxy invokes the tool itself, so the call handler's schema
         // validation never runs for it. Without this check a lazy-mode
         // instance -- where EVERY call arrives here -- would keep dropping
         // unknown parameters without a word.
@@ -363,7 +361,7 @@ final class Tool
         $undoId = $this->undoRecorder->beforeToolCall($name, $arguments);
 
         try {
-            $contentItems = $tool->call($this->container, $arguments);
+            $contentItems = $tool->formatResult($this->registryAccessor->invoke($tool, $arguments));
         } catch (\Throwable $e) {
             $this->undoRecorder->discard($undoId);
 
@@ -427,9 +425,16 @@ final class Tool
     }
 
     /**
-     * RegisteredTool::call() returns Content[]. For our purposes we want the
-     * original PHP value back — a single TextContent with a JSON body is
-     * decoded, anything else is left in its MCP shape (rare for tool results).
+     * formatResult() returns Content[], exactly what a direct tools/call would
+     * send. For our purposes we want the PHP value back — a single
+     * TextContent with a JSON body is decoded, anything else is left in its
+     * MCP shape (rare for tool results).
+     *
+     * Going through the formatter rather than handing back the raw value keeps
+     * the answer identical to the direct call's: objects come back as the
+     * arrays their JSON encodes to, and a JsonSerializable says what it says.
+     *
+     * @param list<mixed> $contentItems
      */
     private static function unwrapContent(array $contentItems): mixed
     {

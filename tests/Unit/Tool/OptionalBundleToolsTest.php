@@ -15,8 +15,8 @@ use Netzhirsch\ContaoMcpBundle\Tool\Faq\Tool as FaqTool;
 use Netzhirsch\ContaoMcpBundle\Tool\FaqCategory\Tool as FaqCategoryTool;
 use Netzhirsch\ContaoMcpBundle\Tool\News\Tool as NewsTool;
 use Netzhirsch\ContaoMcpBundle\Tool\NewsArchive\Tool as NewsArchiveTool;
+use Mcp\Capability\Attribute\McpTool;
 use Netzhirsch\ContaoMcpBundle\Tool\System\Tool as SystemTool;
-use PhpMcp\Server\Attributes\McpTool;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

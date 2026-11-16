@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Server;
 
+use Mcp\Capability\Discovery\SchemaValidator;
 use Netzhirsch\ContaoMcpBundle\Server\ObjectAwareSchemaValidator;
-use PhpMcp\Server\Utils\SchemaValidator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
 /**
  * Guards the empty-object marshalling fix. The JSON-RPC body is decoded
- * associatively, so a client-sent `{}` arrives as `[]` and php-mcp's stock
+ * associatively, so a client-sent `{}` arrives as `[]` and the SDK's stock
  * validator rejects it against `type: object` with "received unknown". The
  * object-aware validator must accept it while leaving lists, non-empty
  * objects and genuine type errors exactly as the stock validator handles them.
@@ -34,13 +34,13 @@ final class ObjectAwareSchemaValidatorTest extends TestCase
 
     private function validator(): ObjectAwareSchemaValidator
     {
-        return new ObjectAwareSchemaValidator(new NullLogger());
+        return new ObjectAwareSchemaValidator(logger: new NullLogger());
     }
 
     public function testStockValidatorRejectsEmptyObjectParam(): void
     {
         // Documents the upstream bug this class works around.
-        $errors = (new SchemaValidator(new NullLogger()))
+        $errors = (new SchemaValidator(logger: new NullLogger()))
             ->validateAgainstJsonSchema(['fields' => []], self::SCHEMA);
 
         self::assertNotEmpty($errors, 'Stock validator is expected to reject empty {} here.');

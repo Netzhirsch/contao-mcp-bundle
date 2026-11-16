@@ -304,27 +304,38 @@ beim Installieren zu beachten:
 damit Contao-5.3-Instanzen weiterlaufen — auf PHP 8.1 und 8.2 ist nur
 Contao 5.3 installierbar.
 
-**Der Installationsbefehl braucht `-W`:**
+**Installationsbefehl mit `-W`:**
 
 ```bash
 composer require netzhirsch/contao-mcp-bundle -W
 ```
 
-Grund ist nicht das Bundle, sondern `php-mcp/server`: es pinnt
-`phpdocumentor/reflection-docblock` auf `^5.6` und `symfony/finder` auf `^6.4 || ^7.2`,
-während eine Contao-6-Installation beide höher auflöst. `-W` erlaubt Composer,
-sie zurückzustufen. Beide Pakete vertragen das; ohne `-W` bricht die Auflösung
-ab. Auf Contao 5 ist das Flag überflüssig.
+`-W` erlaubt Composer, gemeinsam genutzte Abhängigkeiten anzupassen. Bis 1.40
+war es auf Contao 6 Pflicht, weil `php-mcp/server` `phpdocumentor/reflection-docblock`
+auf `^5.6` festhielt; das offizielle `mcp/sdk`, auf dem der Server seit 1.41
+läuft, nimmt auch `^6.0`. Schaden tut das Flag nicht.
 
 ## Transport und Protokoll
 
-Streamable HTTP auf einem einzigen Endpunkt, `POST /mcp` (oder der eingestellte
-Pfad). Einen **SSE-Kanal gibt
-es nicht** — keinen GET-Stream und keine vom Server angestoßenen Nachrichten,
-nur JSON als Anfrage und Antwort. Protokollrevision **2025-03-26**; Clients mit
-**2024-11-05** werden ebenfalls angenommen. Jeder MCP-Client, der Streamable HTTP
-mit OAuth spricht, sollte funktionieren; getestet wird gegen Claude. Ein
-JSON-RPC-Batch nimmt höchstens 50 Aufrufe.
+Streamable HTTP auf einem einzigen Endpunkt, `/mcp` (oder der eingestellte
+Pfad), gebaut auf dem offiziellen PHP-SDK [`mcp/sdk`](https://github.com/modelcontextprotocol/php-sdk).
+Beide Protokoll-Zeitalter laufen über dieselbe URL:
+
+- **Revisionen 2024-11-05 bis 2025-11-25** beginnen mit `initialize`. Der Server
+  vergibt eine `Mcp-Session-Id`, die der Client bei jeder weiteren Anfrage
+  mitschickt. Die Sitzung liegt in der Contao-Datenbank (`tl_mcp_session`),
+  damit jeder PHP-Worker und bei mehreren Servern hinter einem Load Balancer
+  jeder Knoten sie findet. Unbenutzt läuft sie nach sieben Tagen ab; der Client
+  bekommt dann 404 und meldet sich neu an. `DELETE /mcp` beendet sie.
+- **Revision 2026-07-28** kennt weder Handshake noch Sitzung: Jede Anfrage
+  trägt mit, was der Server zum Antworten braucht.
+
+Einen **SSE-Kanal gibt es nicht**: kein GET-Stream (`GET /mcp` antwortet 405)
+und keine vom Server angestoßenen Nachrichten, nur JSON als Anfrage und Antwort.
+Jeder MCP-Client, der Streamable HTTP mit OAuth spricht, sollte funktionieren;
+getestet wird gegen Claude. Ein JSON-RPC-Batch nimmt höchstens 50 Aufrufe
+(Batches gibt es nur bis 2025-03-26 im Protokoll; der Server nimmt sie in allen
+Handshake-Revisionen an).
 
 ## Smoke-Test
 
@@ -332,7 +343,7 @@ JSON-RPC-Batch nimmt höchstens 50 Aufrufe.
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
 
-Geht rund 500 Prüfungen gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
+Geht rund 600 Prüfungen gegen den Tool-Layer durch (CRUD auf Member/Group/Form/
 Newsletter/Comments/Theme/Layout/Templates/Maintenance + Content-Baum +
 Rechte-Parität + External-ID + Audit-Regressions + Key-Rotation + Rate-Limit +
 MCP-Activity-Log), erstellt eigene Testdaten, räumt am Ende wieder auf. Soll
@@ -588,6 +599,10 @@ Damit das klappt:
   ```
 
   Bei einem anderen Endpunkt-Pfad als `mcp` den Ausdruck anpassen.
+- **Der Header `Mcp-Session-Id` muss in beide Richtungen durch**, und `DELETE`
+  auf den Endpunkt darf nicht gesperrt sein. Eine Web Application Firewall oder
+  ein Proxy, der unbekannte Header entfernt, lässt den Client nach jeder Anfrage
+  neu anmelden.
 - **Keine IP-Sperre auf den Endpunkt**, solange nicht feststeht, von welchen
   Adressen der Anbieter kommt. Lokale Clients wie Claude Code verbinden sich vom
   eigenen Rechner.
@@ -1193,17 +1208,13 @@ Leistung geplant.
 
 **Nichts zu tun** — `composer update netzhirsch/contao-mcp-bundle` läuft durch,
 auch wenn in der Root-`composer.json` noch der frühere Patch-Block steht. Die
-`patches/`-Dateien liegen dafür bis 2.0.0 weiter im Paket. Wo der alte Block
-noch steht, wendet `cweagans/composer-patches` sie weiter an — wirkungslos, weil
-`ContaoDispatcher` die gepatchten Methoden überschreibt.
+`patches/`-Dateien liegen dafür bis 2.0.0 weiter im Paket. Seit 1.41 ist
+`php-mcp/server` gar nicht mehr installiert; der alte Block nennt ein Paket, das
+es im Projekt nicht gibt, und `cweagans/composer-patches` wendet nichts mehr an.
 
 Wer aufräumen will (empfohlen, aber nicht dringend): `extra.patches`,
 `cweagans/composer-patches` aus `require` und den `allow-plugins`-Eintrag aus der
-Root-`composer.json` löschen, dann `composer update`. Der Vendor bleibt danach
-gepatcht — das Plugin installiert `php-mcp/server` bei geschrumpfter Patch-Liste
-nicht von sich aus neu. Folgenlos, weil `ContaoDispatcher` die betroffenen
-Methoden überschreibt; wer es sauber will, hängt ein
-`composer reinstall php-mcp/server` an. Details:
+Root-`composer.json` löschen, dann `composer update`. Details:
 [`patches/README.md`](patches/README.md).
 
 ## Wartung
@@ -1221,10 +1232,13 @@ antworteten die Backend-Seiten unter „MCP-Server" sonst mit Fehler 500. Eigene
 Overrides der früheren `be_mcp_*.html5`-Templates greifen unter Contao 6 nicht
 mehr; die Anpassung gehört in `be_mcp_*.html.twig`.
 
-Das Bundle braucht **keine Vendor-Patches** mehr: was es am Dispatcher
-braucht (Lazy-Mode-Filter, Post-Call-Cleanup), liegt in
-`Server\ContaoDispatcher` als Subklasse. Bei einem `php-mcp/server`-Major-Bump
-dort prüfen, ob `handleToolList()`/`handleToolCall()` noch passen.
+Das Bundle braucht **keine Vendor-Patches**. Der Server läuft auf dem
+offiziellen `mcp/sdk`; was das Bundle anders macht als dessen Standard —
+Lazy-Mode-Filter, Lizenz- und Rechteprüfung, Undo, Post-Call-Cleanup —, sitzt
+in zwei eigenen Request-Handlern, `Server\ToolCallHandler` und
+`Server\ToolListHandler`, die das SDK vor seinen eigenen fragt. Das SDK ist
+noch in Version 0.x und auf `~0.9.0` festgelegt: Vor dem Anheben auf eine neue
+Minor-Version den Smoke-Test laufen lassen.
 
 ### Wenn ein Update mit „no merge base" abbricht
 

@@ -51,13 +51,18 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
-use Netzhirsch\ContaoMcpBundle\Server\ContaoDispatcher;
+use Mcp\Schema\JsonRpc\Response as JsonRpcResponse;
+use Mcp\Schema\Request\CallToolRequest;
+use Mcp\Schema\Request\ListToolsRequest;
+use Mcp\Schema\Result\CallToolResult;
+use Mcp\Server;
+use Mcp\Server\Session\InMemorySessionStore;
+use Mcp\Server\Session\Session;
 use Netzhirsch\ContaoMcpBundle\Server\HttpDispatcherFactory;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
+use Netzhirsch\ContaoMcpBundle\Server\ToolCallHandler;
 use Netzhirsch\ContaoMcpBundle\Server\ToolFilter;
-use PhpMcp\Schema\Request\CallToolRequest;
-use PhpMcp\Schema\Request\ListToolsRequest;
-use PhpMcp\Schema\Result\CallToolResult;
+use Netzhirsch\ContaoMcpBundle\Server\ToolListHandler;
 use Netzhirsch\ContaoMcpBundle\Controller\McpController;
 use Netzhirsch\ContaoMcpBundle\Controller\OAuth\MetadataController;
 use Netzhirsch\ContaoMcpBundle\OAuth\Cimd\CimdException;
@@ -135,6 +140,7 @@ final class McpSmokeTestCommand extends Command
         private readonly RegisterController $registerController,
         private readonly McpServerConfigStorage $configStorage,
         private readonly \Netzhirsch\ContaoMcpBundle\Controller\McpUploadController $uploadController,
+        private readonly ToolCallHandler $toolCallHandler,
         private readonly string $projectDir,
     ) {
         parent::__construct();
@@ -3596,16 +3602,39 @@ final class McpSmokeTestCommand extends Command
         // thousands of tools/call cost one token and executed all of them —
         // which makes the limiter decorative and the FPM pool the real limit
         // (audit F06).
-        $batchOf = static function (int $n): Request {
+        $batchOf = static function (int $n): array {
             $items = [];
             for ($i = 1; $i <= $n; ++$i) {
                 $items[] = ['jsonrpc' => '2.0', 'id' => $i, 'method' => 'tools/call',
                     'params' => ['name' => 'ping', 'arguments' => (object) []]];
             }
 
-            return Request::create('/mcp', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'],
-                (string) json_encode($items));
+            return $items;
         };
+
+        // One POST (or DELETE) through the real controller and the SDK behind
+        // it — transport, session store and handlers, as a client sees them.
+        $mcpHttp = function (array|string|null $body, ?string $sessionId = null, array $headers = [], string $method = 'POST'): array {
+            $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json, text/event-stream'];
+            if ($sessionId !== null) {
+                $server['HTTP_MCP_SESSION_ID'] = $sessionId;
+            }
+            foreach ($headers as $name => $value) {
+                $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+            }
+
+            $response = $this->mcpController->handle(Request::create('/mcp', $method, [], [], [], $server,
+                $body === null ? null : (\is_string($body) ? $body : (string) json_encode($body))));
+
+            return [
+                'status' => $response->getStatusCode(),
+                'session' => $response->headers->get('Mcp-Session-Id'),
+                'body' => json_decode((string) $response->getContent(), true),
+            ];
+        };
+        $rpc = static fn (int $id, string $method, array $params = []): array => [
+            'jsonrpc' => '2.0', 'id' => $id, 'method' => $method, 'params' => (object) $params,
+        ];
 
         // The OAuth section above left auth_mode=oauth, and the ceiling sits
         // behind the auth check — deliberately, since refusing an unauthorised
@@ -3614,18 +3643,110 @@ final class McpSmokeTestCommand extends Command
         $authModeBefore = (string) ($this->configStorage->load()['auth_mode'] ?? 'none');
         $this->configStorage->save([...$this->configStorage->load(), 'auth_mode' => 'none']);
 
-        $oversized = $this->mcpController->handle($batchOf(51));
-        $expect('a batch above the ceiling is refused',
-            [$oversized->getStatusCode(), (string) $oversized->getContent()],
-            static fn (array $r) => str_contains(mb_strtolower($r[1]), 'batch too large'));
-        $expect('...and it names the ceiling so the caller can split correctly',
-            (string) $oversized->getContent(),
-            static fn (string $b) => str_contains($b, '50'));
+        // ── Streamable HTTP, end to end ───────────────────────────────────
+        //
+        // Revisions up to 2025-11-25 open with `initialize` and carry the
+        // session id from then on. Under PHP-FPM the next request lands on
+        // another worker, behind a load balancer on another machine — so the
+        // session lives in the database, and these checks would fail against
+        // the SDK's in-memory default.
+        $output->writeln("\n<comment>Streamable HTTP (mcp/sdk)</comment>");
 
-        $accepted = $this->mcpController->handle($batchOf(3));
+        $init = $mcpHttp($rpc(1, 'initialize', [
+            'protocolVersion' => '2025-06-18',
+            'capabilities' => (object) [],
+            'clientInfo' => ['name' => 'smoke', 'version' => '1'],
+        ]));
+        $sessionId = (string) ($init['session'] ?? '');
+
+        $expect('initialize answers with the requested revision',
+            $init, static fn (array $r) => $r['status'] === 200 && ($r['body']['result']['protocolVersion'] ?? null) === '2025-06-18');
+        $expect('initialize names the server and hands out its instructions slot',
+            $init['body']['result']['serverInfo']['name'] ?? null, static fn ($n) => $n === 'Contao MCP Server');
+        $expect('initialize issues a session id',
+            $sessionId, static fn (string $s) => preg_match('/^[0-9a-f-]{36}$/', $s) === 1);
+        $expect('the session is kept in the database, not in this process',
+            (int) $this->connection->fetchOne('SELECT COUNT(*) FROM tl_mcp_session WHERE session_id = ?', [$sessionId]),
+            static fn (int $n) => $n === 1);
+
+        $expect('notifications/initialized is accepted without a body',
+            $mcpHttp(['jsonrpc' => '2.0', 'method' => 'notifications/initialized'], $sessionId)['status'],
+            static fn (int $s) => $s === 202);
+
+        $expect('a request without the session id is refused with 400',
+            $mcpHttp($rpc(2, 'tools/list'))['status'], static fn (int $s) => $s === 400);
+        $expect('an unknown session id answers 404, so the client starts over',
+            $mcpHttp($rpc(3, 'tools/list'), '00000000-0000-4000-8000-000000000000')['status'],
+            static fn (int $s) => $s === 404);
+
+        $httpList = $mcpHttp($rpc(4, 'tools/list'), $sessionId);
+        $expect('tools/list over HTTP answers with the catalogue',
+            array_column($httpList['body']['result']['tools'] ?? [], 'name'),
+            static fn (array $n) => \in_array('contao_call', $n, true) && \in_array('ping', $n, true));
+        $expect('optional parameters keep a single type (no ["null", T] unions)',
+            $httpList['body']['result']['tools'] ?? [],
+            static function (array $tools): bool {
+                foreach ($tools as $tool) {
+                    foreach ((array) ($tool['inputSchema']['properties'] ?? []) as $property) {
+                        if (\is_array($property) && \is_array($property['type'] ?? null) && \in_array('null', $property['type'], true)) {
+                            return false;
+                        }
+                    }
+                }
+
+                return $tools !== [];
+            });
+
+        $httpPing = $mcpHttp($rpc(5, 'tools/call', ['name' => 'ping', 'arguments' => (object) []]), $sessionId);
+        $expect('tools/call over HTTP runs the tool',
+            $httpPing['body']['result'] ?? null,
+            static fn ($r) => \is_array($r) && ($r['isError'] ?? false) === false && ($r['content'][0]['type'] ?? null) === 'text');
+        // The SDK would send an array result a second time as structuredContent.
+        // Every answer would cost twice the context for the same information.
+        $expect('...and sends the result once, as text, without structuredContent',
+            $httpPing['body']['result'] ?? [], static fn (array $r) => !\array_key_exists('structuredContent', $r));
+
+        $promptList = $mcpHttp($rpc(6, 'prompts/list'), $sessionId);
+        $expect('the server advertises its guide as an MCP prompt',
+            array_column($promptList['body']['result']['prompts'] ?? [], 'name'),
+            static fn (array $names) => \in_array('contao_guide', $names, true));
+
+        $guideText = '';
+        foreach ($mcpHttp($rpc(7, 'prompts/get', ['name' => 'contao_guide']), $sessionId)['body']['result']['messages'] ?? [] as $message) {
+            $guideText .= (string) ($message['content']['text'] ?? '');
+        }
+
+        // Revision 2026-07-28: no handshake, no session — what a request needs
+        // travels in it. Same URL, same handlers.
+        $modern = $mcpHttp(
+            ['jsonrpc' => '2.0', 'id' => 8, 'method' => 'tools/list', 'params' => ['_meta' => [
+                'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => (object) [],
+            ]]],
+            null,
+            ['MCP-Protocol-Version' => '2026-07-28', 'Mcp-Method' => 'tools/list'],
+        );
+        $expect('a 2026-07-28 request is answered without any session',
+            $modern, static fn (array $r) => $r['status'] === 200 && \count($r['body']['result']['tools'] ?? []) > 0);
+        $expect('...and none is issued for it',
+            $modern['session'], static fn ($s) => $s === null || $s === '');
+
+        $oversized = $mcpHttp($batchOf(51), $sessionId);
+        $expect('a batch above the ceiling is refused',
+            json_encode($oversized['body']),
+            static fn ($b) => str_contains(mb_strtolower((string) $b), 'batch too large'));
+        $expect('...and it names the ceiling so the caller can split correctly',
+            json_encode($oversized['body']),
+            static fn ($b) => str_contains((string) $b, '50'));
+
         $expect('a batch within the ceiling still runs every item',
-            json_decode((string) $accepted->getContent(), true),
+            $mcpHttp($batchOf(3), $sessionId)['body'],
             static fn ($d) => \is_array($d) && \count($d) === 3);
+
+        $expect('DELETE ends the session',
+            $mcpHttp(null, $sessionId, [], 'DELETE')['status'], static fn (int $s) => $s === 200);
+        $expect('...and it is gone for every worker',
+            $mcpHttp($rpc(9, 'tools/list'), $sessionId)['status'], static fn (int $s) => $s === 404);
 
         // ── Operator switches ─────────────────────────────────────────────
         //
@@ -3748,21 +3869,32 @@ final class McpSmokeTestCommand extends Command
             }
         }
 
-        // ═══════════════════════ Dispatcher ════════════════════════
-        // This is what used to be the vendor patch. Every section above calls
-        // the Tool services directly, so nothing there ever goes through the
-        // dispatcher — these asserts are the only coverage the lazy-mode
-        // filter and the post-call hook get.
-        $output->writeln("\n<comment>Dispatcher (Lazy-Mode + Post-Call-Hook)</comment>");
+        // ═══════════════════════ Tool handlers ════════════════════════
+        // Every section above calls the Tool services directly, so nothing
+        // there goes through the tools/call and tools/list handlers — these
+        // asserts are the only coverage the lazy-mode filter, the argument
+        // guard and the post-call hook get on that path.
+        //
+        // The handler is driven past the licence gate (dispatch()): this runs
+        // on installations without a licence, and the gate has tests of its own.
+        $output->writeln("\n<comment>Tool handlers (Lazy-Mode, guards, Post-Call-Hook)</comment>");
 
-        $dispatcher = $this->dispatcherFactory->getDispatcher();
+        $expect('the factory builds an MCP SDK server',
+            $this->dispatcherFactory->getServer(), static fn ($s) => $s instanceof Server);
 
-        $expect('factory builds the Contao subclass, not the vendor Dispatcher',
-            $dispatcher, static fn ($d) => $d instanceof ContaoDispatcher);
+        $handlerSession = new Session(new InMemorySessionStore());
+        $dispatchCall = fn (int $id, string $name, array $arguments): JsonRpcResponse|\Mcp\Schema\JsonRpc\Error => $this->toolCallHandler->dispatch(
+            (new CallToolRequest($name, $arguments))->withId($id),
+            $handlerSession,
+        );
+        $toolResult = static fn ($response): ?CallToolResult => $response instanceof JsonRpcResponse && $response->result instanceof CallToolResult
+            ? $response->result
+            : null;
 
-        $listNames = static fn ($d): array => array_map(
+        $listHandler = new ToolListHandler($this->registryAccessor, $this->toolFilter, new \Psr\Log\NullLogger());
+        $listNames = static fn (ToolListHandler $h): array => array_map(
             static fn ($t) => $t->name,
-            $d->handleToolList(new ListToolsRequest(1))->tools,
+            $h->handle((new ListToolsRequest())->withId(1), $handlerSession)->result->tools,
         );
 
         // lazy_mode defaults to false, but a dev instance may already have it
@@ -3770,13 +3902,13 @@ final class McpSmokeTestCommand extends Command
         // list while it is genuinely still unfiltered.
         if (!$this->toolFilter->isEnabled()) {
             $expect('unfiltered tools/list exposes the full catalogue',
-                $listNames($dispatcher), static fn (array $n) => \count($n) > 100);
+                $listNames($listHandler), static fn (array $n) => \count($n) > 100);
         } else {
             $output->writeln('  <comment>~ unfiltered list skipped — lazy_mode is already on here</comment>');
         }
 
         $this->toolFilter->enable();
-        $lazyNames = $listNames($dispatcher);
+        $lazyNames = $listNames($listHandler);
 
         $expect('lazy-mode tools/list keeps the discovery tools',
             $lazyNames,
@@ -3792,7 +3924,7 @@ final class McpSmokeTestCommand extends Command
         // Hidden is not gone: contao_call proxies to tools that tools/list
         // never showed. If this breaks, lazy-mode silently amputates the API.
         $expect('a hidden tool is still resolvable for contao_call',
-            $this->registryAccessor->get()->getTool('pages_list'),
+            $this->registryAccessor->find('pages_list'),
             static fn ($t) => $t !== null);
 
         // A caller reaching for a capability types a phrase of near-synonyms.
@@ -3830,21 +3962,8 @@ final class McpSmokeTestCommand extends Command
         // Every incident reported against this server was a knowledge gap, not
         // a broken tool. The guide is that repair made once, up front — and it
         // is generated from live state so it cannot drift the way a text
-        // maintained on the client side does.
-        $promptList = $dispatcher->handlePromptsList(
-            new \PhpMcp\Schema\Request\ListPromptsRequest(90));
-
-        $expect('the server advertises its guide as an MCP prompt',
-            array_map(static fn ($p) => $p->name, $promptList->prompts),
-            static fn (array $names) => \in_array('contao_guide', $names, true));
-
-        $guide = $dispatcher->handlePromptGet(
-            new \PhpMcp\Schema\Request\GetPromptRequest(91, 'contao_guide'));
-        $guideText = '';
-        foreach ($guide->messages as $m) {
-            $guideText .= $m->content->text ?? '';
-        }
-
+        // maintained on the client side does. $guideText was fetched with
+        // prompts/get over HTTP in the Streamable HTTP section.
         $expect('it reports THIS instance, not a generic blurb',
             $guideText,
             static fn (string $t) => str_contains($t, 'Contao ')
@@ -3877,45 +3996,42 @@ final class McpSmokeTestCommand extends Command
             $guideText,
             static fn (string $t) => str_contains($t, 'languageMain') === $hasChangeLanguage);
 
-        // Post-call hook — the second half of the old patch. Observable side
-        // effect: it clears the per-call identity context.
+        // Post-call hook. Observable side effect: it clears the per-call
+        // identity context.
         $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
-        $pingResult = $dispatcher->handleToolCall(new CallToolRequest(2, 'ping', []));
+        $pingResult = $toolResult($dispatchCall(2, 'ping', []));
 
-        $expect('tools/call through the dispatcher returns a result',
+        $expect('tools/call through the handler returns a result',
             $pingResult, static fn ($r) => $r instanceof CallToolResult && !$r->isError);
         $expect('post-call hook cleared the call context',
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
 
-        // …and it must run on the failure path too, or a throwing tool leaks
-        // the previous caller's identity into the next call. That is exactly
-        // what the `finally` in ContaoDispatcher::handleToolCall is for.
+        // …and it must run on the failure path too, or a failing call leaks
+        // the previous caller's identity into the next one. That is what the
+        // `finally` in ToolCallHandler is for.
         $this->mcpCallContext->setIdentity(1, 'smoke-client', 'Smoke', 'tok');
-        $threw = false;
+        $unknownTool = $dispatchCall(3, 'no_such_tool_'.$stamp, []);
 
-        try {
-            $dispatcher->handleToolCall(new CallToolRequest(3, 'no_such_tool_'.$stamp, []));
-        } catch (\Throwable) {
-            $threw = true;
-        }
-
-        $expect('an unknown tool still raises', $threw, static fn ($t) => $t === true);
-        $expect('post-call hook ran even though the call threw',
+        $expect('an unknown tool is a protocol error naming the tool',
+            $unknownTool,
+            static fn ($r) => $r instanceof \Mcp\Schema\JsonRpc\Error
+                && $r->code === \Mcp\Schema\JsonRpc\Error::INVALID_PARAMS
+                && str_contains($r->message, 'no_such_tool_'));
+        $expect('post-call hook ran even though the call failed',
             $this->mcpCallContext->isAuthenticated(), static fn ($a) => $a === false);
-
 
         // ── Unbekannte Parameter ───────────────────────────────────────────
         //
-        // php-mcp generates no `additionalProperties`, so schema validation
-        // waves an unknown key through, and prepareArguments() then reads only
-        // the parameters the method declares — the key vanished and the call
+        // The generated schema has no `additionalProperties`, so validation
+        // waves an unknown key through, and the handler then reads only the
+        // parameters the method declares — the key vanished and the call
         // reported success. One transposed letter in `pageTitle` was enough to
         // make page_update a no-op that looked like a write.
         $argGuardPageId = (int) $this->connection->fetchOne("SELECT id FROM tl_page WHERE type != 'root' ORDER BY id LIMIT 1");
 
-        $decodeResult = static function (CallToolResult $r): array {
+        $decodeResult = static function (?CallToolResult $r): array {
             $text = '';
-            foreach ($r->content as $item) {
+            foreach ($r->content ?? [] as $item) {
                 $text .= $item->text ?? '';
             }
             $decoded = json_decode($text, true);
@@ -3923,11 +4039,7 @@ final class McpSmokeTestCommand extends Command
             return \is_array($decoded) ? $decoded : [];
         };
 
-        $bogus = $dispatcher->handleToolCall(new CallToolRequest(
-            4,
-            'page_update',
-            ['id' => $argGuardPageId, 'pageTitel' => 'typo '.$stamp],
-        ));
+        $bogus = $toolResult($dispatchCall(4, 'page_update', ['id' => $argGuardPageId, 'pageTitel' => 'typo '.$stamp]));
         $bogusBody = $decodeResult($bogus);
 
         $expect('an unknown parameter is refused instead of dropped',
@@ -3943,7 +4055,7 @@ final class McpSmokeTestCommand extends Command
             static fn (int $n) => $n === 0);
 
         // The lazy-mode proxy invokes tools itself and never reaches the
-        // dispatcher's validation, so it needs the same guard — on those
+        // handler's validation, so it needs the same guard — on those
         // instances EVERY call arrives through it.
         $proxied = $this->discoveryTool->call('page_update', ['id' => $argGuardPageId, 'pageTitel' => 'typo '.$stamp]);
 
@@ -3958,16 +4070,12 @@ final class McpSmokeTestCommand extends Command
             $this->discoveryTool->call('pages_list', ['limit' => 1]),
             static fn ($r) => \is_array($r) && !isset($r['error']));
 
-        // The mirror image: a required parameter under the wrong name. php-mcp
-        // raises that inside the dispatcher, where it surfaced as
+        // The mirror image: a required parameter under the wrong name. The
+        // handler raised that while invoking the tool, where it surfaced as
         // `tool_failed · Internal error` — which describes a broken tool. A
         // working tool was filed as defective on the strength of it; the only
         // problem was that template_get takes `path`, not `name`.
-        $missingBody = $decodeResult($dispatcher->handleToolCall(new CallToolRequest(
-            5,
-            'template_get',
-            ['name' => 'news_full.html5'],
-        )));
+        $missingBody = $decodeResult($toolResult($dispatchCall(5, 'template_get', ['name' => 'news_full.html5'])));
 
         $expect('a required parameter under the wrong name says both halves',
             (string) ($missingBody['message'] ?? ''),
@@ -3996,7 +4104,7 @@ final class McpSmokeTestCommand extends Command
         foreach ($families as $bundle => [$familyTable, $familyList, $familyGet]) {
             if ($installed[$bundle]) {
                 $expect("{$familyList} answers normally with {$bundle} installed",
-                    $decodeResult($dispatcher->handleToolCall(new CallToolRequest(60, $familyList, ['limit' => 1]))),
+                    $decodeResult($toolResult($dispatchCall(60, $familyList, ['limit' => 1]))),
                     static fn (array $r) => isset($r['items']) && !isset($r['error']));
 
                 continue;
@@ -4006,8 +4114,8 @@ final class McpSmokeTestCommand extends Command
                 && ($r['error'] ?? null) === 'extension_not_available'
                 && ($r['required_extension'] ?? null) === $bundle;
 
-            $expect("{$familyList} answers extension_not_available through the dispatcher",
-                $decodeResult($dispatcher->handleToolCall(new CallToolRequest(61, $familyList, []))),
+            $expect("{$familyList} answers extension_not_available through the handler",
+                $decodeResult($toolResult($dispatchCall(61, $familyList, []))),
                 $notAvailable);
             $expect("the permission check says the same for {$familyGet}, before any voter",
                 $this->permissionEnforcer->check($familyGet, ['id' => 1]),
@@ -5172,16 +5280,16 @@ final class McpSmokeTestCommand extends Command
         // `table` required is a tool an LLM will keep calling wrong.
         foreach (['deepl_status', 'deepl_translate', 'deepl_translate_records', 'deepl_translate_page_tree'] as $deeplName) {
             $expect(sprintf('%s is registered with an input schema', $deeplName),
-                $this->registryAccessor->get()->getTool($deeplName),
-                static fn ($t) => $t !== null && \is_array($t->schema->inputSchema ?? null));
+                $this->registryAccessor->find($deeplName),
+                static fn ($t) => $t !== null && $t->tool->inputSchema !== []);
         }
 
         $expect('the record tool declares its essential arguments as required',
-            $this->registryAccessor->get()->getTool('deepl_translate_records'),
-            static fn ($t) => array_diff(['table', 'ids', 'target_lang'], $t->schema->inputSchema['required'] ?? []) === []);
+            $this->registryAccessor->find('deepl_translate_records'),
+            static fn ($t) => $t !== null && array_diff(['table', 'ids', 'target_lang'], $t->tool->inputSchema['required'] ?? []) === []);
 
-        $expect('deepl_status answers through the dispatcher, not just in-process',
-            $dispatcher->handleToolCall(new CallToolRequest(41, 'deepl_status', [])),
+        $expect('deepl_status answers through the tools/call handler, not just in-process',
+            $toolResult($dispatchCall(41, 'deepl_status', [])),
             static fn ($r) => $r instanceof CallToolResult && !$r->isError);
 
         $deeplStatus = $this->deepLTool->status();

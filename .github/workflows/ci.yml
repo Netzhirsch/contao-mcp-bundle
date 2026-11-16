@@ -307,10 +307,9 @@ jobs:
           # runs Contao's manager-plugin auto-discovery. -v lifts the
           # log level just enough to surface real solver / patch errors
           # without flooding logs the way -vvv would.
-          # php-mcp/server pins phpdocumentor/reflection-docblock ^5.6 and
-          # symfony/finder ^7.2 || lower; a Contao 6 app resolves both higher,
-          # so the resolver has to be allowed to move them back down. On the 5.x
-          # legs nothing needs moving and this behaves like a plain install.
+          # -W lets the resolver move shared dependencies (reflection-docblock,
+          # symfony/*) to versions every package accepts. On most legs nothing
+          # needs moving and this behaves like a plain install.
           composer update --no-interaction --prefer-dist --no-progress -v -W
 
       # CI-specific env. DATABASE_URL points at the MariaDB sidecar
@@ -761,6 +760,12 @@ jobs:
           set -euo pipefail
           test -f vendor/autoload.php \
             || { echo "::error::composer install produced no autoloader"; exit 1; }
-          grep -q netzhirsch vendor/php-mcp/server/src/Dispatcher.php \
-            || { echo "::error::the legacy patch block silently stopped applying"; exit 1; }
-          echo "Legacy patch block still resolves — existing installs can update untouched."
+          # Since the move to mcp/sdk nothing requires php-mcp/server any more:
+          # the patch block names a package that is not installed, and
+          # composer-patches has nothing to apply it to. What matters is that
+          # its leftover block does not break the install.
+          test ! -d vendor/php-mcp/server \
+            || { echo "::error::php-mcp/server is installed again — who requires it?"; exit 1; }
+          test -f vendor/mcp/sdk/src/Server.php \
+            || { echo "::error::mcp/sdk is missing"; exit 1; }
+          echo "Legacy patch block is harmless — existing installs can update untouched."

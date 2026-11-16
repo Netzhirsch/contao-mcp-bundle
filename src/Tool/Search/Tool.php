@@ -9,7 +9,7 @@ use Contao\Search;
 use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
-use PhpMcp\Server\Attributes\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 
 /**
  * Full-text search over Contao's own search index (`tl_search`).

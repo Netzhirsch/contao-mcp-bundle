@@ -19,8 +19,8 @@ use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Tool\Content\FieldMapper as ContentFieldMapper;
 use Netzhirsch\ContaoMcpBundle\Tool\FormField\FieldMapper as FormFieldFieldMapper;
 use Netzhirsch\ContaoMcpBundle\Tool\Module\FieldMapper as ModuleFieldMapper;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Attributes\Schema;
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use Psr\Log\LoggerInterface;
 
 /**

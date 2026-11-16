@@ -16,7 +16,7 @@ use Netzhirsch\ContaoMcpBundle\Service\FieldProviderRegistry;
 use Netzhirsch\ContaoMcpBundle\Service\FilePermissions;
 use Netzhirsch\ContaoMcpBundle\Service\OptionalBundles;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
-use PhpMcp\Server\Attributes\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Terminal42\LeadsBundle\Terminal42LeadsBundle;

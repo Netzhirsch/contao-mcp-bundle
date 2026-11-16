@@ -27,19 +27,19 @@ class ModuleMcpTools extends AbstractMcpModule
     protected function compileModule(ContainerInterface $container, McpServerConfigStorage $configStorage, array $config): void
     {
         // Tool panel data: every tool the instance knows, grouped, with
-        // enabled/source/protected flags. Reads the UNPRUNED registry (via
-        // getServer()) so disabled tools keep their name + description in the
-        // panel — the serving path prunes separately in getDispatcher().
+        // enabled/source/protected flags. Reads the UNPRUNED registry so
+        // disabled tools keep their name + description in the panel — the
+        // serving path prunes separately in getServer().
         // A failure here (e.g. broken extension class) must not take down
         // the page, so it degrades to a warning.
         $toolCatalogue = null;
         try {
             /** @var HttpDispatcherFactory $factory */
             $factory = $container->get(HttpDispatcherFactory::class);
-            $registry = $factory->getServer()->getRegistry();
+            $registry = $factory->getRegistry();
 
             $registryTools = [];
-            foreach ($registry->getTools() as $name => $schema) {
+            foreach ($registry->getTools()->references as $name => $schema) {
                 $registryTools[(string) $name] = (string) ($schema->description ?? '');
             }
 

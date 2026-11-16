@@ -8,7 +8,7 @@ use Composer\InstalledVersions;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Server\ServerInstructions;
-use PhpMcp\Server\Attributes\McpPrompt;
+use Mcp\Capability\Attribute\McpPrompt;
 
 /**
  * The orientation an agent would otherwise have to acquire by failing.

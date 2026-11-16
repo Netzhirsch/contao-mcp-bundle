@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Security;
 
 use Doctrine\DBAL\Connection;
+use Mcp\Capability\Attribute\McpTool;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy;
 use Netzhirsch\ContaoMcpBundle\Security\ToolPermissionMap;
 use Netzhirsch\ContaoMcpBundle\Server\ServerInstructions;
-use PhpMcp\Server\Attributes\McpTool;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;

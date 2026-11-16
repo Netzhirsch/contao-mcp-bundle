@@ -9,8 +9,8 @@ use Contao\UserGroupModel;
 use Contao\UserModel;
 use Netzhirsch\ContaoMcpBundle\Security\McpPermissionGuard;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Attributes\Schema;
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 
 /**
  * Read-only discovery for Contao backend users (tl_user) and user groups

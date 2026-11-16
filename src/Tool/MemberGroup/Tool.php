@@ -12,8 +12,8 @@ use Contao\Versions;
 use Doctrine\DBAL\Connection;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Attributes\Schema;
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use Psr\Log\LoggerInterface;
 
 /**

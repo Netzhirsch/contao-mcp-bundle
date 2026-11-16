@@ -11,8 +11,8 @@ use Doctrine\DBAL\ParameterType;
 use Netzhirsch\ContaoMcpBundle\Service\AuthorResolver;
 use Netzhirsch\ContaoMcpBundle\Service\ToolError;
 use Netzhirsch\ContaoMcpBundle\Service\UrlRewriteCacheInvalidator;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Attributes\Schema;
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use Psr\Log\LoggerInterface;
 use Terminal42\UrlRewriteBundle\Terminal42UrlRewriteBundle;
 

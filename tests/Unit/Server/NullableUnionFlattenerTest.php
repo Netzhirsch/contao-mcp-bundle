@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Server;
 
+use Mcp\Capability\Discovery\DocBlockParser;
+use Mcp\Capability\Discovery\SchemaGenerator;
+use Mcp\Capability\Registry;
+use Mcp\Schema\Tool;
 use Netzhirsch\ContaoMcpBundle\Server\NullableUnionFlattener;
 use Netzhirsch\ContaoMcpBundle\Tool\Page\Tool as PageTool;
-use PhpMcp\Schema\Tool;
-use PhpMcp\Server\Registry;
-use PhpMcp\Server\Utils\DocBlockParser;
-use PhpMcp\Server\Utils\SchemaGenerator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
 
 /**
  * Guards the CWA-26 rest fix: fragile MCP clients (mcp-remote, Claude Code
@@ -124,10 +123,10 @@ final class NullableUnionFlattenerTest extends TestCase
 
     public function testPageCreateRealSchemaIsFullyFlattened(): void
     {
-        // End-to-end against php-mcp's REAL generator on the REAL tool method:
+        // End-to-end against the SDK's REAL generator on the REAL tool method:
         // exactly the schema the briefing showed failing (fallback/language/
         // layout/groups as ["null", T] unions).
-        $generator = new SchemaGenerator(new DocBlockParser(new NullLogger()));
+        $generator = new SchemaGenerator(new DocBlockParser());
         $raw = $generator->generate(new \ReflectionMethod(PageTool::class, 'create'));
 
         self::assertSame(['null', 'boolean'], $raw['properties']['fallback']['type'] ?? null, 'Upstream generator no longer emits the union — flattener may be obsolete.');
@@ -152,24 +151,23 @@ final class NullableUnionFlattenerTest extends TestCase
 
     public function testFlattenRegistryRewritesToolsInPlace(): void
     {
-        $registry = new Registry(new NullLogger());
+        $registry = new Registry();
         $registry->registerTool(
-            Tool::make('demo_tool', [
+            new Tool('demo_tool', 'Demo', [
                 'type' => 'object',
                 'properties' => ['flag' => ['type' => ['null', 'boolean'], 'default' => null]],
                 'required' => [],
-            ], 'demo'),
-            handler: 'Some\\Handler',
-            isManual: true,
+            ], 'demo', null),
+            'Some\\Handler',
         );
 
         $this->flattener->flattenRegistry($registry);
 
         $tool = $registry->getTool('demo_tool');
-        self::assertNotNull($tool);
-        self::assertSame('boolean', $tool->schema->inputSchema['properties']['flag']['type']);
-        // Handler + manual flag survive the re-registration.
+        self::assertSame('boolean', $tool->tool->inputSchema['properties']['flag']['type']);
+        // Handler and the rest of the definition survive the re-registration.
         self::assertSame('Some\\Handler', $tool->handler);
-        self::assertTrue($tool->isManual);
+        self::assertSame('Demo', $tool->tool->title);
+        self::assertSame('demo', $tool->tool->description);
     }
 }

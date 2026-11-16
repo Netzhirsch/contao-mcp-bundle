@@ -104,7 +104,9 @@ final class EndpointPath
             $base => [
                 'name' => self::ROUTE_ENDPOINT,
                 'controller' => McpController::class.'::handle',
-                'methods' => ['POST', 'OPTIONS'],
+                // DELETE ends a handshake-era session. GET stays out: the
+                // server opens no stream of its own, and 405 says so.
+                'methods' => ['POST', 'DELETE', 'OPTIONS'],
             ],
             $base.'/healthz' => [
                 'name' => self::ROUTE_HEALTHZ,

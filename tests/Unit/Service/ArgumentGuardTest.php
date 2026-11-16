@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Service;
 
+use Mcp\Capability\Registry;
+use Mcp\Schema\Tool;
 use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
 use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
-use PhpMcp\Schema\Tool;
-use PhpMcp\Server\Registry;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
 
 /**
  * A parameter the tool does not have used to vanish without a word: the
@@ -26,9 +25,9 @@ final class ArgumentGuardTest extends TestCase
 
     protected function setUp(): void
     {
-        $registry = new Registry(new NullLogger());
+        $registry = new Registry();
         $registry->registerTool(
-            Tool::make('page_update', [
+            self::tool('page_update', [
                 'type' => 'object',
                 'properties' => [
                     'id' => ['type' => 'integer'],
@@ -37,14 +36,14 @@ final class ArgumentGuardTest extends TestCase
                     'canonicalKeepParams' => ['type' => 'string'],
                 ],
                 'required' => ['id'],
-            ], 'demo'),
-            handler: 'Some\Handler',
-            isManual: true,
+            ]),
+            'Some\Handler',
         );
+        // The SDK turns an empty `properties` into `{}` — the shape that once
+        // made array_keys() throw.
         $registry->registerTool(
-            Tool::make('ping', ['type' => 'object', 'properties' => [], 'required' => []], 'demo'),
-            handler: 'Some\Handler',
-            isManual: true,
+            self::tool('ping', ['type' => 'object', 'properties' => [], 'required' => []]),
+            'Some\Handler',
         );
 
         $accessor = new RegistryAccessor();
@@ -151,15 +150,14 @@ final class ArgumentGuardTest extends TestCase
      */
     public function testDoesNotDescendIntoObjectParameters(): void
     {
-        $registry = new Registry(new NullLogger());
+        $registry = new Registry();
         $registry->registerTool(
-            Tool::make('content_update', [
+            self::tool('content_update', [
                 'type' => 'object',
                 'properties' => ['id' => ['type' => 'integer'], 'fields' => ['type' => 'object']],
                 'required' => ['id'],
-            ], 'demo'),
-            handler: 'Some\Handler',
-            isManual: true,
+            ]),
+            'Some\Handler',
         );
         $accessor = new RegistryAccessor();
         $accessor->set($registry);
@@ -169,5 +167,13 @@ final class ArgumentGuardTest extends TestCase
             'id' => 1,
             'fields' => ['irgendeinDcaFeld' => 'wert', 'nochEins' => 2],
         ]));
+    }
+
+    /**
+     * @param array<string, mixed> $inputSchema
+     */
+    private static function tool(string $name, array $inputSchema): Tool
+    {
+        return new Tool($name, null, $inputSchema, 'demo', null);
     }
 }

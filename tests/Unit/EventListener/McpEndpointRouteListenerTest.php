@@ -97,7 +97,7 @@ final class McpEndpointRouteListenerTest extends TestCase
             self::fail('GET on the endpoint was routed.');
         } catch (MethodNotAllowedHttpException $e) {
             self::assertSame(405, $e->getStatusCode());
-            self::assertSame('POST, OPTIONS', $e->getHeaders()['Allow'] ?? null);
+            self::assertSame('POST, DELETE, OPTIONS', $e->getHeaders()['Allow'] ?? null);
         }
     }
 

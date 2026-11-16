@@ -4,41 +4,46 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
+use Doctrine\DBAL\Connection;
+use Mcp\Capability\Registry;
+use Mcp\Capability\Registry\ReferenceHandler;
+use Mcp\Server;
 use Netzhirsch\ContaoMcpBundle\Backend\McpServerConfigStorage;
 use Netzhirsch\ContaoMcpBundle\ContaoMcpBundle;
 use Netzhirsch\ContaoMcpBundle\Security\OperatorPolicy;
-use Netzhirsch\ContaoMcpBundle\Service\ArgumentGuard;
-use PhpMcp\Server\Server;
-use PhpMcp\Server\Dispatcher;
-use PhpMcp\Server\Session\SubscriptionManager;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Cache\Psr16Cache;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * Builds and caches the php-mcp Server + Dispatcher for the Symfony-controller
- * MCP transport (the alternative to the long-running ReactPHP daemon).
+ * Builds the MCP server (official `mcp/sdk`) that {@see \Netzhirsch\ContaoMcpBundle\Controller\McpController}
+ * hands every request to.
  *
- * Reasons this is a separate factory rather than reusing
- * {@see McpServerFactory}:
- *   - The daemon factory does NOT set up a Symfony-cache layer for tool
- *     discovery. In daemon mode discover() runs once at boot — the
- *     in-memory Registry survives. In controller mode each PHP-FPM
- *     request is a fresh process, so we MUST cache the discovered
- *     registry to disk via Symfony's cache.app pool. Otherwise every
- *     tool call would re-scan ~30 PHP files for #[McpTool] attributes.
- *   - The factory ALSO populates RegistryAccessor and (if lazy_mode is on)
- *     enables ToolFilter — both daemon and controller paths share these
- *     services so the Discovery / Lazy-Mode behaviour is identical.
+ * Two views of the same catalogue:
  *
- * The build is memoised on the instance, so a single PHP-FPM worker only
- * pays the cost once across many requests.
+ *   - {@see getServer()} serves MCP. The operator's disabled tools and those
+ *     an operator switch rules out are gone from it entirely — from
+ *     `tools/list`, `tools/call`, search, describe and `contao_call` alike.
+ *   - {@see getRegistry()} is the unpruned catalogue the Backend tool panel
+ *     renders, disabled tools included, with their descriptions.
+ *
+ * Tool discovery is cached in Symfony's cache.app pool: every request is a
+ * fresh PHP process under FPM, and scanning ~40 classes for attributes each
+ * time would cost more than the call itself.
+ *
+ * The build is memoised on the instance, so a request pays for it once.
  */
 final class HttpDispatcherFactory
 {
-    private ?Dispatcher $dispatcher = null;
     private ?Server $server = null;
+
+    private ?Registry $registry = null;
+
+    private ?ReferenceHandler $referenceHandler = null;
+
+    private bool $pruned = false;
 
     /**
      * @param list<string> $scanDirs
@@ -54,12 +59,12 @@ final class HttpDispatcherFactory
         private readonly McpServerConfigStorage $configStorage,
         private readonly RegistryAccessor $registryAccessor,
         private readonly ToolFilter $toolFilter,
-        private readonly PostCallHook $postCallHook,
-        private readonly ArgumentGuard $argumentGuard,
+        private readonly ToolCallHandler $toolCallHandler,
         private readonly ExtensionToolRegistrar $extensionToolRegistrar,
         private readonly RequestStack $requestStack,
         private readonly OperatorPolicy $operatorPolicy,
         private readonly ServerInstructions $serverInstructions,
+        private readonly Connection $connection,
         private readonly string $serverName,
         private readonly string $serverVersion,
         private readonly array $scanDirs,
@@ -67,94 +72,65 @@ final class HttpDispatcherFactory
     ) {
     }
 
-    public function getDispatcher(): Dispatcher
+    /**
+     * The server that answers MCP requests, its catalogue pruned to what this
+     * installation offers.
+     */
+    public function getServer(): Server
     {
-        if ($this->dispatcher !== null) {
-            return $this->dispatcher;
+        $server = $this->build();
+
+        if (!$this->pruned) {
+            $this->pruned = true;
+            $this->prune();
         }
 
-        $server = $this->buildServer();
-
-        // Remove operator-disabled tools from the catalogue — ONLY on the
-        // MCP-serving path (this method), never in buildServer(): the Backend
-        // tool panel reads the unpruned registry via getServer() so it can
-        // still render disabled tools with their descriptions. A pruned tool
-        // is gone from tools/list, tools/call, search, describe and
-        // contao_call alike.
-        //
-        // The operator switches (read-only, no deletions, privacy mode) take
-        // their tools out the same way: a tool that could only ever be refused
-        // should not be offered.
-        $disabled = [
-            ...($this->configStorage->load()['disabled_tools'] ?? []),
-            ...$this->operatorPolicy->blockedTools(array_keys($server->getRegistry()->getTools())),
-        ];
-        if ($disabled !== []) {
-            $removed = (new ToolCatalog())->prune($server->getRegistry(), array_values(array_unique($disabled)));
-            if ($removed !== []) {
-                $this->logger->info('MCP tools disabled by operator config.', ['tools' => $removed]);
-            }
-        }
-
-        // Build OUR dispatcher rather than using the one Server::build()
-        // constructed internally. ContaoDispatcher adds the Lazy-Mode tool
-        // filter and the post-call cleanup that used to live in a vendor
-        // patch — see that class for why patching had to go.
-        //
-        // It also takes the object-aware SchemaValidator straight through the
-        // constructor, instead of swapping the internally-built one in by
-        // reflection afterwards (it rejects empty object params like
-        // `fields: {}` — see ObjectAwareSchemaValidator).
-        $this->dispatcher = new ContaoDispatcher(
-            $server->getConfiguration(),
-            $server->getRegistry(),
-            $this->subscriptionManagerOf($server),
-            new ObjectAwareSchemaValidator($this->logger),
-            $this->toolFilter,
-            $this->postCallHook,
-            $this->argumentGuard,
-            $this->logger,
-        );
-
-        return $this->dispatcher;
+        return $server;
     }
 
     /**
-     * The SubscriptionManager the Server built for itself. Reused rather than
-     * newly constructed so a subscription made through the Protocol and one
-     * seen by the Dispatcher stay the same object — the bundle exposes no MCP
-     * resources today, but a fresh instance would be a silent trap the day it
-     * does. Falls back to a new instance if the internals ever move.
+     * The whole catalogue, nothing pruned — for the Backend tool panel.
+     * Call it before {@see getServer()} in the same request, or it is pruned.
      */
-    private function subscriptionManagerOf(Server $server): SubscriptionManager
+    public function getRegistry(): Registry
     {
-        try {
-            $dispatcherProp = (new \ReflectionObject($protocol = $server->getProtocol()))->getProperty('dispatcher');
-            $dispatcherProp->setAccessible(true);
-            $vendorDispatcher = $dispatcherProp->getValue($protocol);
+        $this->build();
+        \assert($this->registry !== null);
 
-            $smProp = (new \ReflectionObject($vendorDispatcher))->getProperty('subscriptionManager');
-            $smProp->setAccessible(true);
-            $subscriptionManager = $smProp->getValue($vendorDispatcher);
+        return $this->registry;
+    }
 
-            if ($subscriptionManager instanceof SubscriptionManager) {
-                return $subscriptionManager;
-            }
-        } catch (\Throwable $e) {
-            $this->logger->warning('Could not reuse the server SubscriptionManager.', ['exception' => $e]);
+    /**
+     * Removes operator-disabled tools from the catalogue — ONLY on the
+     * MCP-serving path, never in build(): the Backend tool panel reads the
+     * unpruned registry so it can still render disabled tools.
+     *
+     * The operator switches (read-only, no deletions, privacy mode) take
+     * their tools out the same way: a tool that could only ever be refused
+     * should not be offered.
+     */
+    private function prune(): void
+    {
+        \assert($this->registry !== null);
+
+        $disabled = [
+            ...($this->configStorage->load()['disabled_tools'] ?? []),
+            ...$this->operatorPolicy->blockedTools(array_keys($this->registry->getTools()->references)),
+        ];
+
+        if ($disabled === []) {
+            return;
         }
 
-        return new SubscriptionManager($this->logger);
+        $removed = (new ToolCatalog())->prune($this->registry, array_values(array_unique($disabled)));
+        if ($removed !== []) {
+            $this->logger->info('MCP tools disabled by operator config.', ['tools' => $removed]);
+            // The accessor memoised the catalogue on set(); start it over.
+            $this->registryAccessor->set($this->registry, $this->referenceHandler);
+        }
     }
 
-    public function getServer(): Server
-    {
-        $this->buildServer();
-        \assert($this->server !== null);
-        return $this->server;
-    }
-
-    private function buildServer(): Server
+    private function build(): Server
     {
         if ($this->server !== null) {
             return $this->server;
@@ -162,83 +138,98 @@ final class HttpDispatcherFactory
 
         $this->ensureRequestContext();
 
-        $paginationLimit = (int) ($this->configStorage->load()['pagination_limit'] ?? 500);
+        $config = $this->configStorage->load();
+        $paginationLimit = max(1, (int) ($config['pagination_limit'] ?? 500));
 
-        $builder = Server::make()
-            ->withServerInfo($this->serverName, $this->serverVersion)
-            ->withLogger($this->logger)
-            ->withContainer($this->container)
-            ->withPaginationLimit($paginationLimit)
-            ->withInstructions($this->serverInstructions->text());
+        $this->registry = new Registry(logger: $this->logger);
+        $this->referenceHandler = new ReferenceHandler($this->container);
 
-        // Tool-discovery cache: Symfony's cache.app pool wrapped as PSR-16.
-        // First request: scans + writes cache. Subsequent requests: reads.
-        if ($this->container->has('cache.app')) {
-            try {
-                $pool = $this->container->get('cache.app');
-                if ($pool instanceof \Psr\Cache\CacheItemPoolInterface) {
-                    $simple = new \Symfony\Component\Cache\Psr16Cache($pool);
-                    $builder = $builder->withCache($simple);
-                }
-            } catch (\Throwable $e) {
-                $this->logger->info('cache.app unavailable for MCP discovery cache: '.$e->getMessage());
-            }
-        }
+        $builder = Server::builder()
+            ->setServerInfo($this->serverName, $this->serverVersion)
+            ->setLogger($this->logger)
+            ->setContainer($this->container)
+            ->setPaginationLimit($paginationLimit)
+            ->setInstructions($this->serverInstructions->text())
+            ->setRegistry($this->registry)
+            ->setReferenceHandler($this->referenceHandler)
+            ->setSession(new DatabaseSessionStore($this->connection, $this->logger))
+            // Ahead of the SDK's own handlers for the same requests, which the
+            // SDK consults only when no custom handler claims a request.
+            ->addRequestHandler($this->toolCallHandler)
+            ->addRequestHandler(new ToolListHandler($this->registryAccessor, $this->toolFilter, $this->logger, $paginationLimit))
+            ->setDiscovery($this->bundleRoot(), $this->scanDirs, [], $this->discoveryCache());
 
+        // Discovery runs here: a registry handed to the builder is loaded
+        // eagerly while the server is built.
         $this->server = $builder->build();
-
-        // discover() is internally cache-aware when withCache() was called.
-        $this->server->discover(
-            basePath: $this->bundleRoot(),
-            scanDirs: $this->scanDirs,
-        );
-
-        $registry = $this->server->getRegistry();
 
         // Register operator-allowlisted third-party tools AFTER core
         // discovery, so core tool names are already "taken" and always win
         // a collision. Runs before registryAccessor->set() so Discovery /
         // Lazy-Mode tools see extension tools too.
-        $enabled = $this->configStorage->load()['extension_tools_enabled'] ?? [];
-        $this->extensionToolRegistrar->register($registry, $enabled, $this->extensionToolClasses);
+        $this->extensionToolRegistrar->register(
+            $this->registry,
+            $config['extension_tools_enabled'] ?? [],
+            $this->extensionToolClasses,
+        );
 
         // Flatten ["null", T] type-unions on optional params to a single type.
         // Fragile clients (mcp-remote, Claude Code deferred-tool loader) drop
         // union types entirely → param becomes typeless → -32602 on any value.
         // Runs over the full registry (core + cached + extension tools); the
         // rewritten schema feeds tools/list, describe AND server validation.
-        (new NullableUnionFlattener())->flattenRegistry($registry);
+        (new NullableUnionFlattener())->flattenRegistry($this->registry);
 
         // Populate the shared RegistryAccessor so Discovery / Lazy-Mode tools
-        // can introspect the catalogue.
-        $this->registryAccessor->set($registry);
+        // can introspect the catalogue and invoke tools.
+        $this->registryAccessor->set($this->registry, $this->referenceHandler);
 
-        // Enable Lazy-Mode if configured.
-        if (!empty($this->configStorage->load()['lazy_mode'])) {
+        if (!empty($config['lazy_mode'])) {
             $this->toolFilter->enable();
         }
 
         return $this->server;
     }
 
+    /**
+     * Symfony's cache.app pool as PSR-16, or none when it is not available —
+     * discovery then simply scans every time.
+     */
+    private function discoveryCache(): ?Psr16Cache
+    {
+        if (!$this->container->has('cache.app')) {
+            return null;
+        }
+
+        try {
+            $pool = $this->container->get('cache.app');
+
+            return $pool instanceof \Psr\Cache\CacheItemPoolInterface ? new Psr16Cache($pool) : null;
+        } catch (\Throwable $e) {
+            $this->logger->info('cache.app unavailable for MCP discovery cache: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
     private function bundleRoot(): string
     {
-        return \dirname((new \ReflectionClass(ContaoMcpBundle::class))->getFileName(), 2);
+        return \dirname((string) (new \ReflectionClass(ContaoMcpBundle::class))->getFileName(), 2);
     }
 
     /**
      * Contao classes (Versions, etc.) read `request_stack->getCurrentRequest()`
-     * unconditionally. In a fresh PHP-FPM worker without a real Symfony
-     * request boot (e.g. when McpController is invoked outside the normal
-     * kernel.request flow), we push a synthetic request once. In normal
-     * controller dispatch the RequestStack is already populated, so this
-     * is usually a no-op.
+     * unconditionally. When the factory is reached without a real request
+     * (console commands, the smoke test), a synthetic one is pushed once. In
+     * normal controller dispatch the RequestStack is already populated, so
+     * this is usually a no-op.
      */
     private function ensureRequestContext(): void
     {
         if ($this->requestStack->getCurrentRequest() !== null) {
             return;
         }
+
         $request = Request::create('/_mcp', 'POST');
         $request->server->set('QUERY_STRING', '');
         $this->requestStack->push($request);

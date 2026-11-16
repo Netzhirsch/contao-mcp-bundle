@@ -17,8 +17,8 @@ use Netzhirsch\ContaoMcpBundle\Service\DbalRetry;
 use Netzhirsch\ContaoMcpBundle\Service\ProviderFields;
 use Netzhirsch\ContaoMcpBundle\Service\QueryFilterResolver;
 use Netzhirsch\ContaoMcpBundle\Service\UpdateDiff;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Attributes\Schema;
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use Psr\Log\LoggerInterface;
 
 /**

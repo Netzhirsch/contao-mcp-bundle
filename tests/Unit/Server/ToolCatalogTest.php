@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Server;
 
+use Mcp\Capability\Registry;
+use Mcp\Schema\Tool;
 use Netzhirsch\ContaoMcpBundle\Server\ToolCatalog;
-use PhpMcp\Schema\Tool;
-use PhpMcp\Server\Registry;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
 
 /**
  * Guards the per-tool enable/disable mechanics: registry pruning (incl. the
@@ -29,12 +28,11 @@ final class ToolCatalogTest extends TestCase
 
     private static function registryWith(string ...$names): Registry
     {
-        $registry = new Registry(new NullLogger());
+        $registry = new Registry();
         foreach ($names as $name) {
             $registry->registerTool(
-                Tool::make($name, ['type' => 'object', 'properties' => []], 'desc '.$name),
+                new Tool($name, null, ['type' => 'object', 'properties' => []], 'desc '.$name, null),
                 'Some\\Handler',
-                true,
             );
         }
 
@@ -48,9 +46,9 @@ final class ToolCatalogTest extends TestCase
         $removed = $this->catalog->prune($registry, ['news_delete', 'not_registered_anyway']);
 
         self::assertSame(['news_delete'], $removed);
-        self::assertNull($registry->getTool('news_delete'));
-        self::assertNotNull($registry->getTool('news_list'));
-        self::assertNotNull($registry->getTool('page_get'));
+        self::assertFalse($registry->hasTool('news_delete'));
+        self::assertTrue($registry->hasTool('news_list'));
+        self::assertTrue($registry->hasTool('page_get'));
     }
 
     public function testPruneNeverRemovesProtectedTools(): void
@@ -61,8 +59,8 @@ final class ToolCatalogTest extends TestCase
         $removed = $this->catalog->prune($registry, ['contao_call', 'ping', 'news_list']);
 
         self::assertSame(['news_list'], $removed);
-        self::assertNotNull($registry->getTool('contao_call'));
-        self::assertNotNull($registry->getTool('ping'));
+        self::assertTrue($registry->hasTool('contao_call'));
+        self::assertTrue($registry->hasTool('ping'));
     }
 
     public function testPruneEmptyListIsNoOp(): void
@@ -70,7 +68,7 @@ final class ToolCatalogTest extends TestCase
         $registry = self::registryWith('news_list');
 
         self::assertSame([], $this->catalog->prune($registry, []));
-        self::assertNotNull($registry->getTool('news_list'));
+        self::assertTrue($registry->hasTool('news_list'));
     }
 
     public function testCatalogueGroupsAndFlags(): void

@@ -293,26 +293,37 @@ and the `.well-known` metadata answered 404 there, and the backend pages under
 **Contao 6 requires PHP ≥ 8.4.** The bundle's own floor stays at 8.1 so Contao
 5.3 instances keep working — on PHP 8.1 and 8.2 only Contao 5.3 installs.
 
-**The install needs `-W`:**
+**Install with `-W`:**
 
 ```bash
 composer require netzhirsch/contao-mcp-bundle -W
 ```
 
-The reason is not this bundle but `php-mcp/server`: it pins
-`phpdocumentor/reflection-docblock` to `^5.6` and `symfony/finder` to `^6.4 || ^7.2`,
-while a Contao 6 app resolves both higher. `-W` lets Composer move them back
-down, which both packages tolerate; without it the resolution fails. On Contao 5
-the flag is unnecessary.
+`-W` lets Composer adjust shared dependencies. Up to 1.40 it was required on
+Contao 6, because `php-mcp/server` held `phpdocumentor/reflection-docblock` at
+`^5.6`; the official `mcp/sdk` the server runs on since 1.41 accepts `^6.0` as
+well. The flag does no harm.
 
 ## Transport and protocol
 
-Streamable HTTP on a single endpoint, `POST /mcp` (or the configured path).
-There is **no SSE channel** —
-no GET stream and no server-initiated messages, just request/response JSON.
-Protocol revision **2025-03-26**; clients speaking **2024-11-05** are accepted as
-well. Any MCP client that speaks Streamable HTTP with OAuth should work; Claude
-is what we test against. A JSON-RPC batch takes at most 50 calls.
+Streamable HTTP on a single endpoint, `/mcp` (or the configured path), built on
+the official PHP SDK [`mcp/sdk`](https://github.com/modelcontextprotocol/php-sdk).
+Both protocol eras use the same URL:
+
+- **Revisions 2024-11-05 to 2025-11-25** open with `initialize`. The server
+  issues an `Mcp-Session-Id` the client sends with every later request. The
+  session lives in the Contao database (`tl_mcp_session`), so every PHP worker
+  — and with several servers behind a load balancer, every node — finds it.
+  Unused, it expires after seven days; the client then gets a 404 and connects
+  again. `DELETE /mcp` ends it.
+- **Revision 2026-07-28** has neither handshake nor session: every request
+  carries what the server needs to answer it.
+
+There is **no SSE channel**: no GET stream (`GET /mcp` answers 405) and no
+server-initiated messages, just request/response JSON. Any MCP client that
+speaks Streamable HTTP with OAuth should work; Claude is what we test against.
+A JSON-RPC batch takes at most 50 calls (the protocol has batches only up to
+2025-03-26; the server accepts them in every handshake revision).
 
 ## Smoke test
 
@@ -320,7 +331,7 @@ is what we test against. A JSON-RPC batch takes at most 50 calls.
 vendor/bin/contao-console contao:mcp:smoke-test --env=dev
 ```
 
-Runs about 500 checks against the tool layer (CRUD on members/groups/forms/
+Runs about 600 checks against the tool layer (CRUD on members/groups/forms/
 newsletters/comments/themes/layouts/templates/maintenance, the content tree,
 permission parity, external IDs, audit regressions, key rotation, rate limiting,
 the MCP activity log), creates its own test data and removes it again at the
@@ -535,6 +546,10 @@ that to work:
   ```
 
   Adjust the expression if the endpoint path is not `mcp`.
+- **The `Mcp-Session-Id` header has to get through both ways**, and `DELETE`
+  on the endpoint must not be blocked. A web application firewall or proxy
+  that strips unknown headers makes the client connect again after every
+  request.
 - **No IP block on the endpoint** unless you know which addresses the provider
   uses. Local clients such as Claude Code connect from your own machine.
 
@@ -792,17 +807,13 @@ entity tables, so they cannot be backed up separately).
 
 **Nothing to do.** `composer update netzhirsch/contao-mcp-bundle` goes through
 even if your root `composer.json` still carries the former patch block. The
-`patches/` files stay in the package until 2.0.0 for exactly that reason. Where
-the old block is still in place, `cweagans/composer-patches` keeps applying
-them — to no effect, because `ContaoDispatcher` overrides the patched methods.
+`patches/` files stay in the package until 2.0.0 for exactly that reason. Since
+1.41 `php-mcp/server` is not installed at all; the old block names a package the
+project does not have, and `cweagans/composer-patches` has nothing to apply.
 
 To clean up (recommended, not urgent): delete `extra.patches`,
 `"cweagans/composer-patches"` from `require` and its `allow-plugins` entry, then
-run `composer update`. The vendor stays patched afterwards — a shrinking patch
-list does not make the plugin reinstall `php-mcp/server` on its own. That is
-harmless, because `ContaoDispatcher` overrides the patched methods; for a
-pristine vendor add `composer reinstall php-mcp/server`. Details:
-[`patches/README.md`](patches/README.md).
+run `composer update`. Details: [`patches/README.md`](patches/README.md).
 
 ## Maintenance
 
@@ -817,10 +828,13 @@ update to 1.37.1 the backend pages under "MCP server" otherwise answered with
 error 500. Overrides of the former `be_mcp_*.html5` templates no longer apply on
 Contao 6; the change belongs in `be_mcp_*.html.twig`.
 
-**The bundle needs no vendor patches.** What it needs from the dispatcher
-(the lazy-mode tool filter and the post-call cleanup) lives in
-`Server\ContaoDispatcher`, a subclass. After a `php-mcp/server` major bump,
-check there that `handleToolList()` and `handleToolCall()` still line up.
+**The bundle needs no vendor patches.** The server runs on the official
+`mcp/sdk`; what the bundle does differently from its defaults — the lazy-mode
+filter, licence and permission checks, undo, the post-call cleanup — sits in
+two request handlers of its own, `Server\ToolCallHandler` and
+`Server\ToolListHandler`, which the SDK consults before its own. The SDK is
+still at 0.x and pinned to `~0.9.0`: run the smoke test before moving to a new
+minor version.
 
 ### When an update aborts with "no merge base"
 

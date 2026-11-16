@@ -7,7 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Extension\Leads;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
-use PhpMcp\Server\Attributes\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 use Terminal42\LeadsBundle\Terminal42LeadsBundle;
 
 /**

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Tests\Unit\Docs;
 
+use Mcp\Capability\Attribute\McpTool;
 use Netzhirsch\ContaoMcpBundle\DependencyInjection\ContaoMcpExtension;
-use PhpMcp\Server\Attributes\McpTool;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

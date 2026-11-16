@@ -4,21 +4,21 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
-use PhpMcp\Server\Registry;
+use Mcp\Capability\RegistryInterface;
 
 /**
  * Per-tool enable/disable for the MCP catalogue.
  *
  * Three responsibilities, all around the `disabled_tools` config list:
  *
- *  1. {@see prune()} — remove operator-disabled tools from a php-mcp Registry.
- *     Called by {@see HttpDispatcherFactory::getDispatcher()} on the
+ *  1. {@see prune()} — remove operator-disabled tools from the SDK registry.
+ *     Called by {@see HttpDispatcherFactory::getServer()} on the
  *     MCP-SERVING path only: a pruned tool is gone from `tools/list`,
  *     `tools/call` ("tool not found"), `contao_search_tools`,
  *     `contao_describe_tool` AND `contao_call` — one mechanism, no per-layer
  *     checks. The Backend module uses the UNPRUNED registry (via
- *     `getServer()`) so its panel can still render disabled tools with their
- *     descriptions.
+ *     `getRegistry()`) so its panel can still render disabled tools with
+ *     their descriptions.
  *
  *  2. {@see catalogue()} — the Backend panel's data: every known tool
  *     (core registry + extension candidates that are not even registered yet)
@@ -31,10 +31,6 @@ use PhpMcp\Server\Registry;
  *     (`extension_tools_enabled`). Names that were not rendered in the
  *     submitting form (temporarily uninstalled bundle, missing extension)
  *     keep their previous state instead of being silently wiped.
- *
- * The Registry keeps its tool map private and offers no removal API, so
- * prune() reflects into it — the same pragmatic pattern HttpDispatcherFactory
- * already uses for the Dispatcher's schemaValidator swap.
  */
 final class ToolCatalog
 {
@@ -61,32 +57,15 @@ final class ToolCatalog
      *
      * @return list<string> the names actually removed
      */
-    public function prune(Registry $registry, array $disabledNames): array
+    public function prune(RegistryInterface $registry, array $disabledNames): array
     {
-        if ($disabledNames === []) {
-            return [];
-        }
-
-        $disabled = array_diff($disabledNames, self::PROTECTED_TOOLS);
-        if ($disabled === []) {
-            return [];
-        }
-
-        $prop = (new \ReflectionClass(Registry::class))->getProperty('tools');
-        $prop->setAccessible(true);
-        /** @var array<string, object> $tools */
-        $tools = $prop->getValue($registry);
-
         $removed = [];
-        foreach ($disabled as $name) {
-            if (isset($tools[$name])) {
-                unset($tools[$name]);
+
+        foreach (array_diff($disabledNames, self::PROTECTED_TOOLS) as $name) {
+            if ($registry->hasTool($name)) {
+                $registry->unregisterTool($name);
                 $removed[] = $name;
             }
-        }
-
-        if ($removed !== []) {
-            $prop->setValue($registry, $tools);
         }
 
         return $removed;

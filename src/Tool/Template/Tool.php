@@ -7,7 +7,7 @@ namespace Netzhirsch\ContaoMcpBundle\Tool\Template;
 use Contao\CoreBundle\Twig\Finder\FinderFactory;
 use Contao\CoreBundle\Twig\Loader\ContaoFilesystemLoader;
 use Netzhirsch\ContaoMcpBundle\Service\TwigTemplateCacheInvalidator;
-use PhpMcp\Server\Attributes\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 use Symfony\Component\Finder\Finder;
 use Twig\Environment as TwigEnvironment;
 use Twig\Error\SyntaxError;

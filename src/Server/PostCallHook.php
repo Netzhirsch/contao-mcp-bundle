@@ -8,29 +8,26 @@ use Contao\Model\Registry;
 use Psr\Log\LoggerInterface;
 
 /**
- * Post-tool-call cleanup hook for the long-running ReactPHP daemon.
+ * Post-tool-call cleanup.
  *
- * The php-mcp/server Dispatcher invokes this after every successful or failed
- * `tools/call` (see vendor patch in dispatcher-tool-filter.patch). Without
- * this, two big leaks would creep up over weeks of uptime:
+ * {@see ToolCallHandler} invokes this after every successful or failed
+ * `tools/call`. Two things would otherwise pile up inside one request that
+ * runs many calls (a batch, a bulk import):
  *
  *   1. {@see \Contao\Model\Registry} is a process-singleton that caches every
  *      loaded Model row by primary key. Symfony's `kernel.reset` listener
- *      normally clears it at HTTP-request boundaries — but in the daemon there
- *      ARE no HTTP-request boundaries, so the registry grows monotonically.
- *      After thousands of `news_list`/`pages_get` calls it OOMs.
+ *      clears it at HTTP-request boundaries, not between the calls of one
+ *      request, so it grows with every `news_list`/`pages_get` until the
+ *      memory limit hits.
  *
  *   2. The {@see \Netzhirsch\ContaoMcpBundle\Service\McpCallContext} carries
  *      the OAuth-authenticated identity for the current call. It MUST be
  *      cleared between calls — otherwise call B inherits call A's identity if
  *      its own auth layer didn't refresh the context (defense-in-depth).
  *
- * The hook runs in a `finally` block in the Dispatcher, so it executes even
- * when a tool throws. Errors inside the hook itself are caught upstream so
- * one broken reset doesn't poison the next call.
- *
- * Service contract (consumed via Dispatcher container lookup):
- *   void afterToolCall(string $toolName): void
+ * The hook runs in a `finally` block, so it executes even when a tool throws.
+ * Errors inside the hook itself are caught by the caller so one broken reset
+ * doesn't poison the next call.
  */
 final class PostCallHook
 {

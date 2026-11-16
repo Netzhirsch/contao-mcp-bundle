@@ -4,38 +4,45 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
+use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Discovery\DocBlockParser;
+use Mcp\Capability\Discovery\ElementMetadataResolver;
+use Mcp\Capability\Discovery\SchemaGenerator;
+use Mcp\Capability\RegistryInterface;
+use Mcp\Schema\Tool as ToolSchema;
+use Mcp\Schema\ToolAnnotations;
 use Netzhirsch\ContaoMcpBundle\Extension\ExtensionToolGate;
-use PhpMcp\Schema\Tool as ToolSchema;
-use PhpMcp\Server\Attributes\McpTool;
-use PhpMcp\Server\Registry;
-use PhpMcp\Server\Utils\DocBlockParser;
-use PhpMcp\Server\Utils\HandlerResolver;
-use PhpMcp\Server\Utils\SchemaGenerator;
 use Psr\Log\LoggerInterface;
 
 /**
- * Registers third-party `#[McpTool]` methods into a php-mcp {@see Registry},
- * gated by the operator allowlist.
+ * Registers third-party `#[McpTool]` methods into the SDK registry, gated by
+ * the operator allowlist.
  *
  * Split out of {@see HttpDispatcherFactory} so the security-relevant
  * registration path (allowlist + collision handling + schema derivation) can
  * be tested against a real Registry without booting the whole MCP Server.
  *
- * Reuses php-mcp's own {@see SchemaGenerator}/{@see DocBlockParser}/
- * {@see HandlerResolver} so extension tools get byte-for-byte identical schema
- * derivation to the core tools — a third-party author writes `#[McpTool]`
- * methods exactly the way the bundle's own tools are written.
+ * Reuses the SDK's own {@see SchemaGenerator}/{@see DocBlockParser} so
+ * extension tools get byte-for-byte identical schema derivation to the core
+ * tools — a third-party author writes `#[McpTool]` methods exactly the way the
+ * bundle's own tools are written.
  *
- * Tools are registered as `isManual: true`: they survive a later
- * `Registry::clear()` and are never written to the discovery cache (cheaply
- * re-registered per worker boot, the same lifecycle php-mcp gives its own
- * manually-registered tools).
+ * Both attribute namespaces are accepted: the SDK's
+ * `Mcp\Capability\Attribute\McpTool`, and php-mcp/server's
+ * `PhpMcp\Server\Attributes\McpTool` that EXTENDING.md documented up to 1.40.
+ * The attribute is read from its arguments rather than instantiated, so the
+ * old name works whether {@see PhpMcpAttributeAliases} aliased it or php-mcp
+ * is still installed by another package.
+ *
+ * Extension tools are registered per worker boot and never reach the
+ * discovery cache, which only holds what the scan of src/Tool found.
  */
 final class ExtensionToolRegistrar
 {
     public function __construct(
         private readonly LoggerInterface $logger,
     ) {
+        PhpMcpAttributeAliases::register();
     }
 
     /**
@@ -54,7 +61,7 @@ final class ExtensionToolRegistrar
      */
     public function candidates(array $providerClasses): array
     {
-        $docBlockParser = new DocBlockParser($this->logger);
+        $docBlockParser = new DocBlockParser(logger: $this->logger);
         $candidates = [];
 
         foreach ($providerClasses as $class) {
@@ -63,19 +70,14 @@ final class ExtensionToolRegistrar
             }
 
             foreach ((new \ReflectionClass($class))->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
-                $attributes = $method->getAttributes(McpTool::class);
-                if ($attributes === []) {
+                $attribute = self::toolAttribute($method);
+                if ($attribute === null) {
                     continue;
                 }
 
-                /** @var McpTool $mcpTool */
-                $mcpTool = $attributes[0]->newInstance();
-
                 $candidates[] = [
-                    'name' => $mcpTool->name ?? $method->getName(),
-                    'description' => $mcpTool->description
-                        ?? $docBlockParser->getSummary($docBlockParser->parseDocBlock($method->getDocComment() ?: null))
-                        ?? '',
+                    'name' => ElementMetadataResolver::resolveName($method, $attribute['name']),
+                    'description' => ElementMetadataResolver::resolveDescription($method, $attribute['description'], $docBlockParser) ?? '',
                     'class' => $class,
                 ];
             }
@@ -90,7 +92,7 @@ final class ExtensionToolRegistrar
      *
      * @return list<string> names of the tools that were actually registered
      */
-    public function register(Registry $registry, array $enabledNames, array $providerClasses): array
+    public function register(RegistryInterface $registry, array $enabledNames, array $providerClasses): array
     {
         if ($providerClasses === []) {
             return [];
@@ -99,11 +101,11 @@ final class ExtensionToolRegistrar
         // Names already present after core discovery — core (and earlier
         // extensions) win every collision. Built once, updated as we go.
         $taken = [];
-        foreach (array_keys($registry->getTools()) as $name) {
-            $taken[$name] = true;
+        foreach (array_keys($registry->getTools()->references) as $name) {
+            $taken[(string) $name] = true;
         }
 
-        $docBlockParser = new DocBlockParser($this->logger);
+        $docBlockParser = new DocBlockParser(logger: $this->logger);
         $schemaGenerator = new SchemaGenerator($docBlockParser);
 
         $registered = [];
@@ -114,16 +116,13 @@ final class ExtensionToolRegistrar
                 continue;
             }
 
-            $reflectionClass = new \ReflectionClass($class);
-            foreach ($reflectionClass->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
-                $attributes = $method->getAttributes(McpTool::class);
-                if ($attributes === []) {
+            foreach ((new \ReflectionClass($class))->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+                $attribute = self::toolAttribute($method);
+                if ($attribute === null) {
                     continue;
                 }
 
-                /** @var McpTool $mcpTool */
-                $mcpTool = $attributes[0]->newInstance();
-                $name = $mcpTool->name ?? $method->getName();
+                $name = ElementMetadataResolver::resolveName($method, $attribute['name']);
 
                 $decision = ExtensionToolGate::decide($name, $enabledNames, $taken);
                 if ($decision === ExtensionToolGate::SKIP_DISABLED) {
@@ -142,14 +141,14 @@ final class ExtensionToolRegistrar
                 }
 
                 try {
-                    $handler = [$class, $method->getName()];
-                    $reflection = HandlerResolver::resolve($handler);
-                    $inputSchema = $schemaGenerator->generate($reflection);
-                    $description = $mcpTool->description
-                        ?? $docBlockParser->getSummary($docBlockParser->parseDocBlock($method->getDocComment() ?: null));
-
-                    $tool = ToolSchema::make($name, $inputSchema, $description, $mcpTool->annotations);
-                    $registry->registerTool($tool, $handler, true);
+                    $tool = new ToolSchema(
+                        name: $name,
+                        title: $attribute['title'],
+                        inputSchema: $schemaGenerator->generate($method),
+                        description: ElementMetadataResolver::resolveDescription($method, $attribute['description'], $docBlockParser),
+                        annotations: $attribute['annotations'],
+                    );
+                    $registry->registerTool($tool, [$class, $method->getName()]);
 
                     $taken[$name] = true;
                     $registered[] = $name;
@@ -165,5 +164,44 @@ final class ExtensionToolRegistrar
         }
 
         return $registered;
+    }
+
+    /**
+     * The tool attribute on a method, read from its arguments, or null when
+     * the method has none.
+     *
+     * Read rather than instantiated: php-mcp's attribute took
+     * `(name, description, annotations)` and the SDK's takes
+     * `(name, title, description, annotations, …)`, so the same positional
+     * call means different things, and php-mcp's annotations object is not
+     * the SDK's. Named arguments carry over unchanged.
+     *
+     * @return array{name: ?string, title: ?string, description: ?string, annotations: ?ToolAnnotations}|null
+     */
+    private static function toolAttribute(\ReflectionMethod $method): ?array
+    {
+        foreach ($method->getAttributes() as $attribute) {
+            $attributeName = ltrim($attribute->getName(), '\\');
+            if (!\in_array($attributeName, PhpMcpAttributeAliases::toolAttributeNames(), true)) {
+                continue;
+            }
+
+            $arguments = $attribute->getArguments();
+            $isSdk = $attributeName === McpTool::class;
+
+            $name = $arguments['name'] ?? $arguments[0] ?? null;
+            $title = $arguments['title'] ?? ($isSdk ? ($arguments[1] ?? null) : null);
+            $description = $arguments['description'] ?? ($isSdk ? ($arguments[2] ?? null) : ($arguments[1] ?? null));
+            $annotations = $arguments['annotations'] ?? ($isSdk ? ($arguments[3] ?? null) : ($arguments[2] ?? null));
+
+            return [
+                'name' => \is_string($name) ? $name : null,
+                'title' => \is_string($title) ? $title : null,
+                'description' => \is_string($description) ? $description : null,
+                'annotations' => $annotations instanceof ToolAnnotations ? $annotations : null,
+            ];
+        }
+
+        return null;
     }
 }

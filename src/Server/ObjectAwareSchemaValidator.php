@@ -4,17 +4,17 @@ declare(strict_types=1);
 
 namespace Netzhirsch\ContaoMcpBundle\Server;
 
-use PhpMcp\Server\Utils\SchemaValidator;
+use Mcp\Capability\Discovery\SchemaValidator;
 
 /**
- * Drop-in replacement for php-mcp/server's {@see SchemaValidator} that fixes a
+ * Drop-in replacement for the MCP SDK's {@see SchemaValidator} that fixes a
  * false-positive rejection of EMPTY object parameters (`fields: {}`,
  * `args: {}`, `filters: {}`).
  *
  * Root cause: the JSON-RPC body is decoded with `json_decode($json, true)`
  * (associative). A JSON empty object `{}` therefore arrives as an empty PHP
- * array `[]`, indistinguishable from an empty JSON array. php-mcp's
- * {@see SchemaValidator::convertDataForValidator()} leaves that `[]` as a PHP
+ * array `[]`, indistinguishable from an empty JSON array. The stock
+ * validator's `convertDataForValidator()` leaves that `[]` as a PHP
  * array, and opis/json-schema cannot classify it as `object` — it reports
  * "Invalid type. Expected `null|object`, but received `unknown`." even though
  * the caller sent a perfectly valid (if empty) object.
@@ -36,8 +36,7 @@ use PhpMcp\Server\Utils\SchemaValidator;
  * validation COPY. The handler still receives the original arguments
  * (nullable PHP params accept null natively); only validation is relaxed.
  *
- * Injected over the Dispatcher's internal validator by
- * {@see HttpDispatcherFactory::getDispatcher()} — no vendor patch required.
+ * Used by {@see ToolCallHandler}, which validates every direct `tools/call`.
  */
 final class ObjectAwareSchemaValidator extends SchemaValidator
 {
@@ -50,6 +49,12 @@ final class ObjectAwareSchemaValidator extends SchemaValidator
     {
         $data = $this->stripExplicitNullsForOptional($data, $schema);
         $data = $this->coerceEmptyObjects($data, $schema);
+
+        // The arguments themselves are an object too: a call without any
+        // arrives as `[]`, and the stock validator reads that as a list.
+        if ($data === [] && $this->typeAllows($this->normaliseSchema($schema), 'object')) {
+            $data = new \stdClass();
+        }
 
         return parent::validateAgainstJsonSchema($data, $schema);
     }

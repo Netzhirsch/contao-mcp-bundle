@@ -13,12 +13,12 @@ use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
  * Until now such a parameter was dropped without a word. Two layers had to
  * miss it for that to happen, and both did:
  *
- *   1. php-mcp's SchemaGenerator never emits `additionalProperties`, and in
- *      JSON Schema its absence means "anything else is allowed" — so the
- *      dispatcher's validation pass waves the unknown key through.
- *   2. `RegisteredElement::prepareArguments()` then walks the METHOD's
- *      parameters and picks matching entries out of the arguments. Anything
- *      with no matching parameter is never looked at.
+ *   1. The generated schema never sets `additionalProperties`, and in JSON
+ *      Schema its absence means "anything else is allowed" — so the
+ *      validation pass waves the unknown key through.
+ *   2. The handler then walks the METHOD's parameters and picks matching
+ *      entries out of the arguments. Anything with no matching parameter is
+ *      never looked at.
  *
  * The result was a call that reported success while changing nothing:
  * `page_update(id: 7, pageTitel: "…")` — one transposed letter — returned the
@@ -30,14 +30,14 @@ use Netzhirsch\ContaoMcpBundle\Server\RegistryAccessor;
  * \"text\""). This guard gives the ~80-parameter tools the same manners.
  *
  * It runs in the same two places the permission check and the undo snapshot
- * run — {@see \Netzhirsch\ContaoMcpBundle\Controller\McpController} for direct
+ * run — {@see \Netzhirsch\ContaoMcpBundle\Server\ToolCallHandler} for direct
  * `tools/call`, and the lazy-mode `contao_call` proxy, which invokes tools
- * itself and therefore skips the dispatcher's validation entirely. Lazy-mode
+ * itself and therefore skips the schema validation entirely. Lazy-mode
  * instances route EVERY call through that proxy, so leaving it out would have
  * left the gap open exactly where it is widest.
  *
- * The mirror image is a missing REQUIRED parameter. php-mcp raises that inside
- * the dispatcher, where it surfaces as `tool_failed · Internal error` — a
+ * The mirror image is a missing REQUIRED parameter. The handler raises that
+ * while invoking the tool, where it surfaces as `tool_failed · Internal error` — a
  * message that describes a broken tool rather than a fixable call. It cost a
  * reporter a working tool, noted as defective, when the only problem was the
  * parameter's name: `template_get` takes `path`, not `name`. So the same guard
@@ -67,14 +67,14 @@ final class ArgumentGuard
             return null;
         }
 
-        $tool = $this->registryAccessor->get()->getTool($toolName);
+        $tool = $this->registryAccessor->find($toolName);
         if ($tool === null) {
-            // Unknown tool — the dispatcher's own "not found" is the better
+            // Unknown tool — the call handler's own "not found" is the better
             // answer, and it comes right after this.
             return null;
         }
 
-        $schema = $tool->schema->inputSchema;
+        $schema = $tool->tool->inputSchema;
 
         // `Tool::inputSchema` is declared as
         // `array{type: 'object', properties: array<string, mixed>, ...}`, so

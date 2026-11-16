@@ -6,6 +6,48 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Changed
+- **Der Server läuft auf dem offiziellen PHP-SDK `mcp/sdk` statt auf
+  `php-mcp/server`.** php-mcp kam nicht über Protokollrevision 2025-03-26
+  hinaus. Mit dem SDK spricht der Server alle Revisionen von 2024-11-05 bis
+  2025-11-25 über `initialize` und dazu 2026-07-28 ohne Handshake, auf
+  derselben URL. Der Tool-Katalog bleibt derselbe: alle Tools mit identischen
+  Beschreibungen und Schemas, Antworten weiterhin als JSON-Text — das SDK
+  würde jedes Ergebnis zusätzlich als `structuredContent` schicken und damit
+  doppelt in den Kontext des Modells legen, das unterbleibt.
+- **Sitzungen.** Für Revisionen bis 2025-11-25 vergibt der Server jetzt eine
+  `Mcp-Session-Id`. Sie liegt in der neuen Tabelle `tl_mcp_session`, damit
+  jeder PHP-Worker und bei mehreren Servern hinter einem Load Balancer jeder
+  Knoten sie findet. Unbenutzt läuft sie nach sieben Tagen ab, der Client
+  meldet sich dann neu an; `DELETE /mcp` beendet sie. **Nach dem Update
+  `contao:migrate` ausführen** (Contao Manager: Datenbank aktualisieren).
+- **Eine Ausnahme in einem Tool erreicht den Client nicht mehr mit ihrer
+  Meldung.** php-mcp gab sie als „Tool execution failed: …“ weiter, samt
+  SQL-Fragmenten und Pfaden. Jetzt kommt `tool_failed` mit einer Referenz, die
+  auch im Log steht — so wie es `contao_call` schon tat.
+- Ein unbekanntes Tool antwortet mit JSON-RPC `-32602` statt `-32601`, wie es
+  die Spezifikation vorsieht.
+- Meldet ein Tool einen Fehler, verwirft auch der direkte `tools/call` den
+  Undo-Schnappschuss, nicht nur `contao_call`.
+- Der Wiederholversuch beim kalten DCA-Cache unter Windows greift jetzt: php-mcp
+  hatte die Ausnahme abgefangen, bevor er sie zu sehen bekam.
+
+### Für Erweiterungen
+- Die Attribute heißen jetzt `Mcp\Capability\Attribute\McpTool` und
+  `Mcp\Capability\Attribute\Schema`. Tools mit den bisherigen
+  `PhpMcp\Server\Attributes\…` laufen unverändert weiter; das Bundle bildet die
+  alten Namen auf die neuen ab. Benannte Argumente verwenden — das zweite
+  positionale Argument war bei php-mcp die Beschreibung, beim SDK ist es der
+  Titel. Siehe EXTENDING.md.
+
+### Webserver
+- `DELETE` auf den Endpunkt und der Header `Mcp-Session-Id` müssen
+  durchgelassen werden (README, „Webserver: was durchgelassen werden muss“).
+
+### Removed
+- `php-mcp/server` und mit ihm `react/event-loop`, `react/promise`,
+  `react/stream` und `evenement/evenement`; `Server\ContaoDispatcher`.
+
 ## [1.40.1] – 2026-11-16
 
 ### Fixed

@@ -81,7 +81,7 @@ final class RouteAttributeTest extends TestCase
     public function testThePathDependentRoutesReachRealControllers(): void
     {
         $expected = [
-            '/mcp' => [EndpointPath::ROUTE_ENDPOINT, ['POST', 'OPTIONS']],
+            '/mcp' => [EndpointPath::ROUTE_ENDPOINT, ['POST', 'DELETE', 'OPTIONS']],
             '/mcp/healthz' => [EndpointPath::ROUTE_HEALTHZ, ['GET', 'HEAD']],
             '/mcp/.well-known/oauth-authorization-server' => [EndpointPath::ROUTE_AS_METADATA, ['GET', 'HEAD']],
             '/.well-known/oauth-protected-resource/mcp' => [EndpointPath::ROUTE_PRM, ['GET', 'HEAD']],

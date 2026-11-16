@@ -22,8 +22,8 @@ the server itself, see `README.md`.
 // src/Mcp/InvoiceTool.php in your bundle
 namespace Acme\InvoiceBundle\Mcp;
 
+use Mcp\Capability\Attribute\McpTool;
 use Netzhirsch\ContaoMcpBundle\Extension\AbstractMcpTool;
-use PhpMcp\Server\Attributes\McpTool;
 
 final class InvoiceTool extends AbstractMcpTool
 {
@@ -67,6 +67,14 @@ The equivalent low-level switch is the config file:
 
 Done. `acme_invoice_get` is now callable over MCP.
 
+> **Attribute namespace.** Since 1.41 the server runs on the official
+> `mcp/sdk`, whose attributes live in `Mcp\Capability\Attribute\` (`McpTool`,
+> `Schema` for a parameter). Tools written against the earlier
+> `PhpMcp\Server\Attributes\McpTool` / `Schema` keep working unchanged — the
+> bundle maps the old names onto the new ones. Use named arguments
+> (`name:`, `description:`): the second positional argument was the
+> description in php-mcp and is the title in the SDK.
+
 > The same panel also lets operators disable any **core** tool per
 > instance (`disabled_tools`, opt-out). Your extension tools follow the
 > stricter opt-in rule — see [Security model](#security-model).
@@ -88,13 +96,13 @@ Done. `acme_invoice_get` is now callable over MCP.
    ```
 
 2. **Collection.** A compiler pass (`McpToolProviderPass`) gathers every
-   tagged service, forces it public (php-mcp resolves tool handlers from the
+   tagged service, forces it public (the SDK resolves tool handlers from the
    container by FQCN), and hands the class list to the server factory.
 
 3. **Registration.** On each server boot, after the core tools are
    discovered, the factory reflects your classes for `#[McpTool]` methods and
    registers the **allowlisted** ones into the live registry — reusing
-   php-mcp's own schema generator, so your input schema is derived from your
+   the SDK's own schema generator, so your input schema is derived from your
    method signature identically to a core tool.
 
 You never call discovery or registration yourself. You write the class and
@@ -362,9 +370,9 @@ inject `McpCallContext` / `AuthorResolver` / `DbalRetry` yourself.)
 namespace Acme\InvoiceBundle\Mcp;
 
 use Doctrine\DBAL\Connection;
+use Mcp\Capability\Attribute\McpTool;
 use Netzhirsch\ContaoMcpBundle\Extension\AbstractMcpTool;
 use Netzhirsch\ContaoMcpBundle\Extension\McpToolPermissionProviderInterface;
-use PhpMcp\Server\Attributes\McpTool;
 
 final class InvoiceTool extends AbstractMcpTool implements McpToolPermissionProviderInterface
 {
@@ -464,21 +472,21 @@ a class with methods — call them). To verify it registers correctly against
 the real server, the host bundle's own test pattern is:
 
 ```php
+use Mcp\Capability\Registry;
 use Netzhirsch\ContaoMcpBundle\Server\ExtensionToolRegistrar;
-use PhpMcp\Server\Registry;
 use Psr\Log\NullLogger;
 
-$registry = new Registry(new NullLogger());
+$registry = new Registry();
 $registrar = new ExtensionToolRegistrar(new NullLogger());
 
 // Enabled → registered.
 $registrar->register($registry, ['acme_invoice_get'], [InvoiceTool::class]);
-self::assertNotNull($registry->getTool('acme_invoice_get'));
+self::assertTrue($registry->hasTool('acme_invoice_get'));
 
 // Not enabled → absent.
-$registry2 = new Registry(new NullLogger());
+$registry2 = new Registry();
 $registrar->register($registry2, [], [InvoiceTool::class]);
-self::assertNull($registry2->getTool('acme_invoice_get'));
+self::assertFalse($registry2->hasTool('acme_invoice_get'));
 ```
 
 ---
