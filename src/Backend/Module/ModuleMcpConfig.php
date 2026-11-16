@@ -68,18 +68,25 @@ class ModuleMcpConfig extends AbstractMcpModule
             'extension_tools_enabled' => $configStorage->load()['extension_tools_enabled'],
             'disabled_tools' => $configStorage->load()['disabled_tools'],
             'registration_open_until' => $configStorage->load()['registration_open_until'],
-            // Operator switches: same hidden-'0' / checked-'1' pattern.
-            'read_only' => (bool) Input::post('read_only'),
-            'allow_publish' => (bool) Input::post('allow_publish'),
-            'create_unpublished' => (bool) Input::post('create_unpublished'),
-            'allow_delete' => (bool) Input::post('allow_delete'),
-            'privacy_mode' => (bool) Input::post('privacy_mode'),
-            'admins_allowed' => (bool) Input::post('admins_allowed'),
-            // Raw: Input::post() would encode the special characters a rule
-            // may legitimately contain (quotes, angle brackets, braces); the
-            // text is only ever printed escaped and sent as plain text.
-            'house_rules' => (string) Input::postUnsafeRaw('house_rules'),
         ];
+
+        // Operator switches: same hidden-'0' / checked-'1' pattern. A switch
+        // the request does not carry at all keeps its stored value — three of
+        // them default to on, and a post from an older form (or a script that
+        // knows only the fields above) must not turn publishing, deleting and
+        // administrator access off behind the operator's back.
+        $stored = $configStorage->load();
+        foreach (['read_only', 'allow_publish', 'create_unpublished', 'allow_delete', 'privacy_mode', 'admins_allowed'] as $switch) {
+            $posted = Input::post($switch);
+            $input[$switch] = $posted === null ? $stored[$switch] : (bool) $posted;
+        }
+
+        // Raw: Input::post() would encode the special characters a rule may
+        // legitimately contain (quotes, angle brackets, braces); the text is
+        // only ever printed escaped and sent as plain text. Absent keeps it,
+        // like the switches.
+        $houseRules = Input::postUnsafeRaw('house_rules');
+        $input['house_rules'] = $houseRules === null ? $stored['house_rules'] : (string) $houseRules;
         $result = $configStorage->save($input);
 
         if ($result['saved']) {

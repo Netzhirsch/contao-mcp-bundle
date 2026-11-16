@@ -413,7 +413,11 @@ jobs:
           JAR=$(mktemp)
           LOGIN=$(curl -fsS -c "$JAR" -b "$JAR" http://127.0.0.1:8000/contao/login)
           field() { grep -oP "name=\"$1\" value=\"\\K[^\"]+" <<< "$LOGIN"; }
+          # A browser sends Origin with every POST. Contao 5.3.54 and later skip
+          # the CSRF check of the login form only for a same-origin request
+          # (GHSA-rgq4-cg48-xjxj), so curl has to say where it comes from too.
           curl -fsS -c "$JAR" -b "$JAR" -o /dev/null \
+              -H 'Origin: http://127.0.0.1:8000' \
               --data-urlencode FORM_SUBMIT=tl_login \
               --data-urlencode "REQUEST_TOKEN=$(field REQUEST_TOKEN)" \
               --data-urlencode "_target_path=$(field _target_path)" \
@@ -445,6 +449,7 @@ jobs:
               action=$(grep -oP '<form class="tl_form tl_edit_form"[^>]*action="\K[^"]+' "$page" | head -1 | sed 's/&amp;/\&/g')
               token=$(grep -oP 'name="REQUEST_TOKEN" value="\K[^"]+' "$page" | head -1)
               curl -fsS -b "$JAR" -c "$JAR" -o /dev/null \
+                  -H 'Origin: http://127.0.0.1:8000' \
                   --data-urlencode FORM_SUBMIT=mcp_server_action \
                   --data-urlencode "REQUEST_TOKEN=$token" \
                   --data-urlencode action=save_config \

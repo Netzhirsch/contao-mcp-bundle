@@ -28,6 +28,12 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   ohne `files/` aus; Dateifelder nahmen bisher nur die Form mit.
 - `singleSRC` bei News, Terminen und FAQ und `favicon` bei Root-Seiten nehmen
   jetzt ebenfalls einen Pfad statt nur einer UUID.
+- **Ein Konfigurations-POST ohne die neuen Schalter schaltete drei davon ab.**
+  Das Formular las ein fehlendes Feld als „aus“; bei „Veröffentlichen“,
+  „Löschen“ und „Administratoren“, die standardmäßig an sind, hätte ein
+  Absenden aus einer älteren Formularseite oder einem Skript sie still
+  umgelegt. Ein Schalter oder die Hausregeln, die die Anfrage gar nicht
+  enthält, behalten jetzt ihren gespeicherten Wert.
 
 ### Notes
 - Contaos Sicherheitsreleases vom November 2026 (ab 5.3.54) haben die
@@ -37,6 +43,10 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
   gegen das, was `html_filter_info` für die Installation meldet. Am Bundle
   ändert das nichts: `html_filter_preview` zeigt schon immer, was die
   jeweilige Installation durchlässt.
+- Dieselben Releases prüfen das CSRF-Token des Backend-Logins auch ohne
+  Session, außer die Anfrage kommt nachweislich von derselben Seite
+  (GHSA-rgq4-cg48-xjxj). Der CI-Schritt, der sich per `curl` anmeldet, schickt
+  dafür jetzt einen `Origin`-Header mit, wie ein Browser.
 
 ## [1.40.0] – 2026-11-10
 
