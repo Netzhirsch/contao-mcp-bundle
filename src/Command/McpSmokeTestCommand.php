@@ -1753,6 +1753,41 @@ final class McpSmokeTestCommand extends Command
             $this->externalIdTool->set('ns', 'x', 'tl_theme', 99999999),
             fn ($r) => ($r['error'] ?? null) === 'row_not_found');
 
+        // tl_netzhirsch_component joined the list (reported from
+        // vfbluebeck.netzhirsch.de). A table newly on it exists before its
+        // columns do — until the next contao:migrate. That state has to say
+        // so, not fail with "Unknown column", and must not take the
+        // cross-table list down with it. Built with a stand-in table where
+        // the Bootstrap bundle is absent.
+        $componentTable = 'tl_netzhirsch_component';
+        $standIn = !$this->connection->createSchemaManager()->tablesExist([$componentTable]);
+
+        if ($standIn) {
+            $this->connection->executeStatement('CREATE TABLE '.$componentTable.' (id INT UNSIGNED AUTO_INCREMENT NOT NULL, PRIMARY KEY(id))');
+            $this->connection->insert($componentTable, ['id' => 1]);
+        }
+
+        try {
+            $componentId = (int) $this->connection->fetchOne('SELECT id FROM '.$componentTable.' ORDER BY id LIMIT 1');
+            $hasColumns = isset(array_change_key_case($this->connection->createSchemaManager()->listTableColumns($componentTable))['external_id_key']);
+
+            if (!$hasColumns && $componentId > 0) {
+                $expect('external_id_set on a table without its columns yet says to run contao:migrate',
+                    $this->externalIdTool->set($ns, 'component.x', $componentTable, $componentId),
+                    fn ($r) => ($r['error'] ?? null) === 'migration_pending'
+                        && str_contains((string) ($r['message'] ?? ''), 'contao:migrate'));
+                $expect('and the list across all tables still answers',
+                    $this->externalIdTool->listMappings($ns),
+                    fn ($r) => !isset($r['error']) && \is_array($r['items'] ?? null));
+            } else {
+                $output->writeln('  <comment>~ migration_pending übersprungen — '.$componentTable.' hat die Spalten schon</comment>');
+            }
+        } finally {
+            if ($standIn) {
+                $this->connection->executeStatement('DROP TABLE '.$componentTable);
+            }
+        }
+
         // Backend labels for the injected columns. The field labels resolve via
         // the shared MSC.* references; the legend MUST be mirrored per-table
         // because Contao's DC_Table resolves legend titles from
@@ -4223,6 +4258,95 @@ final class McpSmokeTestCommand extends Command
             $output->writeln('  <comment>~ fileTree-Test übersprungen — keine Datei in tl_files oder kein Theme</comment>');
         }
 
+        // ── Module value shapes ──────────────────────────────────────────
+        //
+        // Reported from vfbluebeck.netzhirsch.de: numberOfItems and perPage
+        // arrived as 1 whatever was sent — they stood in a list of checkboxes
+        // and were stored as `$value ? 1 : 0`, as was showLevel. contextLength
+        // "48,360" went into the column as written and the backend's edit mask
+        // failed on it. cssID {class} was stored with its keys, and Contao
+        // reads it by position: the class never reached the page.
+        $output->writeln("\n<comment>Modulfelder (Zahlen, Mehrfachfelder, cssID)</comment>");
+
+        $shapeThemeId = (int) $this->connection->fetchOne('SELECT id FROM tl_theme ORDER BY id LIMIT 1');
+
+        if ($shapeThemeId > 0) {
+            $shapeIds = [];
+
+            try {
+                $search = $this->moduleTool->create(theme_id: $shapeThemeId, type: 'search', name: $stamp.'_suche', fields: (object) [
+                    'perPage' => 12,
+                    'contextLength' => '48,360',
+                    'fuzzy' => false,
+                    'cssID' => (object) ['class' => 'suche'],
+                ]);
+                $searchId = (int) ($search['id'] ?? 0);
+                $shapeIds[] = $searchId;
+                $searchRow = $searchId > 0
+                    ? $this->connection->fetchAssociative('SELECT perPage, contextLength, fuzzy, cssID FROM tl_module WHERE id = ?', [$searchId])
+                    : null;
+
+                $expect('a number field keeps its number (perPage 12, not 1)', $searchRow,
+                    static fn ($r) => \is_array($r) && (int) $r['perPage'] === 12);
+                $expect('"48,360" is stored as the two inputs of contextLength',
+                    \is_array($searchRow) ? StringUtil::deserialize((string) $searchRow['contextLength']) : null,
+                    static fn ($v) => $v === ['48', '360']);
+                $expect('a checkbox takes false', $searchRow,
+                    static fn ($r) => \is_array($r) && (int) $r['fuzzy'] === 0);
+                $expect('cssID {class} is stored by position, the way Contao reads it',
+                    \is_array($searchRow) ? StringUtil::deserialize((string) $searchRow['cssID']) : null,
+                    static fn ($v) => $v === ['', 'suche']);
+
+                $expect('an id alone keeps the class',
+                    [$this->moduleTool->update($searchId, (object) ['cssID' => (object) ['id' => 'suchfeld']]),
+                        StringUtil::deserialize((string) $this->connection->fetchOne('SELECT cssID FROM tl_module WHERE id = ?', [$searchId]))],
+                    static fn (array $r) => !isset($r[0]['error']) && $r[1] === ['suchfeld', 'suche']);
+
+                $expect('a list is taken as it is',
+                    [$this->moduleTool->update($searchId, (object) ['contextLength' => [20, 200]]),
+                        StringUtil::deserialize((string) $this->connection->fetchOne('SELECT contextLength FROM tl_module WHERE id = ?', [$searchId]))],
+                    static fn (array $r) => !isset($r[0]['error']) && $r[1] === ['20', '200']);
+
+                $expect('a word in a number field is refused by name',
+                    $this->moduleTool->update($searchId, (object) ['perPage' => 'zwölf']),
+                    static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), 'perPage'));
+                $expect('three values for a two-input field are refused by name',
+                    $this->moduleTool->update($searchId, (object) ['contextLength' => '1,2,3']),
+                    static fn ($r) => ($r['error'] ?? '') === 'invalid_input' && str_contains((string) ($r['message'] ?? ''), 'contextLength'));
+
+                $nav = $this->moduleTool->create(theme_id: $shapeThemeId, type: 'navigation', name: $stamp.'_nav', fields: (object) ['showLevel' => 2]);
+                $shapeIds[] = (int) ($nav['id'] ?? 0);
+                $expect('showLevel keeps its number (2, not 1)',
+                    (int) $this->connection->fetchOne('SELECT showLevel FROM tl_module WHERE id = ?', [(int) ($nav['id'] ?? 0)]),
+                    static fn (int $n) => $n === 2);
+
+                // numberOfItems sits on the feed reader in core; newslist and
+                // the like need the news bundle.
+                $readerType = null;
+                $feModTypes = array_merge([], ...array_map(
+                    static fn (mixed $group): array => \is_array($group) ? array_map('strval', array_keys($group)) : [],
+                    array_values($GLOBALS['FE_MOD'] ?? []),
+                ));
+                foreach (['feed_reader', 'rssReader'] as $candidate) {
+                    if (\in_array($candidate, $feModTypes, true)) {
+                        $readerType = $candidate;
+                        break;
+                    }
+                }
+                if ($readerType !== null) {
+                    $reader = $this->moduleTool->create(theme_id: $shapeThemeId, type: $readerType, name: $stamp.'_reader', fields: (object) ['numberOfItems' => 6]);
+                    $shapeIds[] = (int) ($reader['id'] ?? 0);
+                    $expect("numberOfItems keeps its number (6, not 1, on {$readerType})",
+                        (int) $this->connection->fetchOne('SELECT numberOfItems FROM tl_module WHERE id = ?', [(int) ($reader['id'] ?? 0)]),
+                        static fn (int $n) => $n === 6);
+                }
+            } finally {
+                foreach (array_filter($shapeIds) as $shapeId) {
+                    $this->connection->delete('tl_module', ['id' => $shapeId]);
+                }
+            }
+        }
+
         // The same for content elements, which knew singleSRC and multiSRC by
         // name and wrote every other file column raw: posterSRC of the video
         // element, and every image field an extension adds. "Data too long for
@@ -5669,6 +5793,35 @@ final class McpSmokeTestCommand extends Command
             $expect('and leaves no partial file behind',
                 glob($abs.'/.mcp-upload-*') ?: [],
                 fn ($r) => $r === []);
+
+            // ── Stylesheet partials ──────────────────────────────────────
+            //
+            // Reported from vfbluebeck.netzhirsch.de: Contao compiles a layout
+            // stylesheet again only when the file named in the layout changes.
+            // A replaced partial changed nothing on the page until a comment
+            // in main.scss was bumped.
+            $partial = "// smoke\n\$smoke-gap: 1px;\n";
+            $firstScss = $this->fileTool->upload($dir, '_partial.scss', base64_encode($partial));
+
+            if (($firstScss['uploaded'] ?? false) === true) {
+                $expect('a new partial leaves the script cache alone', $firstScss,
+                    fn ($r) => !isset($r['script_cache']));
+
+                $cssDir = $this->projectDir.'/assets/css';
+                if (!is_dir($cssDir)) {
+                    @mkdir($cssDir, 0o777, true);
+                }
+                $compiled = $cssDir.'/'.$stamp.'-compiled.css';
+                @file_put_contents($compiled, '/* compiled before the partial changed */');
+
+                $replacedScss = $this->fileTool->upload($dir, '_partial.scss', base64_encode($partial."\$smoke-gap-2: 2px;\n"), true);
+                $expect('replacing a partial purges the script cache, so the stylesheet compiles again',
+                    [$replacedScss, is_file($compiled)],
+                    fn (array $r) => ($r[0]['script_cache']['purged'] ?? false) === true && $r[1] === false);
+                @unlink($compiled);
+            } else {
+                $output->writeln('  <comment>~ Stylesheet-Test übersprungen — .scss ist hier kein erlaubter Upload-Typ</comment>');
+            }
 
             // ── Chunked ──────────────────────────────────────────────────
             $big = "\x89PNG\r\n\x1A\n".random_bytes(70000);

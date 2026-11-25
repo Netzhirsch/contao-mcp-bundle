@@ -363,7 +363,7 @@ Vier Tools:
 
 **Cascade-Verhalten:** Wenn die Contao-Row gelöscht wird (Backend, Tool, CLI), verschwindet das Mapping mit ihr — die Spalten leben in der Row selbst. Kein eigenes Cleanup nötig.
 
-**Unterstützte Tabellen** (Stand v0.2.0): `tl_theme`, `tl_image_size`, `tl_image_size_item`, `tl_layout`, `tl_page`, `tl_article`, `tl_content`, `tl_module`, `tl_files`, `tl_form`, `tl_form_field`, `tl_member`, `tl_member_group`, `tl_news_archive`, `tl_news`, `tl_calendar`, `tl_calendar_events`, `tl_faq_category`, `tl_faq`, `tl_url_rewrite`, `tl_newsletter_channel`, `tl_newsletter`, `tl_newsletter_recipients`, `tl_comments`. Backend-User-Tabellen (`tl_user`, `tl_user_group`) sind bewusst ausgeschlossen.
+**Unterstützte Tabellen** (Stand v0.2.0): `tl_theme`, `tl_image_size`, `tl_image_size_item`, `tl_layout`, `tl_page`, `tl_article`, `tl_content`, `tl_module`, `tl_files`, `tl_form`, `tl_form_field`, `tl_member`, `tl_member_group`, `tl_news_archive`, `tl_news`, `tl_calendar`, `tl_calendar_events`, `tl_faq_category`, `tl_faq`, `tl_url_rewrite`, `tl_newsletter_channel`, `tl_newsletter`, `tl_newsletter_recipients`, `tl_comments`, seit v1.41.2 auch `tl_netzhirsch_component` (Komponenten des Bootstrap-Bundles; die Spalten kommen mit dem nächsten `contao:migrate`). Backend-User-Tabellen (`tl_user`, `tl_user_group`) sind bewusst ausgeschlossen.
 
 **Typischer Pipeline-Flow**:
 

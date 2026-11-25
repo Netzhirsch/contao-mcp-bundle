@@ -77,6 +77,12 @@ final class Tool
      */
     private const RASTER_EXTENSIONS = ['gif', 'jpg', 'jpeg', 'png', 'webp', 'avif', 'heic', 'jxl'];
 
+    /**
+     * Stylesheet sources Contao compiles itself, and which can be pulled into
+     * another one by @import — see {@see purgeScriptCache()}.
+     */
+    private const STYLESHEET_SOURCES = ['scss', 'sass', 'less'];
+
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly LoggerInterface $logger,
@@ -1218,7 +1224,9 @@ final class Tool
         $targetRelative = ($parent_path === '' ? '' : trim($parent_path, '/').'/').$name;
         $targetAbs = $parentAbs.\DIRECTORY_SEPARATOR.$name;
 
-        if (file_exists($targetAbs) && !$overwrite) {
+        $replacing = file_exists($targetAbs);
+
+        if ($replacing && !$overwrite) {
             return ['error' => 'file_exists', 'message' => "File already exists: {$targetRelative}. Pass overwrite=true to replace."];
         }
 
@@ -1267,6 +1275,10 @@ final class Tool
             $extra['warnings'] = $warnings;
         }
 
+        if ($replacing && \in_array($extension, self::STYLESHEET_SOURCES, true)) {
+            $extra['script_cache'] = $this->purgeScriptCache($dbafsPath);
+        }
+
         clearstatcache(true, $targetAbs);
         $storedSize = (int) @filesize($targetAbs);
 
@@ -1281,6 +1293,42 @@ final class Tool
                 : $this->serializer->fromFilesystem($targetAbs, $targetRelative))
             + ['uploaded' => true, 'size_bytes' => $storedSize]
             + $extra;
+    }
+
+    /**
+     * Contao compiles a layout's SCSS/LESS once and keeps the result until the
+     * file named in the layout changes — it looks at that file's date alone.
+     * A partial it @imports can change as often as it likes: the page keeps
+     * the old CSS. Reported from vfbluebeck.netzhirsch.de, where the only way
+     * through was bumping a comment in main.scss.
+     *
+     * So replacing such a file purges the script cache, the backend's
+     * "Purge the script cache" job: assets/css and assets/js, and the page
+     * cache with them so no cached page points at a deleted file. The next
+     * page view compiles again. Only on replace: a new partial does nothing
+     * until a stylesheet imports it, and that stylesheet changes with it.
+     *
+     * @return array{purged: bool, message: string}
+     */
+    private function purgeScriptCache(string $dbafsPath): array
+    {
+        try {
+            $this->framework->createInstance(\Contao\Automator::class)->purgeScriptCache();
+        } catch (\Throwable $e) {
+            $this->logger->warning('MCP upload: the script cache could not be purged after a stylesheet changed.', ['path' => $dbafsPath, 'exception' => $e]);
+
+            return [
+                'purged' => false,
+                'message' => 'The stylesheet was saved, but the script cache could not be purged. Contao keeps serving the old CSS until it is: run maintenance_run(["scripts"]).',
+            ];
+        }
+
+        $this->log(sprintf('Purged the script cache after %s changed via MCP', $dbafsPath), __METHOD__);
+
+        return [
+            'purged' => true,
+            'message' => 'Purged the script and page cache: Contao recompiles a layout stylesheet only when the file named in the layout changes, not when a partial it imports does. The next page view compiles it again.',
+        ];
     }
 
     /**

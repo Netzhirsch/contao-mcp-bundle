@@ -6,6 +6,45 @@ Versionierung nach [SemVer 2.0](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.41.2] – 2026-11-25
+
+> Befunde aus dem Aufbau von vfbluebeck.netzhirsch.de. Wer das
+> Bootstrap-Bundle einsetzt: nach dem Update einmal „Datenbank aktualisieren“
+> (`contao:migrate`), damit Komponenten eine externe ID bekommen können.
+
+### Fixed
+- **`module_create`/`module_update` speicherten `numberOfItems`, `perPage` und
+  `showLevel` immer als 1.** Die drei standen in der Liste der Checkboxen und
+  wurden als „an/aus“ gespeichert: „6 Einträge, 12 pro Seite, zwei Ebenen“
+  kam als 1, 1 und 1 an. Ob ein Feld Checkbox, Zahl oder Mehrfachfeld ist,
+  entscheidet jetzt die DCA, auch für die Felder von Erweiterungen. Ein Wort in
+  einem Zahlenfeld wird mit Feldnamen abgelehnt.
+- **Mehrfach-Textfelder wie `contextLength` (Suche) landeten als Text in der
+  Spalte.** „48,360“ stand so in der Datenbank, und die Bearbeitungsmaske im
+  Backend meldete einen Fehler. Jetzt nehmen sie eine Liste (`["48", "360"]`)
+  oder eine kommagetrennte Angabe und speichern sie wie das Backend; zu viele
+  Werte oder Buchstaben in einem Zahlenfeld werden abgelehnt.
+- **`cssID` an Modulen kam nicht im HTML an.** Das Objekt `{id, class}` wurde
+  mit seinen Schlüsseln gespeichert, Contao liest `cssID` aber nach Position.
+  Die Klasse fehlte damit überall, auch eingebunden über das Inhaltselement
+  „Modul“. Module nehmen `cssID` jetzt wie Inhaltselemente und Artikel; wer nur
+  `id` oder nur `class` schickt, behält den anderen Teil.
+
+### Added
+- **`external_id_set` unterstützt `tl_netzhirsch_component`,** die Komponenten
+  des Bootstrap-Bundles. Die Spalten legt das nächste `contao:migrate` an.
+  Bis dahin antworten die External-ID-Tools für diese Tabelle mit
+  `migration_pending` und dem Hinweis auf die Datenbank-Aktualisierung, und
+  `external_ids_list` über alle Tabellen läuft weiter, statt an der fehlenden
+  Spalte zu scheitern.
+- **Ein überschriebenes SCSS-, Sass- oder LESS-Partial leert den
+  Skript-Cache.** Contao kompiliert ein Stylesheet aus dem Layout nur neu, wenn
+  sich diese eine Datei ändert; ein importiertes Partial zählt nicht. Bisher
+  half nur, in `main.scss` etwas zu ändern. Jetzt leert `file_upload` (und
+  `file_upload_finish`) beim Überschreiben einer solchen Datei den Skript- und
+  Seiten-Cache, wie der Wartungsjob „Skript-Cache leeren“, und sagt das in der
+  Antwort (`script_cache`).
+
 ## [1.41.1] – 2026-11-16
 
 > Fehlerbehebung aus dem laufenden Betrieb, alles in `entity_duplicate`.

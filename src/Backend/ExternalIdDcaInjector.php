@@ -88,6 +88,11 @@ final class ExternalIdDcaInjector
         'tl_newsletter',
         'tl_newsletter_recipients',
         'tl_comments',
+        // netzhirsch/contao-bootstrap-bundle: the components themselves. A
+        // design pipeline maps every component it builds; component_instance_*
+        // already took an external id for the elements, the component row
+        // behind them could not be mapped.
+        'tl_netzhirsch_component',
     ];
 
     public function __invoke(string $table): void

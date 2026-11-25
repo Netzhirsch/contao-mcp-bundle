@@ -398,6 +398,8 @@ final class Tool
         $limit = max(1, min($limit, 1000));
         $offset = max(0, $offset);
 
+        $this->forgetSchema();
+
         $supported = self::SUPPORTED_TABLES;
 
         // No filters at all → return only the metadata; caller is just
@@ -422,6 +424,9 @@ final class Tool
                     'table' => $table,
                 ];
             }
+            if (!$this->hasMappingColumns($table)) {
+                return $this->migrationPending($table);
+            }
             $tables = [$table];
         } else {
             // UNION-mode: silently skip tables whose extension is not
@@ -430,9 +435,11 @@ final class Tool
             // "table doesn't exist" mid-query. Operator-friendly because
             // calling `list` shouldn't require knowing which extensions
             // happen to be wired up.
+            // The same for a table whose columns contao:migrate has not added
+            // yet — a table newly on the list exists before its columns do.
             $tables = array_values(array_filter(
                 $supported,
-                fn (string $t): bool => $this->tableExists($t),
+                fn (string $t): bool => $this->tableExists($t) && $this->hasMappingColumns($t),
             ));
         }
 
@@ -512,6 +519,8 @@ final class Tool
      */
     private function validateInput(string $namespace, string $external_key, string $table): ?array
     {
+        $this->forgetSchema();
+
         if (trim($namespace) === '' || \strlen($namespace) > 64) {
             return ['error' => 'invalid_input', 'message' => 'namespace must be 1-64 chars.'];
         }
@@ -532,7 +541,50 @@ final class Tool
                 'table' => $table,
             ];
         }
+        if (!$this->hasMappingColumns($table)) {
+            return $this->migrationPending($table);
+        }
         return null;
+    }
+
+    /**
+     * @return array{error: string, message: string, table: string}
+     */
+    private function migrationPending(string $table): array
+    {
+        return [
+            'error' => 'migration_pending',
+            'message' => sprintf(
+                '%s does not have the external-id columns yet. They are added by the database update after installing or updating the MCP bundle: run contao:migrate (Contao Manager: "Datenbank aktualisieren").',
+                $table,
+            ),
+            'table' => $table,
+        ];
+    }
+
+    /** @var array<string, bool> */
+    private array $mappingColumnsCache = [];
+
+    /**
+     * The caches hold for one tool call. The service lives as long as the
+     * process: a long-running worker, or the smoke test, would otherwise keep
+     * answering "no columns" after contao:migrate added them.
+     */
+    private function forgetSchema(): void
+    {
+        $this->tableExistsCache = null;
+        $this->mappingColumnsCache = [];
+    }
+
+    private function hasMappingColumns(string $table): bool
+    {
+        if (!\array_key_exists($table, $this->mappingColumnsCache)) {
+            $columns = array_change_key_case($this->connection->createSchemaManager()->listTableColumns($table));
+
+            $this->mappingColumnsCache[$table] = isset($columns['external_id_namespace'], $columns['external_id_key']);
+        }
+
+        return $this->mappingColumnsCache[$table];
     }
 
     /**

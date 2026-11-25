@@ -163,9 +163,13 @@ final class Tool
             Required: theme_id, type, name.
             Optional via `fields`: any column appearing in module_palette_get(type) —
             common ones: headline (string or {value, unit:h1..h6}), customTpl,
-            cssID, jumpTo (page id), pages (list<int>), rootPage (list<int>),
+            cssID ({id, class}), jumpTo (page id), pages (list<int>), rootPage (page id),
             navigationTpl, levelOffset, showLevel, showProtected, defineRoot,
             protected (bool), guests (bool), groups (list<int>).
+            Value shapes follow the field's widget: checkboxes take true/false, number
+            fields (numberOfItems, perPage, showLevel, levelOffset, skipFirst) a whole
+            number, multi-input fields a list — contextLength of the search module is
+            ["48", "360"] (a "48,360" string is split the same way).
             RockSolid Custom Elements (rsce_* types): rsce_data, a JSON object with the
             module's settings — module_palette_get(type) lists its keys.
 
@@ -225,7 +229,7 @@ final class Tool
      */
     #[McpTool(
         name: 'module_update',
-        description: 'Updates a tl_module row. Pass id; everything else goes in `fields`. Pass type= inside fields to switch the module to a different type (the palette of the new type is used for validation). On RSCE modules rsce_data is merged into what is stored: send only the keys to change, null removes one. Versions snapshot + tl_log.',
+        description: 'Updates a tl_module row. Pass id; everything else goes in `fields`. Pass type= inside fields to switch the module to a different type (the palette of the new type is used for validation). Values take the same shapes as on module_create: cssID {id, class} (one of the two keeps the other), numbers as numbers, multi-input fields such as contextLength as a list. On RSCE modules rsce_data is merged into what is stored: send only the keys to change, null removes one. Versions snapshot + tl_log.',
     )]
     public function update(
         int $id,

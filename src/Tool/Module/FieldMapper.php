@@ -58,14 +58,30 @@ final class FieldMapper
     private const HEADLINE_TUPLE_FIELDS = ['headline'];
 
     /**
-     * tinyint flags — accept bool, store 0/1.
+     * Flags for which the live DCA may have no definition (`guests` and
+     * `tableless` are gone from Contao 5). Every checkbox the DCA does define
+     * is recognised there — see {@see castValue()}.
+     *
+     * This list used to be the only source, and it held three numbers:
+     * numberOfItems, perPage and showLevel were stored as `$value ? 1 : 0`, so
+     * "6 items, 12 per page, two levels" arrived as 1, 1 and 1.
      *
      * @var list<string>
      */
-    private const BOOL_FIELDS = [
-        'protected', 'guests', 'showLevel', 'hardLimit', 'showProtected', 'defineRoot',
-        'showHidden', 'autologin', 'redirectBack', 'tableless', 'numberOfItems', 'perPage',
-    ];
+    private const BOOL_FIELDS = ['protected', 'guests', 'tableless'];
+
+    /**
+     * Serialised positional string pairs, as on content_* and article_*: an
+     * object {id, class} or a list [id, class]. A plain string is stored as it
+     * is (an already serialised value).
+     *
+     * An object went into the column unconverted before, serialised with its
+     * keys — and Contao reads cssID by position, so the class never reached
+     * the page.
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    private const STRING_PAIR_FIELDS = ['cssID' => ['id', 'class']];
 
     /**
      * Single int fields that point at a page id (pageTree, single-select).
@@ -324,12 +340,40 @@ final class FieldMapper
                 : FileUuid::toBinary($value, $field);
         }
 
-        if (\in_array($field, self::BOOL_FIELDS, true)) {
-            return $value ? 1 : 0;
+        $definition = $GLOBALS['TL_DCA']['tl_module']['fields'][$field] ?? null;
+        $definition = \is_array($definition) ? $definition : [];
+
+        if (self::isCheckbox($definition) || \in_array($field, self::BOOL_FIELDS, true)) {
+            return self::flag($value) ? 1 : 0;
         }
 
         if (\in_array($field, self::SINGLE_PAGE_FIELDS, true)) {
             return (int) $value;
+        }
+
+        if (isset(self::STRING_PAIR_FIELDS[$field])) {
+            if (\is_string($value)) {
+                return $value;
+            }
+
+            [$keyA, $keyB] = self::STRING_PAIR_FIELDS[$field];
+
+            if (!\is_array($value) && !\is_object($value)) {
+                throw new \InvalidArgumentException(sprintf('"%s" must be an object {%s, %s} or a string.', $field, $keyA, $keyB));
+            }
+
+            [$a, $b] = SerializedTuple::pair($value, $current, $keyA, $keyB);
+
+            return ($a === '' && $b === '') ? '' : serialize([$a, $b]);
+        }
+
+        if (self::isWholeNumber($definition)) {
+            return self::wholeNumber($field, $value, $definition);
+        }
+
+        $size = self::multipleTextSize($definition);
+        if ($size !== null) {
+            return self::textList($field, $value, $size, $definition);
         }
 
         if (\in_array($field, self::INT_LIST_FIELDS, true)) {
@@ -373,6 +417,147 @@ final class FieldMapper
         }
 
         return $value;
+    }
+
+    /**
+     * A single checkbox: one flag, stored as 0/1.
+     *
+     * @param array<string, mixed> $definition
+     */
+    private static function isCheckbox(array $definition): bool
+    {
+        return ($definition['inputType'] ?? null) === 'checkbox' && empty($definition['eval']['multiple']);
+    }
+
+    /**
+     * A one-value text field over an integer column — numberOfItems, perPage,
+     * showLevel, levelOffset, skipFirst and every field like them an extension
+     * adds.
+     *
+     * @param array<string, mixed> $definition
+     */
+    private static function isWholeNumber(array $definition): bool
+    {
+        if (($definition['inputType'] ?? null) !== 'text' || !empty($definition['eval']['multiple'])) {
+            return false;
+        }
+
+        $sql = $definition['sql'] ?? '';
+        $type = strtolower(\is_array($sql) ? (string) ($sql['type'] ?? '') : (string) $sql);
+
+        return preg_match('/^(tiny|small|medium|big)?int(eger)?\b/', $type) === 1;
+    }
+
+    /**
+     * The number of inputs of a multi-input text field — contextLength of the
+     * search module is two: [characters around a hit, total length].
+     *
+     * @param array<string, mixed> $definition
+     */
+    private static function multipleTextSize(array $definition): ?int
+    {
+        if (($definition['inputType'] ?? null) !== 'text' || empty($definition['eval']['multiple'])) {
+            return null;
+        }
+
+        $size = (int) ($definition['eval']['size'] ?? 0);
+
+        return $size > 1 ? $size : null;
+    }
+
+    private static function flag(mixed $value): bool
+    {
+        if (\is_string($value)) {
+            return filter_var($value, \FILTER_VALIDATE_BOOLEAN, \FILTER_NULL_ON_FAILURE) ?? ($value !== '');
+        }
+
+        return (bool) $value;
+    }
+
+    /**
+     * @param array<string, mixed> $definition
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function wholeNumber(string $field, mixed $value, array $definition): int
+    {
+        if ($value === '' || $value === false) {
+            return 0;
+        }
+
+        if (\is_int($value)) {
+            $number = $value;
+        } elseif (\is_string($value) && preg_match('/^\s*-?\d+\s*$/', $value) === 1) {
+            $number = (int) $value;
+        } elseif (\is_float($value) && floor($value) === $value) {
+            $number = (int) $value;
+        } else {
+            throw new \InvalidArgumentException(sprintf(
+                '"%s" is a whole number, got %s.',
+                $field,
+                \is_scalar($value) ? '"'.$value.'"' : get_debug_type($value),
+            ));
+        }
+
+        if ($number < 0 && \in_array($definition['eval']['rgxp'] ?? '', ['natural', 'digit'], true)) {
+            throw new \InvalidArgumentException(sprintf('"%s" cannot be negative, got %d.', $field, $number));
+        }
+
+        return $number;
+    }
+
+    /**
+     * A multi-input text field, stored the way its widget stores it: a
+     * serialised list of exactly `size` strings.
+     *
+     * Takes a list (`["48", "360"]`), a comma-separated string (`"48,360"`, the
+     * way the backend shows the two inputs side by side) or the stored
+     * serialised form. The string went into the column as it came before, and
+     * the backend's edit mask failed on it.
+     *
+     * @param array<string, mixed> $definition
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function textList(string $field, mixed $value, int $size, array $definition): string
+    {
+        if (\is_object($value)) {
+            $value = (array) $value;
+        }
+
+        if (\is_string($value)) {
+            $stored = StringUtil::deserialize($value);
+            $value = \is_array($stored) ? $stored : ($value === '' ? [] : explode(',', $value));
+        } elseif (\is_int($value) || \is_float($value)) {
+            $value = [(string) $value];
+        }
+
+        if (!\is_array($value)) {
+            throw new \InvalidArgumentException(sprintf('"%s" takes a list of %d values, e.g. %s.', $field, $size, self::textListExample($size)));
+        }
+
+        $parts = array_map(static fn (mixed $part): string => trim(\is_scalar($part) ? (string) $part : ''), array_values($value));
+
+        if (\count($parts) > $size) {
+            throw new \InvalidArgumentException(sprintf('"%s" takes %d values, got %d.', $field, $size, \count($parts)));
+        }
+
+        if (($definition['eval']['rgxp'] ?? '') === 'natural') {
+            foreach ($parts as $part) {
+                if ($part !== '' && preg_match('/^\d+$/', $part) !== 1) {
+                    throw new \InvalidArgumentException(sprintf('"%s" takes whole numbers, got "%s".', $field, $part));
+                }
+            }
+        }
+
+        $parts = array_pad($parts, $size, '');
+
+        return implode('', $parts) === '' ? '' : serialize($parts);
+    }
+
+    private static function textListExample(int $size): string
+    {
+        return '["'.implode('", "', array_map('strval', range(1, $size))).'"]';
     }
 
     private static function isDifferent(mixed $current, mixed $next): bool
